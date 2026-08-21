@@ -1,5 +1,6 @@
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
@@ -93,9 +94,15 @@ public sealed class AgentHarness : IAsyncDisposable
 
     public AgentStatusReader Status => Services.GetRequiredService<AgentStatusReader>();
 
+    /// <summary>One pass of sync, scan, offer and send.</summary>
+    public UploadCycle Cycle => Services.GetRequiredService<UploadCycle>();
+
+    /// <summary>The memo cache, for the one promise it makes that has no other observable form.</summary>
+    public FileHashCache Hashes => Services.GetRequiredService<FileHashCache>();
+
     public HeartbeatLoop HeartbeatLoop => Hosted<HeartbeatLoop>();
 
-    public ConfigurationSyncLoop SyncLoop => Hosted<ConfigurationSyncLoop>();
+    public UploadCycleLoop CycleLoop => Hosted<UploadCycleLoop>();
 
     public AgentControlService ControlService => Hosted<AgentControlService>();
 
@@ -164,6 +171,7 @@ public sealed class AgentHarness : IAsyncDisposable
         await Services.DisposeAsync().ConfigureAwait(false);
 
         Server.Dispose();
+        Files.Dispose();
     }
 
     private T Hosted<T>() where T : IHostedService =>

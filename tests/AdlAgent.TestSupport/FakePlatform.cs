@@ -26,43 +26,176 @@ public sealed class FakeHostLifecycle : IHostLifecycle
 }
 
 /// <summary>
-/// A filesystem stated rather than created: folders, filenames and the one
-/// timestamp the window is measured against.
+/// A vendor folder: real bytes on this machine, under the folder path and the
+/// timestamps the test says they have.
 /// </summary>
-public sealed class FakeFileMetadataSource : IFileMetadataSource
+/// <remarks>
+/// Both halves matter. The bytes are real because everything downstream of
+/// the seam does real work on them -- hashing, streaming an upload, a server
+/// checking the digest -- and a fake that only stated sizes would leave all
+/// of that untested. The <em>facts</em> are stated because the cases that
+/// matter belong to another operating system: a file copied in today carrying
+/// last week's last-write time is a Windows story, and a Linux CI runner
+/// cannot produce one.
+/// <para>
+/// So a test says where the vendor writes ("C:\\VendorData\\Garissa") and what
+/// it wrote, and this puts the bytes somewhere it is allowed to put them. The
+/// core never builds a path of its own under ENUMERATE -- it opens what the
+/// seam handed it -- so the difference does not reach it.
+/// </para>
+/// </remarks>
+public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
 {
-    private readonly Dictionary<string, List<FileFacts>> _folders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly string _root = Directory.CreateTempSubdirectory("adl-agent-vendor").FullName;
+    private readonly Dictionary<string, Folder> _folders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _gate = new();
 
-    /// <summary>Put a file in a folder, with the windowing timestamp it should have.</summary>
+    /// <summary>
+    /// How many times each folder has been walked, by folder path.
+    /// </summary>
+    /// <remarks>
+    /// The one number that proves the rule the spec cares most about: one
+    /// enumeration per distinct folder per cycle, however many stations share
+    /// it. On the folders this product exists for, a second walk is not a
+    /// tidiness problem.
+    /// </remarks>
+    public IReadOnlyDictionary<string, int> Enumerations
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _folders.ToDictionary(
+                    entry => entry.Key, entry => entry.Value.Walks, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    public int EnumerationsOf(string folder) =>
+        Enumerations.TryGetValue(folder, out var walks) ? walks : 0;
+
+    /// <summary>Write a file into a folder, with the time the window sees.</summary>
+    public FakeFileMetadataSource Add(
+        string folder, string name, DateTimeOffset windowTimestamp, string contents)
+    {
+        var path = Place(folder, name);
+
+        File.WriteAllText(path, contents);
+
+        return Record(folder, name, path, windowTimestamp);
+    }
+
+    /// <summary>The same, for a test that cares about the size and not the bytes.</summary>
     public FakeFileMetadataSource Add(
         string folder, string name, DateTimeOffset windowTimestamp, long length = 1024)
     {
-        var path = folder.TrimEnd('/', '\\') + PathSeparator(folder) + name;
+        var path = Place(folder, name);
 
-        if (!_folders.TryGetValue(folder, out var files))
+        // Distinct per file: two files of the same length that hashed alike
+        // would make "ADL already holds this" and "this is a different file"
+        // indistinguishable in a test.
+        var filler = new byte[length];
+
+        for (var index = 0; index < filler.Length; index++)
         {
-            files = [];
-            _folders[folder] = files;
+            filler[index] = (byte)((name.GetHashCode(StringComparison.Ordinal) + index) & 0xFF);
         }
 
-        files.RemoveAll(file => file.Name == name);
-        files.Add(new FileFacts(path, name, length, windowTimestamp));
+        File.WriteAllBytes(path, filler);
+
+        return Record(folder, name, path, windowTimestamp);
+    }
+
+    /// <summary>
+    /// Append to a file, the way a logger fills a daily CSV.
+    /// </summary>
+    /// <remarks>
+    /// The timestamp moves with the write, because on a real machine it
+    /// would: an append bumps last-write, which is what puts a grown file
+    /// back inside the candidate window (story 14).
+    /// </remarks>
+    public FakeFileMetadataSource Append(
+        string folder, string name, string more, DateTimeOffset writtenAt)
+    {
+        var path = Place(folder, name);
+
+        File.AppendAllText(path, more);
+
+        return Record(folder, name, path, writtenAt);
+    }
+
+    /// <summary>
+    /// Say a file is in the folder without ever writing it.
+    /// </summary>
+    /// <remarks>
+    /// For the files a cycle must never open: the hundreds of thousands
+    /// sitting below a station's watermark, whose whole point is that the
+    /// walk sees them and nothing else does. If the agent were to read one,
+    /// it would not find it -- which is the assertion.
+    /// </remarks>
+    public FakeFileMetadataSource State(
+        string folder, string name, DateTimeOffset windowTimestamp, long length = 1024)
+    {
+        var path = Place(folder, name);
+
+        lock (_gate)
+        {
+            _folders[folder].Entries[name] = new FileFacts(path, name, length, windowTimestamp);
+        }
 
         return this;
     }
 
-    public IEnumerable<FileFacts> Enumerate(string folderPath) =>
-        _folders.TryGetValue(folderPath, out var files) ? files.ToList() : [];
+    /// <summary>Take a file away, as a vendor's archiving job would.</summary>
+    public void Remove(string folder, string name)
+    {
+        lock (_gate)
+        {
+            if (_folders.TryGetValue(folder, out var files) && files.Entries.Remove(name))
+            {
+                File.Delete(Path.Combine(files.Directory, name));
+            }
+        }
+    }
+
+    /// <summary>Where this file really is, which is what the seam hands over.</summary>
+    public string PathOf(string folder, string name)
+    {
+        lock (_gate)
+        {
+            return _folders.TryGetValue(folder, out var files) && files.Entries.TryGetValue(name, out var facts)
+                ? facts.Path
+                : Path.Combine(DirectoryFor(folder), name);
+        }
+    }
+
+    public IEnumerable<FileFacts> Enumerate(string folderPath)
+    {
+        lock (_gate)
+        {
+            if (!_folders.TryGetValue(folderPath, out var files))
+            {
+                return [];
+            }
+
+            files.Walks++;
+
+            return files.Entries.Values.ToList();
+        }
+    }
 
     public FileFacts? Describe(string path)
     {
-        foreach (var files in _folders.Values)
+        lock (_gate)
         {
-            foreach (var file in files)
+            foreach (var folder in _folders.Values)
             {
-                if (string.Equals(file.Path, path, StringComparison.OrdinalIgnoreCase))
+                foreach (var facts in folder.Entries.Values)
                 {
-                    return file;
+                    if (string.Equals(facts.Path, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return facts;
+                    }
                 }
             }
         }
@@ -70,7 +203,56 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource
         return null;
     }
 
-    private static char PathSeparator(string folder) => folder.Contains('\\') ? '\\' : '/';
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private string Place(string folder, string name) => Path.Combine(DirectoryFor(folder), name);
+
+    private string DirectoryFor(string folder)
+    {
+        lock (_gate)
+        {
+            if (!_folders.TryGetValue(folder, out var files))
+            {
+                // Named after the folder rather than its path, which may well
+                // be a Windows one on a machine that has no C: drive.
+                files = new Folder(Path.Combine(_root, _folders.Count.ToString()));
+                Directory.CreateDirectory(files.Directory);
+                _folders[folder] = files;
+            }
+
+            return files.Directory;
+        }
+    }
+
+    private FakeFileMetadataSource Record(
+        string folder, string name, string path, DateTimeOffset windowTimestamp)
+    {
+        lock (_gate)
+        {
+            _folders[folder].Entries[name] =
+                new FileFacts(path, name, new FileInfo(path).Length, windowTimestamp);
+        }
+
+        return this;
+    }
+
+    private sealed class Folder(string directory)
+    {
+        public string Directory { get; } = directory;
+
+        public Dictionary<string, FileFacts> Entries { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public int Walks { get; set; }
+    }
 }
 
 /// <summary>

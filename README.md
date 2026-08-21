@@ -13,7 +13,7 @@ the design this implements is [wmo-raf/adl#269](https://github.com/wmo-raf/adl/i
 
 ## What is built so far
 
-This repository currently holds the skeleton and the first live vertical
+The skeleton and first live vertical
 ([wmo-raf/adl#278](https://github.com/wmo-raf/adl/issues/278)):
 
 - **pairing** — exchange a pairing code for a device token and store it
@@ -24,9 +24,33 @@ This repository currently holds the skeleton and the first live vertical
 - **revocation** — a `401` stops the machine sending and surfaces
   "re-pair needed" locally
 
-Still to come: the scan and upload cycle (#279), `DIRECT_FETCH` and the
-reconciliation sweep (#280), the WPF tray (#281), installers and
-auto-update (#282).
+The upload cycle ([wmo-raf/adl#279](https://github.com/wmo-raf/adl/issues/279)),
+which is the thing the product is: **sync → scan → manifest → upload**, on the
+check interval ADL sets.
+
+- **`ENUMERATE`** — each distinct folder is walked once per cycle and its
+  entries are routed to station links by pattern, so forty stations sharing a
+  vendor's dump directory cost one walk, not forty.
+- **candidate window** — a file is a candidate when the timestamp the metadata
+  seam reports (on Windows, the later of last-write and creation) is at or
+  after ADL's watermark for that station. The `max()` is what catches both a
+  logger appending to today's file and a backfill copied in weeks late.
+- **hash memo cache** — only candidates are hashed, and only those whose
+  `(size, timestamp)` is not already known. A settled folder costs the walk and
+  nothing else. The cache is pure optimisation: losing it costs one re-hashing
+  pass and never data, so it is never written to disk.
+- **partial files** — anything written inside the station's stability window
+  (default 60 s), or that the readiness seam says is held open, is left for the
+  next cycle. It counts as backlog, never as a failure.
+- **newest first** — a fresh install facing months of backlog offers today's
+  files in its first manifest page and drains history behind them.
+- **paging** — manifests are sent in pages of the size ADL states (~500).
+- **retry is the next cycle** — the agent keeps no record of what it delivered.
+  The vendor's folder is its only state; a refused upload, a dead link, or a
+  power cut mid-cycle all resolve by offering the same files again.
+
+Still to come: `DIRECT_FETCH` and the reconciliation sweep (#280), the WPF
+tray (#281), installers and auto-update (#282).
 
 ## Structure
 
@@ -131,6 +155,22 @@ dotnet bin/.../adl-agent.dll status
 `status` should report `Paired` and, within a few seconds, `Fleet: online`.
 The device then shows its version, last-seen and clock skew in the admin's
 Agent Devices listing.
+
+To watch a whole cycle, point a station link at a folder on this machine
+(Agent Station Links → Local Folder Path and File Pattern in the admin, or the
+config endpoint), drop a file into it, and wait out the check interval:
+
+```bash
+printf 'timestamp,temp\n2026-08-21 09:00:00,21.4\n' > /tmp/vendor/DEMO_20260821.csv
+
+docker compose exec adl adl shell -c \
+  "from adl_agent_plugin.models import AgentStationDataFile; \
+   print([(f.file_name, f.size, f.status) for f in AgentStationDataFile.objects.all()])"
+```
+
+Append another row to the same file and it is offered again on the next cycle,
+because its hash changed — one ledger row, updated in place. Leave it alone and
+the next manifest offers it and ADL asks for nothing.
 
 On macOS and Linux pass `--Agent:StateDirectory`: the Windows head keeps state
 under the platform's common application data folder, which is not writable

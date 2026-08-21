@@ -140,7 +140,7 @@ public class ConfigurationCacheTests
         };
 
         await agent.PairAsync();
-        await agent.SyncLoop.SyncAsync();
+        await agent.Cycle.RunAsync();
 
         Assert.Equal(TimeSpan.FromMinutes(15), agent.Cadence.HeartbeatInterval);
         Assert.Equal(TimeSpan.FromMinutes(30), agent.Cadence.CheckInterval);
@@ -161,7 +161,7 @@ public class ConfigurationCacheTests
         };
 
         await agent.PairAsync();
-        await agent.SyncLoop.SyncAsync();
+        await agent.Cycle.RunAsync();
 
         Assert.Equal(AgentCadenceDefaults.Heartbeat, agent.Cadence.HeartbeatInterval);
         Assert.Equal(AgentCadenceDefaults.Check, agent.Cadence.CheckInterval);

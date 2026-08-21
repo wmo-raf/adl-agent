@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Pairing;
@@ -79,7 +79,7 @@ public class ArchitectureTests
         var loops = host.Services.GetServices<IHostedService>().ToList();
 
         Assert.Contains(loops, loop => loop is HeartbeatLoop);
-        Assert.Contains(loops, loop => loop is ConfigurationSyncLoop);
+        Assert.Contains(loops, loop => loop is UploadCycleLoop);
         Assert.Contains(loops, loop => loop is AgentControlService);
 
         // The session and the state store come up too, which is the whole of
