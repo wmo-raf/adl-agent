@@ -1,0 +1,176 @@
+using AdlAgent.Core.Api;
+using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Hosting;
+using AdlAgent.Core.Pairing;
+using AdlAgent.Core.Platform;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace AdlAgent.Core.Heartbeat;
+
+/// <summary>
+/// Say "I am here", every few minutes, whatever else is happening.
+/// </summary>
+/// <remarks>
+/// The isolation is the feature. This loop shares no lock, no queue and no
+/// failure with the scan cycle; it reads the cycle's last report and never
+/// waits on it. That is what buys HQ the distinction they have never had with
+/// reverse tunnels -- "the machine is down" versus "the machine is up and its
+/// work has wedged" -- and it only holds as long as nothing in this file
+/// starts depending on the cycle making progress.
+/// <para>
+/// Nothing here throws. A beat that cannot be sent is recorded and the loop
+/// sleeps; a machine whose heartbeat loop died would look exactly like a
+/// machine that is off, which is the one lie this agent must never tell.
+/// </para>
+/// </remarks>
+public sealed class HeartbeatLoop : BackgroundService
+{
+    private readonly IAdlApiClient _client;
+    private readonly AgentSession _session;
+    private readonly ConfigurationService _configuration;
+    private readonly ICycleReportSource _cycles;
+    private readonly VolumeSpaceReader _volumes;
+    private readonly HeartbeatMonitor _monitor;
+    private readonly AgentCadence _cadence;
+    private readonly AgentWakeSignal _wake;
+    private readonly IHostLifecycle _host;
+    private readonly TimeProvider _time;
+    private readonly ILogger<HeartbeatLoop> _logger;
+
+    public HeartbeatLoop(
+        IAdlApiClient client,
+        AgentSession session,
+        ConfigurationService configuration,
+        ICycleReportSource cycles,
+        VolumeSpaceReader volumes,
+        HeartbeatMonitor monitor,
+        AgentCadence cadence,
+        AgentWakeSignal wake,
+        IHostLifecycle host,
+        TimeProvider time,
+        ILogger<HeartbeatLoop> logger)
+    {
+        _client = client;
+        _session = session;
+        _configuration = configuration;
+        _cycles = cycles;
+        _volumes = volumes;
+        _monitor = monitor;
+        _cadence = cadence;
+        _wake = wake;
+        _host = host;
+        _time = time;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            await BeatAsync(stoppingToken).ConfigureAwait(false);
+
+            try
+            {
+                await _wake.WaitAsync(_cadence.HeartbeatInterval, _time, stoppingToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Send one beat. Never throws; a failure is a fact about this machine's
+    /// link, not a reason to stop being able to report.
+    /// </summary>
+    public async Task BeatAsync(CancellationToken cancellationToken = default)
+    {
+        var token = _session.ActiveToken;
+
+        if (token is null)
+        {
+            // An unpaired machine has nobody to report to, and a revoked one
+            // has been told to stop. Neither is a missed beat.
+            return;
+        }
+
+        var sentAt = _time.GetUtcNow();
+
+        try
+        {
+            var response = await _client
+                .HeartbeatAsync(token, Compose(sentAt), cancellationToken)
+                .ConfigureAwait(false);
+
+            _monitor.RecordSuccess(response, sentAt);
+            _cadence.Adopt(response.HeartbeatIntervalMinutes, response.CheckIntervalMinutes);
+
+            if (response.ClockSkewSeconds is { } skew && Math.Abs(skew) >= 300)
+            {
+                _logger.LogWarning(
+                    "This machine's clock is {Skew} seconds away from ADL's. File windows are measured against it, so fix the clock.",
+                    skew);
+            }
+        }
+        catch (DeviceRevokedException exception)
+        {
+            _session.MarkRevoked();
+            _monitor.RecordFailure(exception.Detail, sentAt);
+        }
+        catch (AdlUnreachableException exception)
+        {
+            _monitor.RecordFailure(exception.Message, sentAt);
+
+            _logger.LogWarning("Heartbeat did not reach ADL: {Reason}", exception.Message);
+        }
+        catch (AdlRequestException exception)
+        {
+            _monitor.RecordFailure(exception.Detail, sentAt);
+
+            _logger.LogWarning(
+                "ADL refused the heartbeat ({Code}): {Detail}", exception.Code, exception.Detail);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _monitor.RecordFailure(exception.Message, sentAt);
+
+            _logger.LogError(exception, "Could not send a heartbeat.");
+        }
+    }
+
+    /// <summary>
+    /// Everything the machine can say about itself right now.
+    /// </summary>
+    /// <remarks>
+    /// Assembled from whatever is available and never from a call that could
+    /// fail: the disk read swallows its own errors, the cycle report is
+    /// whatever the cycle last left, and the folder list comes from the
+    /// cached configuration. A beat gets sent even on a machine where
+    /// everything else has gone wrong, because that is the machine whose
+    /// beat matters most.
+    /// </remarks>
+    private HeartbeatRequest Compose(DateTimeOffset now)
+    {
+        var configuration = _configuration.Current;
+
+        var folders = configuration is null
+            ? []
+            : configuration.StationLinks
+                .Select(link => link.Config.LocalFolderPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path));
+
+        return new HeartbeatRequest
+        {
+            AppVersion = AgentVersion.Current,
+            OsVersion = _host.PlatformDescription,
+            UptimeSeconds = (long)Math.Max(0, (now - _host.StartedAt).TotalSeconds),
+            DeviceTime = now,
+            BacklogCount = _cycles.BacklogCount,
+            LastCycle = _cycles.LastCompletedCycle,
+            Disk = _volumes.Read(folders),
+        };
+    }
+}

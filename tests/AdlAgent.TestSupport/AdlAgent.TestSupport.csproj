@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AdlAgent.TestSupport</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>The fake ADL server and the fake platform providers. Shared by every test project.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AdlAgent.Core\AdlAgent.Core.csproj" />
+  </ItemGroup>
+
+</Project>

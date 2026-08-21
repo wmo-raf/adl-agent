@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AdlAgent.Core/AdlAgent.Core.csproj" />
+    <Project Path="src/AdlAgent.Windows/AdlAgent.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AdlAgent.Core.Tests/AdlAgent.Core.Tests.csproj" />
+    <Project Path="tests/AdlAgent.TestSupport/AdlAgent.TestSupport.csproj" />
+  </Folder>
+</Solution>
