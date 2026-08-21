@@ -125,6 +125,35 @@ public sealed class AgentHarness : IAsyncDisposable
     }
 
     /// <summary>
+    /// Wait until every loop is asleep on its timer.
+    /// </summary>
+    /// <remarks>
+    /// The barrier a test needs before it may believe anything a loop was
+    /// supposed to have done. Arriving at the fake ADL is not the same
+    /// moment as having been acted on: the server records a heartbeat while
+    /// it is handling the request, and the agent adopts the cadence that
+    /// answer carries some time after the response comes back. A test that
+    /// asserted on the cadence the instant the beat landed would be racing
+    /// the round trip -- and would pass on a quiet machine and fail on a
+    /// loaded CI runner, which is the worst way to find out.
+    /// <para>
+    /// Loops going quiet is the one observable that means "done": a loop
+    /// waiting on the wake signal has finished everything the last wake-up
+    /// gave it.
+    /// </para>
+    /// </remarks>
+    public async Task AtRestAsync(int loopsAtRest = 2)
+    {
+        var wake = Services.GetRequiredService<AgentWakeSignal>();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+
+        while (wake.Waiting < loopsAtRest && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(5).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Move the agent's clock on, once every loop is asleep on its timer.
     /// </summary>
     /// <remarks>
@@ -137,13 +166,7 @@ public sealed class AgentHarness : IAsyncDisposable
     /// </remarks>
     public async Task AdvanceAsync(TimeSpan by, int loopsAtRest = 2)
     {
-        var wake = Services.GetRequiredService<AgentWakeSignal>();
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-
-        while (wake.Waiting < loopsAtRest && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(5).ConfigureAwait(false);
-        }
+        await AtRestAsync(loopsAtRest).ConfigureAwait(false);
 
         Time.Advance(by);
     }

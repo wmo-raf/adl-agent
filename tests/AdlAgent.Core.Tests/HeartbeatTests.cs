@@ -186,6 +186,14 @@ public class HeartbeatTests
         await agent.PairAsync();
 
         Assert.True(await agent.Server.WaitForHeartbeatsAsync(1));
+
+        // A beat arriving is not the cadence having been adopted. Two loops
+        // can adopt it -- the heartbeat from ADL's answer, the scan cycle
+        // from its sync -- and this needs only the first of them, whichever
+        // that turns out to be. Which one wins is the scheduler's business,
+        // and on a loaded machine it can be neither yet.
+        await agent.AtRestAsync();
+
         Assert.Equal(TimeSpan.FromMinutes(20), agent.Cadence.HeartbeatInterval);
 
         await agent.AdvanceAsync(TimeSpan.FromMinutes(5));
