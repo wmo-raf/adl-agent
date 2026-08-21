@@ -47,6 +47,31 @@ public class FolderScanTests
     }
 
     [Fact]
+    public async Task Two_folders_differing_only_in_case_are_two_folders()
+    {
+        await using var agent = new AgentHarness();
+
+        // Whether these are one directory or two is the filesystem's answer,
+        // not the agent's, so the agent does not fold them together. Being
+        // wrong this way costs a Windows server one extra walk; folding them
+        // would have a Linux server scan the wrong folder for one of the two
+        // stations and never say a word about it.
+        agent.Server.Config = SyncConfigs.With(
+            SyncConfigs.Link(11, "/vendor/garissa", "*.dat"),
+            SyncConfigs.Link(12, "/vendor/GARISSA", "*.dat"));
+
+        agent.Files
+            .Add("/vendor/garissa", "one.dat", Settled(agent), "lower\n")
+            .Add("/vendor/GARISSA", "two.dat", Settled(agent), "upper\n");
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        Assert.Equal("lower\n", agent.Server.Held(11, "one.dat")!.Text);
+        Assert.Equal("upper\n", agent.Server.Held(12, "two.dat")!.Text);
+    }
+
+    [Fact]
     public async Task A_file_no_pattern_claims_is_left_where_it_is()
     {
         await using var agent = new AgentHarness();
@@ -72,32 +97,53 @@ public class FolderScanTests
         await using var agent = new AgentHarness();
 
         agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Shared, "*.dat"));
-
-        for (var index = 0; index < 5; index++)
-        {
-            agent.Files.Add(Shared, $"GARISSA_{index}.dat", Settled(agent), $"row {index}\n");
-        }
+        agent.Files.Add(Shared, "GARISSA_1.dat", Settled(agent), "row 1\n");
 
         await agent.PairAsync();
         await agent.Cycle.RunAsync();
 
-        Assert.Equal(5, agent.Hashes.Computed);
+        Assert.Equal("row 1\n", agent.Server.Held(11, "GARISSA_1.dat")!.Text);
+
+        var offeredAs = agent.Server.ManifestPages[0][0].Hash;
+
+        // The bytes are taken away and the folder goes on describing the file
+        // exactly as before. Nothing on a real disk behaves like this -- it is
+        // how a test can see that nothing opened the file.
+        agent.Files.Vanish(Shared, "GARISSA_1.dat");
 
         await agent.Cycle.RunAsync();
         await agent.Cycle.RunAsync();
 
-        // Two more cycles, no more reads: a settled folder costs a walk, and
-        // the walk hands over everything the memo cache needs to answer.
-        Assert.Equal(5, agent.Hashes.Computed);
-        Assert.Equal(10, agent.Hashes.Remembered);
+        // Still offered, still under the same hash, still no failure: the walk
+        // handed over the size and the time, and that answered the question.
+        Assert.Equal(offeredAs, agent.Server.ManifestPages[2].Single().Hash);
+        Assert.Equal(0, agent.Cycles.LastCompletedCycle!.Links.Single().Failed);
+    }
 
-        // Until one of them changes, which the size and time in the key catch.
+    [Fact]
+    public async Task A_file_that_changed_is_read_again()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Shared, "*.dat"));
+        agent.Files.Add(Shared, "GARISSA_1.dat", Settled(agent), "row 1\n");
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        // The same trick, with the file's size and time moved on as an append
+        // would move them. Now the memo cache must not answer -- and the read
+        // it is forced into is the read that finds the bytes gone.
+        agent.Files.Vanish(Shared, "GARISSA_1.dat");
         agent.Time.Advance(TimeSpan.FromMinutes(30));
-        agent.Files.Append(Shared, "GARISSA_2.dat", "row 2 again\n", Settled(agent));
+        agent.Files.State(Shared, "GARISSA_1.dat", Settled(agent), length: 99);
 
         await agent.Cycle.RunAsync();
 
-        Assert.Equal(6, agent.Hashes.Computed);
+        var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
+
+        Assert.Equal(1, link.Failed);
+        Assert.Contains("could not be read", link.Error!);
     }
 
     [Fact]
@@ -133,8 +179,12 @@ public class FolderScanTests
         clock.Stop();
 
         Assert.Equal(1, agent.Files.EnumerationsOf(Shared));
-        Assert.Equal(5, agent.Hashes.Computed);
+
+        // The five above the watermark, and only those. The hundred thousand
+        // below it were never written to disk, so a cycle that opened one
+        // would have failed here rather than merely been slow.
         Assert.Equal(5, agent.Server.Ledger.Count);
+        Assert.Equal(0, agent.Cycles.LastCompletedCycle!.Links.Single().Failed);
 
         // Wildly generous, and still nowhere near a folder that has to be
         // re-hashed: the point is that the cost of a settled folder is the
@@ -271,6 +321,30 @@ public class FolderScanTests
         await agent.Cycle.RunAsync();
 
         Assert.Equal("g\n", agent.Server.Held(11, "GARISSA_20260821.dat")!.Text);
+    }
+
+    [Fact]
+    public async Task A_station_whose_files_are_in_dated_sub_folders_says_so()
+    {
+        await using var agent = new AgentHarness();
+
+        // ADL lets a station say this, and this version of the agent walks
+        // only the folder itself. The folder is there and readable, so a
+        // walk finds nothing and everything looks fine -- which is why the
+        // station has to be told to say what is wrong with it instead.
+        agent.Server.Config = SyncConfigs.With(
+            SyncConfigs.Link(11, Shared, "*.dat", dirStructuredByDate: true));
+
+        agent.Files.Add(Shared, "GARISSA_20260821.dat", Settled(agent), "g\n");
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
+
+        Assert.Contains("dated sub-folders", link.Error!);
+        Assert.Equal(0, agent.Files.EnumerationsOf(Shared));
+        Assert.Empty(agent.Server.ManifestPages);
     }
 
     [Fact]

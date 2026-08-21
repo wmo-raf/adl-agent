@@ -143,6 +143,56 @@ public class UploadCycleTests
     }
 
     [Fact]
+    public async Task A_fresh_install_sends_todays_files_before_it_has_looked_at_last_years()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder, "*.dat")) with
+        {
+            Limits = new AgentLimits { ManifestEntries = 10, FileBytes = 50 * 1024 * 1024 },
+        };
+
+        // A year of daily files, all inside the window, as a machine paired
+        // for the first time would find them.
+        var oldest = agent.Time.GetUtcNow() - TimeSpan.FromDays(365);
+
+        for (var day = 0; day < 365; day++)
+        {
+            agent.Files.Add(Folder, $"GARISSA_{day:000}.dat", oldest.AddDays(day), $"day {day}\n");
+        }
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        // Story 18, as it looks on the wire: the first page is the newest ten
+        // files, and they are uploaded before the second page is even
+        // offered. A cycle that manifested the whole year before sending
+        // anything would show thirty-seven manifests and then three hundred
+        // and sixty-five uploads.
+        //
+        // What this cannot see is that those ten files are also the only ten
+        // that have been *read* at that point. That the scan hashes lazily is
+        // a latency property with no signature at any seam -- the same calls
+        // go out in the same order either way -- so no test asserts it; see
+        // the remarks on FolderScanner.Hashing for why it matters anyway.
+        var calls = agent.Server.Requests
+            .Select(request => request.Path)
+            .SkipWhile(path => path != "manifest/")
+            .Take(12)
+            .ToList();
+
+        Assert.Equal("manifest/", calls[0]);
+        Assert.Equal(Enumerable.Repeat("files/", 10), calls.Skip(1).Take(10));
+        Assert.Equal("manifest/", calls[11]);
+
+        Assert.Equal(
+            ["GARISSA_364.dat", "GARISSA_363.dat", "GARISSA_362.dat"],
+            agent.Server.ManifestPages[0].Take(3).Select(entry => entry.Name));
+
+        Assert.Equal(365, agent.Server.Ledger.Count);
+    }
+
+    [Fact]
     public async Task A_manifest_too_large_for_one_call_is_sent_in_pages()
     {
         await using var agent = new AgentHarness();

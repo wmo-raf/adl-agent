@@ -11,12 +11,17 @@ namespace AdlAgent.Core.Api;
 /// </remarks>
 public class AdlRequestException : Exception
 {
-    public AdlRequestException(HttpStatusCode statusCode, string code, string detail)
+    public AdlRequestException(
+        HttpStatusCode statusCode,
+        string code,
+        string detail,
+        IReadOnlyList<RejectedEntry>? rejected = null)
         : base(detail)
     {
         StatusCode = statusCode;
         Code = code;
         Detail = detail;
+        Rejected = rejected ?? [];
     }
 
     public HttpStatusCode StatusCode { get; }
@@ -24,6 +29,29 @@ public class AdlRequestException : Exception
     public string Code { get; }
 
     public string Detail { get; }
+
+    /// <summary>
+    /// Which entries of a batch ADL could not read, when it said.
+    /// </summary>
+    /// <remarks>
+    /// ADL refuses a manifest all or nothing, and names the offending entries
+    /// by position. Carrying that up matters more than it looks: without it a
+    /// caller only knows "one of these five hundred is bad", and the only
+    /// thing it can do is offer the same five hundred again next cycle, and
+    /// the next, forever. One unreadable filename would take a station's
+    /// whole folder down with it.
+    /// </remarks>
+    public IReadOnlyList<RejectedEntry> Rejected { get; }
+}
+
+/// <summary>One entry of a batch ADL would not read, and why.</summary>
+public sealed record RejectedEntry(int Index, string Detail);
+
+/// <summary>The refusals this agent does something other than report.</summary>
+public static class AgentErrorCodes
+{
+    /// <summary>The batch held more entries than ADL accepts in one call.</summary>
+    public const string ManifestTooLarge = "manifest_too_large";
 }
 
 /// <summary>

@@ -194,6 +194,27 @@ public sealed class FakeAdlServer : IDisposable
 
     public HashSet<long> StationLinksDisabledInAdl { get; } = [];
 
+    /// <summary>
+    /// Filenames this instance will not read as a manifest entry.
+    /// </summary>
+    /// <remarks>
+    /// The reason is left unsaid on purpose: what matters is the shape of the
+    /// refusal, not which rule was broken. ADL refuses such a manifest whole
+    /// -- "an agent that had half its manifest accepted would believe the
+    /// other half was already held" -- and names the offending entries by
+    /// position, which is the only thing that lets an agent get the rest of
+    /// the page through.
+    /// </remarks>
+    public HashSet<string> UnreadableNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Entries this instance takes in one manifest, whatever it advertises.</summary>
+    /// <remarks>
+    /// Set below <see cref="AgentLimits.ManifestEntries"/> to be an instance
+    /// whose stated limit is a lie -- the case where an agent that believed
+    /// the number would be refused on every page of every cycle for ever.
+    /// </remarks>
+    public int? ManifestEntriesActuallyAccepted { get; set; }
+
     /// <summary>What ADL holds for one station link and name, if anything.</summary>
     public StagedFile? Held(long stationLinkId, string name) =>
         Ledger.TryGetValue((stationLinkId, name), out var staged) ? staged : null;
@@ -441,7 +462,29 @@ public sealed class FakeAdlServer : IDisposable
             return (400, new { code = "invalid_body", detail = "Send an object with a \"files\" list." });
         }
 
-        if (offered.Files.Count > Config.Limits.ManifestEntries)
+        var unreadable = offered.Files
+            .Select((entry, index) => (entry, index))
+            .Where(offer => UnreadableNames.Contains(offer.entry.Name))
+            .Select(offer => new
+            {
+                index = offer.index,
+                detail = $"{offer.entry.Name} could not be read as a manifest entry.",
+            })
+            .ToList();
+
+        if (unreadable.Count > 0)
+        {
+            // All or nothing, and by position -- exactly as the plugin's
+            // parse_entries does it.
+            return (400, new
+            {
+                code = "invalid_entry",
+                detail = $"{unreadable.Count} of the files offered could not be read.",
+                errors = unreadable,
+            });
+        }
+
+        if (offered.Files.Count > (ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries))
         {
             // Refused, never truncated: an agent told about the first five
             // hundred of its files would take the silence about the rest for
@@ -449,8 +492,10 @@ public sealed class FakeAdlServer : IDisposable
             return (400, new
             {
                 code = "manifest_too_large",
-                detail = $"Offer at most {Config.Limits.ManifestEntries} files per manifest, in pages.",
-                limit = Config.Limits.ManifestEntries,
+                detail = "Offer at most "
+                    + (ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries)
+                    + " files per manifest, in pages.",
+                limit = ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries,
             });
         }
 

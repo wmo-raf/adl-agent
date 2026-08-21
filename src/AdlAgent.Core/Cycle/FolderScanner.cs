@@ -58,41 +58,98 @@ public sealed class FolderScanner
     public ScanResult Scan(AgentConfiguration configuration, DateTimeOffset now)
     {
         var tallies = new Dictionary<long, LinkTally>();
-        var folders = new Dictionary<string, List<Target>>(StringComparer.OrdinalIgnoreCase);
+        var folders = new Dictionary<string, List<Target>>(StringComparer.Ordinal);
 
         foreach (var target in Targets(configuration, tallies))
         {
-            var folder = Normalise(target.Link.Config.LocalFolderPath);
+            var key = GroupingKey(target.Folder);
 
-            if (!folders.TryGetValue(folder, out var sharing))
+            if (!folders.TryGetValue(key, out var sharing))
             {
                 sharing = [];
-                folders[folder] = sharing;
+                folders[key] = sharing;
             }
 
             sharing.Add(target);
         }
 
-        var candidates = new List<FileCandidate>();
+        var matched = new List<Match>();
 
-        foreach (var (folder, targets) in folders)
+        foreach (var targets in folders.Values)
         {
-            Walk(folder, targets, now, candidates);
+            // The folder as ADL spells it, not the key it was grouped under.
+            // What goes to the seam is always a path an administrator typed;
+            // the key is this method's private business.
+            Walk(targets[0].Folder, targets, now, matched);
         }
 
         // Newest first, and by name where two files share a timestamp, so
         // that a page boundary falls in the same place twice and a failure
         // message names the same file twice.
-        candidates.Sort(static (left, right) =>
+        matched.Sort(static (left, right) =>
         {
-            var byTime = right.Entry.Mtime.CompareTo(left.Entry.Mtime);
+            var byTime = right.Facts.WindowTimestamp.CompareTo(left.Facts.WindowTimestamp);
 
             return byTime != 0
                 ? byTime
-                : string.Compare(left.Entry.Name, right.Entry.Name, StringComparison.OrdinalIgnoreCase);
+                : string.Compare(left.Facts.Name, right.Facts.Name, StringComparison.OrdinalIgnoreCase);
         });
 
-        return new ScanResult(candidates, tallies);
+        return new ScanResult(Hashing(matched), tallies);
+    }
+
+    /// <summary>
+    /// The matched files, hashed as they are asked for and not before.
+    /// </summary>
+    /// <remarks>
+    /// Lazily, and that is the whole of story 18. Sorting puts today's files
+    /// at the front; hashing them all first would mean a fresh install facing
+    /// a year of backlog reads every one of those files before ADL hears
+    /// about a single one of them. Handing the cycle a sequence instead lets
+    /// it read five hundred files, send them, and only then start on the
+    /// history behind -- so current observations move in the first minute of
+    /// the first cycle rather than after the folder has been chewed through.
+    /// <para>
+    /// A file that cannot be read is charged to its station and skipped: one
+    /// unreadable file is not a reason to stop offering the rest.
+    /// </para>
+    /// <para>
+    /// Worth knowing when changing this: no test can catch it being made
+    /// eager again. The same calls go out in the same order either way, and
+    /// what differs -- how long the first upload waits on a folder nobody has
+    /// looked at in a year -- is invisible at every seam the tests can reach.
+    /// </para>
+    /// </remarks>
+    private IEnumerable<FileCandidate> Hashing(List<Match> matched)
+    {
+        foreach (var match in matched)
+        {
+            string hash;
+
+            try
+            {
+                hash = _hashes.Hash(match.Facts);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                match.Target.Tally.Fail($"{match.Facts.Name} could not be read: {exception.Message}");
+
+                _logger.LogWarning(exception, "Could not read {Path} to hash it.", match.Facts.Path);
+
+                continue;
+            }
+
+            yield return new FileCandidate(
+                match.Facts.Path,
+                new ManifestEntry
+                {
+                    StationLinkId = match.Target.Link.Id,
+                    Name = match.Facts.Name,
+                    Size = match.Facts.Length,
+                    Mtime = match.Facts.WindowTimestamp,
+                    Hash = hash,
+                });
+        }
     }
 
     /// <summary>
@@ -108,6 +165,12 @@ public sealed class FolderScanner
     private static IEnumerable<Target> Targets(
         AgentConfiguration configuration, Dictionary<long, LinkTally> tallies)
     {
+        // One compiled glob per distinct pattern, for the length of this
+        // scan. Several stations sharing a naming convention is the norm,
+        // and this is also what keeps the compiled regex from outliving the
+        // configuration that asked for it.
+        var patterns = new Dictionary<string, FilePattern>(StringComparer.Ordinal);
+
         foreach (var connection in configuration.Sync.Connections)
         {
             foreach (var link in connection.StationLinks)
@@ -139,7 +202,28 @@ public sealed class FolderScanner
                     continue;
                 }
 
-                var pattern = FilePattern.For(link.Config.FilePattern);
+                if (link.Config.DirStructuredByDate)
+                {
+                    // ADL lets a station say its files live under dated
+                    // sub-folders, and this version walks only the folder
+                    // itself. Said out loud rather than walked anyway and
+                    // found empty: a station that scans zero files for a
+                    // reason nobody is told is the silence this whole product
+                    // exists to remove.
+                    tally.Note(
+                        "This station's files are in dated sub-folders, which this version of the agent does not walk. "
+                        + "Point it at the folder the files are actually in, or wait for support to land.");
+
+                    continue;
+                }
+
+                var glob = link.Config.FilePattern ?? "";
+
+                if (!patterns.TryGetValue(glob, out var pattern))
+                {
+                    pattern = FilePattern.For(glob);
+                    patterns[glob] = pattern;
+                }
 
                 if (pattern.IsEmpty)
                 {
@@ -155,7 +239,7 @@ public sealed class FolderScanner
 
     /// <summary>One folder, walked once, offered to everything that shares it.</summary>
     private void Walk(
-        string folder, List<Target> targets, DateTimeOffset now, List<FileCandidate> candidates)
+        string folder, List<Target> targets, DateTimeOffset now, List<Match> matched)
     {
         var entries = 0;
 
@@ -167,7 +251,7 @@ public sealed class FolderScanner
             {
                 if (target.Pattern.Matches(facts.Name))
                 {
-                    Consider(target, facts, now, candidates);
+                    Consider(target, facts, now, matched);
                 }
             }
         }
@@ -185,9 +269,9 @@ public sealed class FolderScanner
 
     /// <summary>One entry, against one station's rules.</summary>
     private void Consider(
-        Target target, FileFacts facts, DateTimeOffset now, List<FileCandidate> candidates)
+        Target target, FileFacts facts, DateTimeOffset now, List<Match> matched)
     {
-        target.Tally.Scanned++;
+        target.Tally.Saw();
 
         var watermark = target.Link.Watermark;
 
@@ -200,10 +284,12 @@ public sealed class FolderScanner
 
         if (facts.Length > target.Limits.FileBytes)
         {
-            // Offering it would waste a manifest slot and an upload every
-            // cycle for a file ADL is required to refuse.
-            target.Tally.Failed++;
-            target.Tally.Note(
+            // ADL enforces this cap itself and would refuse the file. Caught
+            // here as well because a refusal the agent could have predicted
+            // is one it would earn again on every cycle for the life of the
+            // install -- a manifest slot and an upload, forever, for a file
+            // that can never be accepted.
+            target.Tally.Fail(
                 $"{facts.Name} is {facts.Length} bytes, more than the {target.Limits.FileBytes} ADL accepts.");
 
             return;
@@ -214,63 +300,50 @@ public sealed class FolderScanner
             // Still being written, or held open by whoever is writing it.
             // Not a failure -- the newest file in a live folder is in this
             // state on every single cycle -- just not this cycle's business.
-            target.Tally.Pending++;
+            target.Tally.Wait();
 
             return;
         }
 
-        string hash;
-
-        try
-        {
-            hash = _hashes.Hash(facts);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            target.Tally.Failed++;
-            target.Tally.Note($"{facts.Name} could not be read: {exception.Message}");
-
-            _logger.LogWarning(exception, "Could not read {Path} to hash it.", facts.Path);
-
-            return;
-        }
-
-        candidates.Add(new FileCandidate(
-            facts.Path,
-            new ManifestEntry
-            {
-                StationLinkId = target.Link.Id,
-                Name = facts.Name,
-                Size = facts.Length,
-                Mtime = facts.WindowTimestamp,
-                Hash = hash,
-            }));
+        matched.Add(new Match(facts, target));
     }
 
     /// <summary>
-    /// The folder as a grouping key: the same directory spelled two ways is
-    /// still one walk.
+    /// What makes two station links share a walk.
     /// </summary>
     /// <remarks>
-    /// Written by hand rather than with the framework's path helpers, which
-    /// know only the separators of the machine they are running on -- and the
-    /// paths here were typed on a Windows server and may well be read on a
-    /// Linux one.
+    /// Deliberately not a path: this string is only ever a dictionary key,
+    /// and what reaches the file-metadata seam is the folder as ADL spells
+    /// it. That is the whole reason there is no path grammar in here.
+    /// Interpreting a path -- what a trailing separator means, whether
+    /// <c>C:</c> and <c>C:\</c> are the same place, whether two spellings
+    /// differing only in case are one folder -- is the platform's business,
+    /// and the core has no business guessing at it.
+    /// <para>
+    /// So the key is the exact string, with surrounding whitespace and one
+    /// trailing separator taken off, compared case-sensitively. Being wrong
+    /// in the safe direction costs a folder two walks instead of one; being
+    /// wrong the other way would have a station on a Linux server scan
+    /// <c>/data</c> when it was configured for <c>/Data</c>.
+    /// </para>
     /// </remarks>
-    private static string Normalise(string folder)
+    private static string GroupingKey(string folder)
     {
         var trimmed = folder.Trim();
-        var end = trimmed.Length;
 
-        while (end > 1 && (trimmed[end - 1] == '/' || trimmed[end - 1] == '\\') && trimmed[end - 2] != ':')
-        {
-            end--;
-        }
-
-        return trimmed[..end];
+        return trimmed.Length > 1 && (trimmed[^1] == '/' || trimmed[^1] == '\\')
+            ? trimmed[..^1]
+            : trimmed;
     }
+
+    /// <summary>A file that belongs to a station and is ready to go.</summary>
+    private sealed record Match(FileFacts Facts, Target Target);
 
     /// <summary>One station link's share of one folder's walk.</summary>
     private sealed record Target(
-        StationLinkConfig Link, FilePattern Pattern, LinkTally Tally, AgentLimits Limits);
+        StationLinkConfig Link, FilePattern Pattern, LinkTally Tally, AgentLimits Limits)
+    {
+        /// <summary>The folder this station's files are in, as ADL spells it.</summary>
+        public string Folder => Link.Config.LocalFolderPath.Trim();
+    }
 }

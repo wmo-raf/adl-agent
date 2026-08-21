@@ -189,6 +189,15 @@ there.
 - Pairing is not confirmed against ADL before `pair` reports success — the
   token is stored and proven by the sync and heartbeat that follow within a
   second or two, which `adl-agent status` then shows.
+- **Date-structured folders are not walked.** ADL lets a station link say its
+  files sit under dated sub-folders (`dir_structured_by_date`, with a
+  granularity and a month format); the cycle walks only the folder itself. No
+  ticket covers this — #279 specified flat enumeration and #280 is
+  `DIRECT_FETCH` plus the reconciliation sweep — and the range machinery it
+  needs (every dated directory from the link's start date to now) is the same
+  machinery the sweep will bring, so it belongs with or after #280. Until
+  then such a station reports the reason on every cycle rather than quietly
+  collecting nothing.
 
 ## Testing approach
 

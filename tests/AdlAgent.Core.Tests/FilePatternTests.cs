@@ -55,13 +55,4 @@ public class FilePatternTests
             Assert.False(pattern.Matches("GARISSA_20260821.dat"));
         }
     }
-
-    [Fact]
-    public void The_same_pattern_is_compiled_once()
-    {
-        // Configuration is re-read every cycle for the life of the service;
-        // recompiling the same handful of globs every ten minutes for months
-        // is waste with nothing on the other side of it.
-        Assert.Same(FilePattern.For("SHARED_*.dat"), FilePattern.For("SHARED_*.dat"));
-    }
 }

@@ -42,6 +42,11 @@ public sealed record ManifestRequest
 }
 
 /// <summary>What ADL made of one page of candidates.</summary>
+/// <remarks>
+/// Every answer ADL gives carries the configuration version and the limits,
+/// so that the two things a machine most needs to keep in step ride the calls
+/// it makes most often rather than waiting for the next sync.
+/// </remarks>
 public sealed record ManifestResponse
 {
     public long ConfigVersion { get; init; }
@@ -67,6 +72,12 @@ public sealed record ManifestResponse
 }
 
 /// <summary>One file ADL asked for, identified as it was offered.</summary>
+/// <remarks>
+/// The hash comes back with the name so the agent can match the answer to the
+/// candidate it proposed rather than re-reading the file to work out which
+/// version of it this is -- which on a folder that is still being written to
+/// would sometimes be a different version.
+/// </remarks>
 public sealed record RequestedFile
 {
     public long StationLinkId { get; init; }
@@ -75,6 +86,12 @@ public sealed record RequestedFile
 }
 
 /// <summary>What ADL now holds under that name.</summary>
+/// <remarks>
+/// Read back rather than assumed: ADL hashes the bytes itself and answers
+/// with what it stored, so an upload the agent believes in and an upload ADL
+/// believes in are the same upload. The agent acts on the refusals, not on
+/// this -- a success here is worth logging and nothing more.
+/// </remarks>
 public sealed record UploadResponse
 {
     public long StationLinkId { get; init; }

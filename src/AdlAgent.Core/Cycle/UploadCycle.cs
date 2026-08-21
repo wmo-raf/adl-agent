@@ -79,8 +79,6 @@ public sealed class UploadCycle
 
         var scan = _scanner.Scan(configuration, _time.GetUtcNow());
 
-        _hashes.Forget();
-
         var delivered = await DeliverAsync(token, configuration, scan, cancellationToken)
             .ConfigureAwait(false);
 
@@ -91,6 +89,11 @@ public sealed class UploadCycle
             // anyway, since the heartbeat is going down the same link.
             return;
         }
+
+        // Only now: the files are read as the pages are built, so until the
+        // last page has gone out the cache does not yet know what this
+        // cycle's working set was.
+        _hashes.Forget();
 
         Record(scan);
     }
@@ -116,6 +119,17 @@ public sealed class UploadCycle
     /// <summary>
     /// Offer the candidates a page at a time and send what is asked for.
     /// </summary>
+    /// <remarks>
+    /// A page ADL refuses is not simply reported and dropped. The scan is
+    /// deterministic, so the identical page would be built again next cycle
+    /// and refused again -- for ever. One filename ADL cannot store would
+    /// take its four hundred and ninety-nine blameless neighbours with it,
+    /// and the station would go quiet with nothing but a repeating message to
+    /// show for it. So a refusal is answered by making the page one ADL can
+    /// read: smaller when it was too long, and without the entries ADL named
+    /// when it could not read them. Every branch either shrinks the page or
+    /// gives up on part of it, so the loop always moves.
+    /// </remarks>
     /// <returns>False when ADL stopped answering and the cycle was cut short.</returns>
     private async Task<bool> DeliverAsync(
         string token,
@@ -125,12 +139,20 @@ public sealed class UploadCycle
     {
         var pageSize = PageSize(configuration.Sync.Limits);
 
-        for (var start = 0; start < scan.Candidates.Count; start += pageSize)
+        using var candidates = scan.Candidates.GetEnumerator();
+
+        // Candidates taken from the sequence but not yet accepted for a page,
+        // because the page they were in came back refused.
+        var carried = new List<FileCandidate>();
+
+        while (true)
         {
-            var page = scan.Candidates
-                .Skip(start)
-                .Take(pageSize)
-                .ToList();
+            var page = NextPage(candidates, carried, pageSize);
+
+            if (page.Count == 0)
+            {
+                return true;
+            }
 
             ManifestResponse answer;
 
@@ -140,28 +162,48 @@ public sealed class UploadCycle
                     .ManifestAsync(token, page.Select(candidate => candidate.Entry).ToList(), cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (DeviceRevokedException)
+            catch (Exception exception) when (EndsTheCycle(exception))
             {
-                _session.MarkRevoked();
-
-                return false;
-            }
-            catch (AdlUnreachableException exception)
-            {
-                _logger.LogWarning("The manifest did not reach ADL: {Reason}", exception.Message);
+                Stop(exception, "The manifest");
 
                 return false;
             }
             catch (AdlRequestException exception)
             {
-                // ADL refused the page itself -- too many entries, or an
-                // entry it could not read. Nothing in it was accepted, so the
-                // whole page waits for the next cycle.
+                if (exception.Code == AgentErrorCodes.ManifestTooLarge && pageSize > 1)
+                {
+                    // ADL accepts fewer than it said it would. Halve and try
+                    // the same files again rather than spend every cycle
+                    // being told the same thing.
+                    pageSize = Math.Max(1, pageSize / 2);
+
+                    _logger.LogWarning(
+                        "ADL refused a manifest of {Count} files as too large; offering {PageSize} at a time.",
+                        page.Count, pageSize);
+
+                    carried.InsertRange(0, page);
+
+                    continue;
+                }
+
+                if (Narrow(scan, page, exception) is { } readable)
+                {
+                    // ADL named the entries it could not read. The rest of
+                    // the page is still worth offering, and offering it now
+                    // is what keeps one bad filename from silencing a folder.
+                    carried.InsertRange(0, readable);
+
+                    continue;
+                }
+
                 _logger.LogError(
                     "ADL refused a manifest of {Count} files ({Code}): {Detail}",
                     page.Count, exception.Code, exception.Detail);
 
-                Blame(scan, page, exception.Detail);
+                foreach (var candidate in page)
+                {
+                    scan.For(candidate.Entry.StationLinkId)?.Fail(exception.Detail);
+                }
 
                 continue;
             }
@@ -173,8 +215,49 @@ public sealed class UploadCycle
                 return false;
             }
         }
+    }
 
-        return true;
+    /// <summary>
+    /// The page without the entries ADL named, or <c>null</c> if that is no
+    /// help.
+    /// </summary>
+    /// <remarks>
+    /// Null when ADL named nothing, named every entry, or named only
+    /// positions this page does not have: in each case there is no smaller
+    /// page worth trying, and the caller gives up on the whole of it and
+    /// charges it once. Nothing is charged here until that is decided --
+    /// blaming a file on the way past and then blaming the whole page it was
+    /// in would have every station report twice the failures it had.
+    /// </remarks>
+    private static List<FileCandidate>? Narrow(
+        ScanResult scan, List<FileCandidate> page, AdlRequestException exception)
+    {
+        var dropped = new HashSet<int>();
+
+        foreach (var rejected in exception.Rejected)
+        {
+            if (rejected.Index >= 0 && rejected.Index < page.Count)
+            {
+                dropped.Add(rejected.Index);
+            }
+        }
+
+        if (dropped.Count == 0 || dropped.Count == page.Count)
+        {
+            return null;
+        }
+
+        foreach (var rejected in exception.Rejected.Where(rejected => dropped.Contains(rejected.Index)))
+        {
+            var candidate = page[rejected.Index];
+
+            // The only place anyone will ever see why one file of five
+            // hundred is not arriving, so it is ADL's own sentence about it.
+            scan.For(candidate.Entry.StationLinkId)
+                ?.Fail($"{candidate.Entry.Name}: {rejected.Detail}");
+        }
+
+        return page.Where((_, index) => !dropped.Contains(index)).ToList();
     }
 
     /// <summary>Send every file ADL asked for out of this page.</summary>
@@ -211,28 +294,23 @@ public sealed class UploadCycle
                 continue;
             }
 
-            var tally = scan.Links.GetValueOrDefault(wanted.StationLinkId);
+            var tally = scan.For(wanted.StationLinkId);
 
             try
             {
-                await _client
+                var stored = await _client
                     .UploadFileAsync(token, candidate.Entry, candidate.Path, cancellationToken)
                     .ConfigureAwait(false);
 
-                if (tally is not null)
-                {
-                    tally.Uploaded++;
-                }
-            }
-            catch (DeviceRevokedException)
-            {
-                _session.MarkRevoked();
+                tally?.Accept();
 
-                return false;
+                _logger.LogDebug(
+                    "ADL took {Name} for station link {Link}: {Size} bytes, {Status}.",
+                    stored.Name, stored.StationLinkId, stored.Size, stored.Status);
             }
-            catch (AdlUnreachableException exception)
+            catch (Exception exception) when (EndsTheCycle(exception))
             {
-                _logger.LogWarning("An upload did not reach ADL: {Reason}", exception.Message);
+                Stop(exception, "An upload");
 
                 return false;
             }
@@ -242,14 +320,14 @@ public sealed class UploadCycle
                 // the vendor appended to it between the hash and the read, so
                 // the bytes no longer match what was promised. Next cycle
                 // offers the file as it now stands.
-                Fail(tally, candidate, exception.Detail);
+                tally?.Fail($"{candidate.Entry.Name}: {exception.Detail}");
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException)
             {
                 // Gone, moved, or locked since the scan. Also next cycle's
                 // business, if it is still there at all.
-                Fail(tally, candidate, exception.Message);
+                tally?.Fail($"{candidate.Entry.Name}: {exception.Message}");
             }
         }
 
@@ -257,22 +335,17 @@ public sealed class UploadCycle
     }
 
     /// <summary>Note what ADL made of this page, per station.</summary>
-    private void Tally(ScanResult scan, IReadOnlyList<FileCandidate> page, ManifestResponse answer)
+    private static void Tally(
+        ScanResult scan, IReadOnlyList<FileCandidate> page, ManifestResponse answer)
     {
         foreach (var candidate in page)
         {
-            if (scan.Links.TryGetValue(candidate.Entry.StationLinkId, out var tally))
-            {
-                tally.Offered++;
-            }
+            scan.For(candidate.Entry.StationLinkId)?.Offer();
         }
 
         foreach (var wanted in answer.Requested)
         {
-            if (scan.Links.TryGetValue(wanted.StationLinkId, out var tally))
-            {
-                tally.Requested++;
-            }
+            scan.For(wanted.StationLinkId)?.Want();
         }
 
         // A machine works from a cached configuration, so it will sometimes
@@ -281,55 +354,81 @@ public sealed class UploadCycle
         // ignoring Garissa" is something a technician can act on.
         foreach (var stationLinkId in answer.UnknownStationLinks)
         {
-            Note(scan, stationLinkId, "ADL does not know this station as one of this machine's.");
+            scan.Note(stationLinkId, "ADL does not know this station as one of this machine's.");
         }
 
         foreach (var stationLinkId in answer.DisabledStationLinks)
         {
-            Note(scan, stationLinkId, "This station is switched off in ADL and is not taking files.");
+            scan.Note(stationLinkId, "This station is switched off in ADL and is not taking files.");
         }
     }
 
-    /// <summary>A page ADL refused outright: every station in it failed by it.</summary>
-    private static void Blame(ScanResult scan, IReadOnlyList<FileCandidate> page, string detail)
-    {
-        foreach (var candidate in page)
-        {
-            if (scan.Links.TryGetValue(candidate.Entry.StationLinkId, out var tally))
-            {
-                tally.Failed++;
-                tally.Note(detail);
-            }
-        }
-    }
+    /// <summary>
+    /// True when this failure ends the cycle rather than costing one file.
+    /// </summary>
+    /// <remarks>
+    /// The two that do are the two the agent cannot work around by trying the
+    /// next file: a token ADL has stopped accepting, and an ADL that is not
+    /// answering at all. Everything else -- a refused page, a refused file, a
+    /// file that moved -- leaves the rest of the cycle worth running.
+    /// </remarks>
+    private static bool EndsTheCycle(Exception exception) =>
+        exception is DeviceRevokedException or AdlUnreachableException;
 
-    private static void Fail(LinkTally? tally, FileCandidate candidate, string detail)
+    /// <summary>Give up on the rest of this cycle, and say why.</summary>
+    private void Stop(Exception exception, string what)
     {
-        if (tally is null)
+        if (exception is DeviceRevokedException)
         {
+            // Withdraws the token, so nothing else this machine does can
+            // reach ADL until somebody pairs it again.
+            _session.MarkRevoked();
+
             return;
         }
 
-        tally.Failed++;
-        tally.Note($"{candidate.Entry.Name}: {detail}");
+        _logger.LogWarning("{What} did not reach ADL: {Reason}", what, exception.Message);
     }
 
-    private static void Note(ScanResult scan, long stationLinkId, string message)
+    /// <summary>
+    /// The next page: what a refused page left over, then whatever the scan
+    /// hands over next.
+    /// </summary>
+    /// <remarks>
+    /// Taking from the sequence is what reads and hashes the files, so a page
+    /// costs a page's worth of reading and no more. Left-overs come first, so
+    /// that narrowing a refused page does not put its survivors behind the
+    /// year of history queued up after them.
+    /// </remarks>
+    private static List<FileCandidate> NextPage(
+        IEnumerator<FileCandidate> candidates, List<FileCandidate> carried, int size)
     {
-        if (scan.Links.TryGetValue(stationLinkId, out var tally))
+        var page = new List<FileCandidate>(Math.Min(size, 512));
+
+        while (page.Count < size && carried.Count > 0)
         {
-            tally.Note(message);
+            page.Add(carried[0]);
+            carried.RemoveAt(0);
         }
+
+        while (page.Count < size && candidates.MoveNext())
+        {
+            page.Add(candidates.Current);
+        }
+
+        return page;
     }
 
     /// <summary>
     /// How many candidates go in one manifest call -- ADL's number, clamped.
     /// </summary>
     /// <remarks>
-    /// Clamped because a fleet is not worth risking on one bad number: a page
-    /// size of zero would loop forever offering nothing, and one far above
-    /// what ADL accepts would have every page refused. The upper bound is
-    /// generous enough that a real change to the limit is followed.
+    /// Clamped only against a number that could not be a page size at all: a
+    /// zero would build empty pages for ever. The upper bound is generous
+    /// rather than pinned to what ADL accepts today, because pinning it would
+    /// stop a fleet following a real increase -- and a number too high costs
+    /// one refusal, which <see cref="DeliverAsync"/> answers by halving until
+    /// the pages fit.
     /// </remarks>
     private static int PageSize(AgentLimits limits) => Math.Clamp(limits.ManifestEntries, 1, 5_000);
 

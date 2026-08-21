@@ -222,7 +222,7 @@ public sealed class AdlApiClient : IAdlApiClient
     private async Task<AdlRequestException> ReadFailureAsync(
         HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var (code, detail) = await ReadErrorEnvelopeAsync(response, cancellationToken)
+        var (code, detail, rejected) = await ReadErrorEnvelopeAsync(response, cancellationToken)
             .ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -233,7 +233,7 @@ public sealed class AdlApiClient : IAdlApiClient
             return new DeviceRevokedException(code, detail);
         }
 
-        return new AdlRequestException(response.StatusCode, code, detail);
+        return new AdlRequestException(response.StatusCode, code, detail, rejected);
     }
 
     /// <summary>
@@ -244,11 +244,12 @@ public sealed class AdlApiClient : IAdlApiClient
     /// a reverse proxy in front of ADL is an HTML page, and the agent still
     /// has to say something a technician can act on.
     /// </remarks>
-    private static async Task<(string Code, string Detail)> ReadErrorEnvelopeAsync(
-        HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<(string Code, string Detail, IReadOnlyList<RejectedEntry> Rejected)>
+        ReadErrorEnvelopeAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var fallback = ($"http_{(int)response.StatusCode}",
-            $"ADL answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+            $"ADL answered {(int)response.StatusCode} {response.ReasonPhrase}.",
+            (IReadOnlyList<RejectedEntry>)[]);
 
         try
         {
@@ -263,7 +264,8 @@ public sealed class AdlApiClient : IAdlApiClient
 
             return (
                 string.IsNullOrWhiteSpace(envelope.Code) ? fallback.Item1 : envelope.Code,
-                envelope.Detail);
+                envelope.Detail,
+                envelope.Errors);
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
@@ -275,5 +277,8 @@ public sealed class AdlApiClient : IAdlApiClient
     {
         public string Code { get; init; } = "";
         public string Detail { get; init; } = "";
+
+        /// <summary>Present when ADL refused a batch and said which entries.</summary>
+        public IReadOnlyList<RejectedEntry> Errors { get; init; } = [];
     }
 }

@@ -24,20 +24,12 @@ public sealed class FileHashCache
 {
     private readonly Lock _gate = new();
 
-    private Dictionary<string, Entry> _known = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, Entry> _touched = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>How many files were hashed by reading them.</summary>
-    /// <remarks>
-    /// Kept because "untouched files are not re-hashed" is a promise with no
-    /// other observable form: the manifest of a settled folder looks the same
-    /// whether every file was read or none were. A test asserts on these two
-    /// numbers; nothing in the agent's behaviour depends on them.
-    /// </remarks>
-    public long Computed { get; private set; }
-
-    /// <summary>How many files answered from what was already known.</summary>
-    public long Remembered { get; private set; }
+    // Keyed on the path exactly as the platform seam spelled it, compared
+    // case-sensitively. Folding case would be a guess about somebody else's
+    // filesystem: harmless on Windows, where it would at worst save a
+    // re-hash, and wrong on Linux, where /data/a and /data/A are two files.
+    private Dictionary<string, Entry> _known = new(StringComparer.Ordinal);
+    private Dictionary<string, Entry> _touched = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The file's sha-256 in lowercase hex, read from the disk only if this
@@ -51,7 +43,6 @@ public sealed class FileHashCache
         {
             if (_known.TryGetValue(file.Path, out var known) && known.Describes(file))
             {
-                Remembered++;
                 _touched[file.Path] = known;
 
                 return known.Hash;
@@ -62,8 +53,6 @@ public sealed class FileHashCache
 
         lock (_gate)
         {
-            Computed++;
-
             var entry = new Entry(file.Length, file.WindowTimestamp, hash);
 
             _known[file.Path] = entry;
@@ -77,7 +66,8 @@ public sealed class FileHashCache
     /// Forget every file that was not looked at since the last call.
     /// </summary>
     /// <remarks>
-    /// Called at the end of a cycle. Without it the cache would be a record
+    /// Called once the scan is done, which is when the working set is known.
+    /// Without it the cache would be a record
     /// of every file the machine has ever seen -- including the ones a
     /// vendor's archiving job moved away years ago -- on a service that runs
     /// for months. With it, what is held is the working set: the files inside
@@ -88,7 +78,7 @@ public sealed class FileHashCache
         lock (_gate)
         {
             _known = _touched;
-            _touched = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
+            _touched = new Dictionary<string, Entry>(StringComparer.Ordinal);
         }
     }
 

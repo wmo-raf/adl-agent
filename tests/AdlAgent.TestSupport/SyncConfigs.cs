@@ -43,7 +43,8 @@ public static class SyncConfigs
         DateTimeOffset? watermark = null,
         int stabilityWindowSeconds = 60,
         bool enabled = true,
-        string listingStrategy = ListingStrategies.Enumerate) =>
+        string listingStrategy = ListingStrategies.Enumerate,
+        bool dirStructuredByDate = false) =>
         new()
         {
             Id = id,
@@ -54,6 +55,7 @@ public static class SyncConfigs
                 FilePattern = pattern,
                 StabilityWindowSeconds = stabilityWindowSeconds,
                 ListingStrategy = listingStrategy,
+                DirStructuredByDate = dirStructuredByDate,
             },
             Admin = new StationLinkAdminConfig
             {

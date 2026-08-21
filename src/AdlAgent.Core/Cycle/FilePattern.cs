@@ -11,10 +11,17 @@ namespace AdlAgent.Core.Cycle;
 /// the stations that share it, so what it means here has to be what it means
 /// in ADL. ADL matches with Python's <c>fnmatch</c>, and this follows it:
 /// <c>*</c> for any run of characters, <c>?</c> for one, <c>[abc]</c> and
-/// <c>[!a-z]</c> for a set, and everything else literal. Case is ignored,
-/// which is <c>fnmatch</c>'s behaviour on the platform these agents run on
-/// and the only behaviour a technician typing a pattern would expect of a
-/// Windows folder.
+/// <c>[!a-z]</c> for a set, and everything else literal.
+/// <para>
+/// Case is ignored, and that is a decision rather than an oversight.
+/// <c>fnmatch</c> folds case through <c>os.path.normcase</c>, so ADL's own
+/// match count -- the number a technician checks their pattern against in the
+/// admin -- ignores case on the Windows servers this ships to. Matching
+/// case-sensitively here would make the agent disagree with the count the
+/// person was shown. A Linux head has to revisit this: there
+/// <c>GARISSA.dat</c> and <c>garissa.dat</c> are two files, and folding them
+/// together could route one station's observations to another's ledger.
+/// </para>
 /// <para>
 /// Compiled to a regular expression rather than matched character by
 /// character because the whole point of the enumerate strategy is that a
@@ -38,11 +45,6 @@ public sealed class FilePattern
     /// </remarks>
     public static readonly FilePattern MatchesNothing = new("", null);
 
-    private static readonly Dictionary<string, FilePattern> Compiled =
-        new(StringComparer.Ordinal);
-
-    private static readonly Lock Gate = new();
-
     private readonly Regex? _matcher;
 
     private FilePattern(string text, Regex? matcher)
@@ -61,11 +63,12 @@ public sealed class FilePattern
     /// The compiled form of <paramref name="pattern"/>.
     /// </summary>
     /// <remarks>
-    /// Cached across calls because the configuration is re-read every cycle
-    /// and the patterns in it almost never change; compiling the same handful
-    /// of globs every ten minutes for the life of a service is waste with no
-    /// upside. Bounded by how many distinct patterns a device has ever been
-    /// configured with, which is a number an administrator types by hand.
+    /// Compiling costs real time, so a caller with several links to serve
+    /// should compile each distinct pattern once and keep it for the length
+    /// of the scan -- see <see cref="FolderScanner"/>. Nothing is cached
+    /// here: a static cache would outlive every pattern a device was ever
+    /// configured with, on a service that runs for months, to save a
+    /// millisecond every ten minutes.
     /// </remarks>
     public static FilePattern For(string? pattern)
     {
@@ -74,23 +77,11 @@ public sealed class FilePattern
             return MatchesNothing;
         }
 
-        lock (Gate)
-        {
-            if (Compiled.TryGetValue(pattern, out var known))
-            {
-                return known;
-            }
-
-            var compiled = new FilePattern(
-                pattern,
-                new Regex(
-                    Translate(pattern),
-                    RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
-
-            Compiled[pattern] = compiled;
-
-            return compiled;
-        }
+        return new FilePattern(
+            pattern,
+            new Regex(
+                Translate(pattern),
+                RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
     }
 
     /// <summary>True when a file of this name belongs to the station.</summary>

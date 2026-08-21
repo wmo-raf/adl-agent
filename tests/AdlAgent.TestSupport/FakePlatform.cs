@@ -47,7 +47,10 @@ public sealed class FakeHostLifecycle : IHostLifecycle
 public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("adl-agent-vendor").FullName;
-    private readonly Dictionary<string, Folder> _folders = new(StringComparer.OrdinalIgnoreCase);
+    // Case-sensitive, so that a test can describe two folders whose names
+    // differ only in case -- one filesystem's two directories and another's
+    // one. The agent must not be the thing that decides which it is.
+    private readonly Dictionary<string, Folder> _folders = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
 
     /// <summary>
@@ -66,7 +69,7 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
             lock (_gate)
             {
                 return _folders.ToDictionary(
-                    entry => entry.Key, entry => entry.Value.Walks, StringComparer.OrdinalIgnoreCase);
+                    entry => entry.Key, entry => entry.Value.Walks, StringComparer.Ordinal);
             }
         }
     }
@@ -142,6 +145,24 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
         {
             _folders[folder].Entries[name] = new FileFacts(path, name, length, windowTimestamp);
         }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Take a file's bytes away while leaving the folder still describing it.
+    /// </summary>
+    /// <remarks>
+    /// A filesystem cannot really do this, and that is the point: it makes
+    /// "nothing read this file" observable. A cycle that answers from the
+    /// hash memo cache carries on as if the file were still whole; a cycle
+    /// that reads it finds nothing there and says so. Without a trick like
+    /// this the promise is untestable, because a settled folder's manifest
+    /// looks identical whether every file was read or none were.
+    /// </remarks>
+    public FakeFileMetadataSource Vanish(string folder, string name)
+    {
+        File.Delete(Place(folder, name));
 
         return this;
     }

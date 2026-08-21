@@ -97,9 +97,6 @@ public sealed class AgentHarness : IAsyncDisposable
     /// <summary>One pass of sync, scan, offer and send.</summary>
     public UploadCycle Cycle => Services.GetRequiredService<UploadCycle>();
 
-    /// <summary>The memo cache, for the one promise it makes that has no other observable form.</summary>
-    public FileHashCache Hashes => Services.GetRequiredService<FileHashCache>();
-
     public HeartbeatLoop HeartbeatLoop => Hosted<HeartbeatLoop>();
 
     public UploadCycleLoop CycleLoop => Hosted<UploadCycleLoop>();
