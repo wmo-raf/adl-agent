@@ -34,8 +34,18 @@ public sealed class AgentHarness : IAsyncDisposable
 {
     private bool _started;
 
-    public AgentHarness()
+    /// <summary>
+    /// A fresh agent, or one that has been restarted.
+    /// </summary>
+    /// <param name="store">
+    /// What a previous run left behind. Passing the store of a disposed
+    /// harness is how a test says "the service was restarted": the token, the
+    /// cached configuration and the sweep log survive, and everything the
+    /// agent holds only in memory does not.
+    /// </param>
+    public AgentHarness(InMemoryAgentStateStore? store = null)
     {
+        Store = store ?? new InMemoryAgentStateStore();
         Server = new FakeAdlServer();
         Time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-21T09:00:00Z"));
         Time.AutoAdvanceAmount = TimeSpan.Zero;
@@ -78,7 +88,7 @@ public sealed class AgentHarness : IAsyncDisposable
 
     public FakeControlSurface Control { get; } = new();
 
-    public InMemoryAgentStateStore Store { get; } = new();
+    public InMemoryAgentStateStore Store { get; }
 
     public ServiceProvider Services { get; }
 

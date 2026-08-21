@@ -64,6 +64,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<ConfigurationService>();
         services.TryAddSingleton<FileHashCache>();
         services.TryAddSingleton<FolderScanner>();
+        services.TryAddSingleton<ReconciliationSweep>();
         services.TryAddSingleton<UploadCycle>();
         services.TryAddSingleton<AgentCadence>();
         services.TryAddSingleton<AgentWakeSignal>();

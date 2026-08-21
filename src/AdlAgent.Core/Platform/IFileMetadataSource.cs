@@ -26,8 +26,23 @@ public interface IFileMetadataSource
     IEnumerable<FileFacts> Enumerate(string folderPath);
 
     /// <summary>
-    /// One named file, or <c>null</c> if it is not there. This is the whole
-    /// of what the DIRECT_FETCH strategy needs from the filesystem.
+    /// One named file inside <paramref name="folderPath"/>, or <c>null</c> if
+    /// it is not there. This is the whole of what the DIRECT_FETCH strategy
+    /// needs from the filesystem.
     /// </summary>
-    FileFacts? Describe(string path);
+    /// <remarks>
+    /// A folder and a name rather than a path, because joining them is path
+    /// grammar and path grammar is the platform's business. The core knows
+    /// what a station's folder is called (an administrator typed it) and what
+    /// a file in it is called (a clock and a format imply it); which
+    /// separator goes between them, and what that means when the folder is
+    /// spelled <c>C:</c> or ends in a slash already, is a question it should
+    /// never have to answer.
+    /// <para>
+    /// A name that is not there is the ordinary case and not an error: on a
+    /// ten-minute cadence the file for the ten minutes that have not finished
+    /// yet is absent on every single cycle.
+    /// </para>
+    /// </remarks>
+    FileFacts? Describe(string folderPath, string fileName);
 }

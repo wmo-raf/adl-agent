@@ -21,4 +21,14 @@ public interface IAgentStateStore
     CachedConfiguration? LoadConfig();
 
     void SaveConfig(SyncResponse config, DateTimeOffset fetchedAt);
+
+    /// <summary>
+    /// When each station link was last swept, or an empty log if none ever
+    /// was. Unreadable counts as empty: the cost of forgetting is one extra
+    /// sweep, and the cost of refusing to start is a machine somebody has to
+    /// visit.
+    /// </summary>
+    SweepLog LoadSweeps();
+
+    void SaveSweeps(SweepLog sweeps);
 }

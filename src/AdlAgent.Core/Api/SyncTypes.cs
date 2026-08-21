@@ -56,6 +56,20 @@ public sealed record DeviceConfig
     /// deliberately not derived from the check interval.
     /// </summary>
     public int HeartbeatIntervalMinutes { get; init; } = 5;
+
+    /// <summary>
+    /// How often each enumerating station offers its whole folder rather than
+    /// only what the candidate window admits. Zero or less switches sweeps
+    /// off.
+    /// </summary>
+    /// <remarks>
+    /// Nullable because an ADL that predates the setting sends nothing, and
+    /// the daily default the spec asks for is the right reading of silence.
+    /// A zero would be indistinguishable from that if this were an
+    /// <see cref="int"/>, and "the field is absent" and "the administrator
+    /// turned it off" are opposite instructions.
+    /// </remarks>
+    public int? ReconciliationIntervalHours { get; init; }
 }
 
 public sealed record ConnectionConfig
@@ -144,6 +158,10 @@ public static class ListingStrategies
     public static bool IsEnumerate(string? strategy) =>
         string.IsNullOrWhiteSpace(strategy) ||
         string.Equals(strategy, Enumerate, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when this station's filenames are built rather than found.</summary>
+    public static bool IsDirectFetch(string? strategy) =>
+        string.Equals(strategy, DirectFetch, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record StationLinkAdminConfig

@@ -20,7 +20,7 @@ public class PlatformSeamTests : IDisposable
         var path = Write("GARISSA_20260821.dat", "0,1,2\n");
         var source = new WindowsFileMetadataSource();
 
-        var facts = source.Describe(path);
+        var facts = source.Describe(_folder, "GARISSA_20260821.dat");
 
         Assert.NotNull(facts);
         Assert.Equal("GARISSA_20260821.dat", facts.Value.Name);
@@ -33,9 +33,31 @@ public class PlatformSeamTests : IDisposable
     {
         var source = new WindowsFileMetadataSource();
 
-        Assert.Null(source.Describe(Path.Combine(_folder, "never-written.dat")));
+        Assert.Null(source.Describe(_folder, "never-written.dat"));
+        Assert.Null(source.Describe(Path.Combine(_folder, "no-such-folder"), "never-written.dat"));
+        Assert.Null(source.Describe(_folder, ""));
         Assert.Empty(source.Enumerate(Path.Combine(_folder, "no-such-folder")));
         Assert.Empty(source.Enumerate(""));
+    }
+
+    [Fact]
+    public void A_name_the_filesystem_could_not_hold_describes_nothing()
+    {
+        Write("GARISSA_20260821.dat", "0,1,2\n");
+
+        var source = new WindowsFileMetadataSource();
+
+        // A station's filename datetime format is free text in ADL, and one
+        // of the formats the FTP plugin offers is YYYY-MM-DDTHH:MM:SS -- a
+        // perfectly good name on the Unix servers it was written for. On
+        // Windows the colon names an alternate data stream of the folder
+        // itself, so this has to answer "not there" rather than open
+        // something.
+        Assert.Null(source.Describe(_folder, "GARISSA_2026-08-21T09:00:00.dat"));
+
+        // And a name that climbs out of the folder it was given never
+        // reaches the filesystem at all.
+        Assert.Null(source.Describe(_folder, Path.Combine("..", "GARISSA_20260821.dat")));
     }
 
     [Fact]
@@ -59,8 +81,9 @@ public class PlatformSeamTests : IDisposable
     [Fact]
     public void The_readiness_seam_leaves_a_file_that_was_just_written_alone()
     {
-        var path = Write("still-being-written.dat", "half a line");
-        var facts = new WindowsFileMetadataSource().Describe(path)!.Value;
+        Write("still-being-written.dat", "half a line");
+
+        var facts = new WindowsFileMetadataSource().Describe(_folder, "still-being-written.dat")!.Value;
         var probe = new WindowsFileReadinessProbe();
 
         var justWritten = facts.WindowTimestamp + TimeSpan.FromSeconds(10);
@@ -76,7 +99,7 @@ public class PlatformSeamTests : IDisposable
     public void The_readiness_seam_leaves_a_file_someone_else_is_holding_alone()
     {
         var path = Write("held-open.dat", "vendor software is still writing this");
-        var facts = new WindowsFileMetadataSource().Describe(path)!.Value;
+        var facts = new WindowsFileMetadataSource().Describe(_folder, "held-open.dat")!.Value;
         var probe = new WindowsFileReadinessProbe();
         var settled = facts.WindowTimestamp + TimeSpan.FromSeconds(120);
 

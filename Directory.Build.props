@@ -7,7 +7,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- ICU is loaded on purpose. ADL names a station link's filename
+         timezone the way its database stores it (an IANA name such as
+         "Africa/Nairobi"), and DIRECT_FETCH builds filenames by converting
+         an instant into it. On Windows that name only resolves through the
+         IANA-to-Windows mapping, and that mapping lives in ICU: in
+         globalization-invariant mode every non-UTC station in the fleet
+         would build its filenames three hours from the ones on the disk.
+         It is free here, because .NET on Windows uses the operating
+         system's own ICU rather than shipping one, so the self-contained
+         publish is the same size either way. Anything the agent puts on
+         the wire formats against InvariantCulture explicitly, so the
+         machine's locale still changes nothing. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <!-- One version number for the whole agent. It travels to ADL on every
          call (X-Agent-Version) and is what the update feed compares against,
          so it is set once here rather than per project. -->
