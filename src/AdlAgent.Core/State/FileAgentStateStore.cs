@@ -8,16 +8,17 @@ using Microsoft.Extensions.Options;
 namespace AdlAgent.Core.State;
 
 /// <summary>
-/// Two JSON files in the directory the host handed over.
+/// Three JSON files in the directory the host handed over.
 /// </summary>
 /// <remarks>
-/// Two files rather than one because they fail differently. A configuration
-/// cache that gets truncated by a power cut is a cache miss -- the agent
-/// syncs and moves on. The token being lost is a machine that has to be
-/// re-paired by someone in the building. Keeping them apart means a bad
-/// write to the noisy one can never take the precious one with it.
+/// Separate files rather than one because they fail differently. A
+/// configuration cache that gets truncated by a power cut is a cache miss --
+/// the agent syncs and moves on; a lost sweep log costs one extra sweep. The
+/// token being lost is a machine that has to be re-paired by someone in the
+/// building. Keeping them apart means a bad write to a noisy one can never
+/// take the precious one with it.
 /// <para>
-/// Both are flushed to the disk under a temporary name and then moved into
+/// Each is flushed to the disk under a temporary name and then moved into
 /// place, so a crash mid-write leaves the previous contents rather than half
 /// of the new ones. Country servers lose power; a token file that survives
 /// the outage as a truncated fragment is a machine somebody has to visit.
@@ -27,6 +28,7 @@ public sealed class FileAgentStateStore : IAgentStateStore
 {
     private const string StateFileName = "state.json";
     private const string ConfigCacheFileName = "config-cache.json";
+    private const string SweepLogFileName = "sweeps.json";
 
     private readonly string _directory;
     private readonly ILogger<FileAgentStateStore> _logger;
@@ -61,6 +63,10 @@ public sealed class FileAgentStateStore : IAgentStateStore
             FetchedAt = fetchedAt,
             Config = config,
         });
+
+    public SweepLog LoadSweeps() => Read<SweepLog>(SweepLogFileName) ?? new SweepLog();
+
+    public void SaveSweeps(SweepLog sweeps) => Write(SweepLogFileName, sweeps);
 
     private T? Read<T>(string fileName) where T : class
     {

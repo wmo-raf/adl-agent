@@ -49,8 +49,52 @@ check interval ADL sets.
   The vendor's folder is its only state; a refused upload, a dead link, or a
   power cut mid-cycle all resolve by offering the same files again.
 
-Still to come: `DIRECT_FETCH` and the reconciliation sweep (#280), the WPF
-tray (#281), installers and auto-update (#282).
+`DIRECT_FETCH` and the reconciliation sweep
+([wmo-raf/adl#280](https://github.com/wmo-raf/adl/issues/280)) — the escape
+hatch for folders where listing is itself the problem, and the backstop that
+lets the cheap path be cheap.
+
+- **`DIRECT_FETCH`** — a station ADL puts on this strategy never lists its
+  folder. It builds the filenames its vendor's clock implies (prefix +
+  datetime + extension, on the interval and in the filename timezone ADL
+  holds) and asks the filesystem about those exact names. A million files in
+  the directory cost nothing, because nothing reads them. An expected file
+  that is not there is a quiet non-event — the interval that has not finished
+  yet is missing on every cycle for ever — but a station that finds *none* of
+  its names says so.
+- **filename grid** — instants are aligned to the interval as the vendor sees
+  it, measured from local midnight in the station's filename timezone, and
+  re-aligned each step so a daylight-saving change moves the grid rather than
+  the backlog. A country on a fractional UTC offset writes `…1440`, not
+  `…1445`.
+- **bounded** — one cycle constructs at most 20 000 names per station, newest
+  first, so a one-minute cadence with a start date two years back cannot cost
+  a million stat calls every ten minutes. What the bound cuts off is picked
+  up by the reconciliation below.
+- **reconciliation sweep** — once a day a station stops trusting the cheap
+  path. An enumerating one offers everything its pattern matches back to its
+  collection start date rather than only what is above ADL's watermark, which
+  is what catches a file whose timestamps make it look old however it
+  arrived. A `DIRECT_FETCH` one has no folder to re-walk and no lower floor
+  to find anything with, so what it reconciles is its own reach: it asks
+  about every name back to the start date (up to 500 000) instead of the
+  newest 20 000 — without which a file copied in three weeks late would be
+  looked for on no cycle at all.
+- **a sweep is only a lower floor** — the same single walk, the same
+  readiness check, the same hashes; ADL's ledger diff decides what it was
+  worth. A sweep cut short by an unreachable ADL stays owed. A station the
+  scan turned away (no folder, no pattern, half-configured Direct Fetch) is
+  not recorded as swept, so fixing it does not mean waiting another day. The
+  record survives a restart, so a service that restarts hourly does not offer
+  its whole folder hourly.
+- **cadence** — daily by default. The agent reads
+  `reconciliation_interval_hours` from the device block of the sync response
+  when ADL sends it (`0` switches sweeps off); the plugin does not serve that
+  field yet, so today every install reconciles daily. Adding it server-side
+  is a companion change in
+  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin).
+
+Still to come: the WPF tray (#281), installers and auto-update (#282).
 
 ## Structure
 
@@ -189,15 +233,24 @@ there.
 - Pairing is not confirmed against ADL before `pair` reports success — the
   token is stored and proven by the sync and heartbeat that follow within a
   second or two, which `adl-agent status` then shows.
+- **IANA timezone names need ICU, and Windows Server 2016 has none.** ADL
+  sends a station's filename timezone as an IANA name (`Africa/Nairobi`), and
+  Windows resolves those through a mapping in ICU — supplied by the operating
+  system from Windows 10 / Server 2019 onwards. On the older machines in the
+  best-effort tier a `DIRECT_FETCH` station whose filenames are written in
+  local time may be unable to resolve it. It reports the timezone it could
+  not resolve rather than looking for the wrong filenames, so the station
+  shows a reason in the fleet listing instead of going quiet.
 - **Date-structured folders are not walked.** ADL lets a station link say its
   files sit under dated sub-folders (`dir_structured_by_date`, with a
   granularity and a month format); the cycle walks only the folder itself. No
   ticket covers this — #279 specified flat enumeration and #280 is
   `DIRECT_FETCH` plus the reconciliation sweep — and the range machinery it
-  needs (every dated directory from the link's start date to now) is the same
-  machinery the sweep will bring, so it belongs with or after #280. Until
-  then such a station reports the reason on every cycle rather than quietly
-  collecting nothing.
+  needs (every dated directory from the link's start date to now) is not
+  what #280 brought — the sweep only lowers the floor of the one folder that
+  is already walked, and `DIRECT_FETCH` builds names rather than directory
+  trees. Until a ticket covers it, such a station reports the reason on every
+  cycle, under either strategy, rather than quietly collecting nothing.
 
 ## Testing approach
 

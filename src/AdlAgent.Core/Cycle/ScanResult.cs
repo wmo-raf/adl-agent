@@ -7,10 +7,11 @@ namespace AdlAgent.Core.Cycle;
 /// </summary>
 /// <remarks>
 /// The path is kept beside the entry because the upload needs both and they
-/// must be the same file. Under the enumerate strategy the path is the one
-/// the platform seam handed over, never one the core assembled -- which is
-/// what lets a test describe a Windows folder on a machine that has no C:
-/// drive.
+/// must be the same file. It is always the one the platform seam handed over
+/// and never one the core assembled -- true under DIRECT_FETCH as well,
+/// where the core supplies the folder and the filename separately and the
+/// seam joins them -- which is what lets a test describe a Windows folder on
+/// a machine that has no C: drive.
 /// </remarks>
 public sealed record FileCandidate(string Path, ManifestEntry Entry);
 
@@ -24,9 +25,17 @@ public sealed record FileCandidate(string Path, ManifestEntry Entry);
 /// at a time -- which is what lets a fresh install put today's observations
 /// on the wire before it has touched last year's. It can be walked once.
 /// </remarks>
+/// <param name="Reconciled">
+/// The stations that offered everything they could this cycle rather than
+/// only what the candidate window admits. What the scan actually did, not
+/// what it was asked to do: a station it turned away for want of a folder or
+/// a pattern is not in here, so its day's reconciliation is not spent on a
+/// cycle that never looked at it.
+/// </param>
 public sealed record ScanResult(
     IEnumerable<FileCandidate> Candidates,
-    IReadOnlyDictionary<long, LinkTally> Links)
+    IReadOnlyDictionary<long, LinkTally> Links,
+    IReadOnlySet<long> Reconciled)
 {
     /// <summary>
     /// This station's tally, or <c>null</c> if the scan opened none for it.

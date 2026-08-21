@@ -30,6 +30,7 @@ public sealed class UploadCycle
 {
     private readonly ConfigurationService _configuration;
     private readonly FolderScanner _scanner;
+    private readonly ReconciliationSweep _sweeps;
     private readonly FileHashCache _hashes;
     private readonly IAdlApiClient _client;
     private readonly AgentSession _session;
@@ -41,6 +42,7 @@ public sealed class UploadCycle
     public UploadCycle(
         ConfigurationService configuration,
         FolderScanner scanner,
+        ReconciliationSweep sweeps,
         FileHashCache hashes,
         IAdlApiClient client,
         AgentSession session,
@@ -51,6 +53,7 @@ public sealed class UploadCycle
     {
         _configuration = configuration;
         _scanner = scanner;
+        _sweeps = sweeps;
         _hashes = hashes;
         _client = client;
         _session = session;
@@ -77,7 +80,13 @@ public sealed class UploadCycle
             return;
         }
 
-        var scan = _scanner.Scan(configuration, _time.GetUtcNow());
+        var now = _time.GetUtcNow();
+
+        // Decided before the scan and recorded after it, so that a cycle
+        // which dies in the middle of a sweep leaves the sweep still owed.
+        var sweep = _sweeps.Plan(configuration, now);
+
+        var scan = _scanner.Scan(configuration, sweep, now);
 
         var delivered = await DeliverAsync(token, configuration, scan, cancellationToken)
             .ConfigureAwait(false);
@@ -94,6 +103,8 @@ public sealed class UploadCycle
         // last page has gone out the cache does not yet know what this
         // cycle's working set was.
         _hashes.Forget();
+
+        _sweeps.Record(sweep, scan.Reconciled, now);
 
         Record(scan);
     }

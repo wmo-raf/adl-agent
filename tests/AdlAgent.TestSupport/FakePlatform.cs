@@ -77,6 +77,24 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
     public int EnumerationsOf(string folder) =>
         Enumerations.TryGetValue(folder, out var walks) ? walks : 0;
 
+    /// <summary>
+    /// How many times a named file in this folder has been asked about.
+    /// </summary>
+    /// <remarks>
+    /// The DIRECT_FETCH counterpart of <see cref="Enumerations"/>, and what
+    /// makes "no folder is listed, exact paths are stat'ed" an assertion
+    /// rather than a claim: the promise is that this number moves and
+    /// <see cref="EnumerationsOf"/> stays at zero, however many files the
+    /// folder holds.
+    /// </remarks>
+    public int DescribesOf(string folder)
+    {
+        lock (_gate)
+        {
+            return _folders.TryGetValue(folder, out var files) ? files.Describes : 0;
+        }
+    }
+
     /// <summary>Write a file into a folder, with the time the window sees.</summary>
     public FakeFileMetadataSource Add(
         string folder, string name, DateTimeOffset windowTimestamp, string contents)
@@ -205,23 +223,19 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
         }
     }
 
-    public FileFacts? Describe(string path)
+    public FileFacts? Describe(string folderPath, string fileName)
     {
         lock (_gate)
         {
-            foreach (var folder in _folders.Values)
+            if (!_folders.TryGetValue(folderPath, out var files))
             {
-                foreach (var facts in folder.Entries.Values)
-                {
-                    if (string.Equals(facts.Path, path, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return facts;
-                    }
-                }
+                return null;
             }
-        }
 
-        return null;
+            files.Describes++;
+
+            return files.Entries.TryGetValue(fileName, out var facts) ? facts : null;
+        }
     }
 
     public void Dispose()
@@ -273,6 +287,8 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
         public Dictionary<string, FileFacts> Entries { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public int Walks { get; set; }
+
+        public int Describes { get; set; }
     }
 }
 
@@ -334,9 +350,20 @@ public sealed class InMemoryAgentStateStore : IAgentStateStore
 {
     private AgentState _state = new();
     private CachedConfiguration? _config;
+    private SweepLog _sweeps = new();
 
     /// <summary>How many times state has been written. A restart is a new store.</summary>
     public int Writes { get; private set; }
+
+    /// <summary>
+    /// How many times the sweep log has been written.
+    /// </summary>
+    /// <remarks>
+    /// Watched because the log is touched on every cycle and written on
+    /// almost none of them: a machine that flushed it every ten minutes for
+    /// years would be writing to say nothing had changed.
+    /// </remarks>
+    public int SweepWrites { get; private set; }
 
     public AgentState Load() => _state;
 
@@ -350,6 +377,14 @@ public sealed class InMemoryAgentStateStore : IAgentStateStore
 
     public void SaveConfig(SyncResponse config, DateTimeOffset fetchedAt) =>
         _config = new CachedConfiguration { FetchedAt = fetchedAt, Config = config };
+
+    public SweepLog LoadSweeps() => _sweeps;
+
+    public void SaveSweeps(SweepLog sweeps)
+    {
+        _sweeps = sweeps;
+        SweepWrites++;
+    }
 
     /// <summary>Put a cached configuration in place, as a previous run would have left it.</summary>
     public void Seed(SyncResponse config, DateTimeOffset fetchedAt) => SaveConfig(config, fetchedAt);

@@ -29,3 +29,22 @@ public sealed record CachedConfiguration
 
     public SyncResponse Config { get; init; } = new();
 }
+
+/// <summary>
+/// When each station link was last offered its whole folder.
+/// </summary>
+/// <remarks>
+/// The one thing about its own work the agent remembers between runs, and it
+/// is deliberately not a record of what was delivered -- that stays ADL's, so
+/// that a lost file here costs a sweep and never a gap. It is kept because
+/// the alternative is worse: a service restarts on every crash, every reboot
+/// and every auto-update, and a machine that swept on every start would offer
+/// its entire folder -- two hundred manifest pages on the folders this
+/// product exists for -- down a country link that is slow on its good days.
+/// </remarks>
+public sealed record SweepLog
+{
+    /// <summary>Station link id to the last time its whole folder was offered.</summary>
+    public IReadOnlyDictionary<long, DateTimeOffset> Swept { get; init; } =
+        new Dictionary<long, DateTimeOffset>();
+}

@@ -276,12 +276,16 @@ public class FolderScanTests
     }
 
     [Fact]
-    public async Task A_station_the_agent_cannot_yet_scan_says_so_rather_than_doing_nothing()
+    public async Task A_station_the_agent_cannot_scan_says_so_rather_than_doing_nothing()
     {
         await using var agent = new AgentHarness();
 
         agent.Server.Config = SyncConfigs.With(
-            SyncConfigs.Link(11, Shared, "*.dat", listingStrategy: Core.Api.ListingStrategies.DirectFetch),
+            // A strategy from an ADL newer than this agent. Walking the
+            // folder anyway would be the worst of the three things it could
+            // do: a strategy nobody has heard of is usually one chosen
+            // because the folder is enormous.
+            SyncConfigs.Link(11, Shared, "*.dat", listingStrategy: "usn_journal"),
             SyncConfigs.Link(12, Shared, pattern: ""));
 
         agent.Files.Add(Shared, "GARISSA_20260821.dat", Settled(agent), "g\n");
@@ -291,11 +295,12 @@ public class FolderScanTests
 
         var links = agent.Cycles.LastCompletedCycle!.Links;
 
-        Assert.Contains("direct_fetch", links.Single(link => link.StationLinkId == 11).Error!);
+        Assert.Contains("usn_journal", links.Single(link => link.StationLinkId == 11).Error!);
 
         // A folder is nearly always shared, so guessing "every file" for a
         // station with no pattern would file one station's data under another.
         Assert.Contains("No file pattern", links.Single(link => link.StationLinkId == 12).Error!);
+        Assert.Equal(0, agent.Files.EnumerationsOf(Shared));
         Assert.Empty(agent.Server.ManifestPages);
     }
 

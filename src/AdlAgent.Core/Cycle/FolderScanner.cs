@@ -10,7 +10,7 @@ namespace AdlAgent.Core.Cycle;
 /// the configuration says about it.
 /// </summary>
 /// <remarks>
-/// Three ideas do all the work here, and every one of them is about a folder
+/// Four ideas do all the work here, and every one of them is about a folder
 /// with a hundred thousand files in it.
 /// <para>
 /// <b>One walk per folder.</b> Station links are grouped by the folder they
@@ -18,6 +18,16 @@ namespace AdlAgent.Core.Cycle;
 /// entry offered to every pattern that folder serves. A country whose vendor
 /// writes forty stations into one dump directory pays for one walk, not
 /// forty.
+/// </para>
+/// <para>
+/// <b>Or no walk at all.</b> A station ADL has put on DIRECT_FETCH does not
+/// walk its folder: it builds the filenames its vendor's clock implies and
+/// asks the filesystem about those exact names (see
+/// <see cref="ExpectedFiles"/>). That is the escape hatch for the folder
+/// where the walk itself is the problem -- a million minute-by-minute files
+/// for every station in the country -- and the two strategies meet again
+/// immediately afterwards: same size cap, same readiness check, same lazy
+/// hashing, same newest-first order.
 /// </para>
 /// <para>
 /// <b>Cheapest question first.</b> An entry is filtered against the
@@ -55,22 +65,49 @@ public sealed class FolderScanner
     /// <summary>
     /// Every file worth offering, newest first, and a tally per station.
     /// </summary>
-    public ScanResult Scan(AgentConfiguration configuration, DateTimeOffset now)
+    /// <param name="sweep">
+    /// The stations offering their whole folder this cycle rather than only
+    /// what the candidate window admits. See <see cref="ReconciliationSweep"/>.
+    /// </param>
+    public ScanResult Scan(AgentConfiguration configuration, SweepPlan sweep, DateTimeOffset now)
     {
         var tallies = new Dictionary<long, LinkTally>();
-        var folders = new Dictionary<string, List<Target>>(StringComparer.Ordinal);
+        var folders = new Dictionary<string, List<Walked>>(StringComparer.Ordinal);
+        var fetching = new List<Fetched>();
 
-        foreach (var target in Targets(configuration, tallies))
+        // What was reconciled, as opposed to what the plan asked for. A
+        // station the scan turns away -- no folder, no pattern, Direct Fetch
+        // settings that do not add up -- did not offer anything, let alone
+        // everything, and must not have its day's reconciliation spent on it.
+        var reconciled = new HashSet<long>();
+
+        foreach (var target in Targets(configuration, sweep, now, tallies))
         {
-            var key = GroupingKey(target.Folder);
-
-            if (!folders.TryGetValue(key, out var sharing))
+            if (target.Reconciling)
             {
-                sharing = [];
-                folders[key] = sharing;
+                reconciled.Add(target.Link.Id);
             }
 
-            sharing.Add(target);
+            switch (target)
+            {
+                case Fetched fetched:
+                    fetching.Add(fetched);
+
+                    break;
+
+                case Walked walked:
+                    var key = GroupingKey(walked.Folder);
+
+                    if (!folders.TryGetValue(key, out var sharing))
+                    {
+                        sharing = [];
+                        folders[key] = sharing;
+                    }
+
+                    sharing.Add(walked);
+
+                    break;
+            }
         }
 
         var matched = new List<Match>();
@@ -81,6 +118,11 @@ public sealed class FolderScanner
             // What goes to the seam is always a path an administrator typed;
             // the key is this method's private business.
             Walk(targets[0].Folder, targets, now, matched);
+        }
+
+        foreach (var target in fetching)
+        {
+            Fetch(target, now, matched);
         }
 
         // Newest first, and by name where two files share a timestamp, so
@@ -95,7 +137,7 @@ public sealed class FolderScanner
                 : string.Compare(left.Facts.Name, right.Facts.Name, StringComparison.OrdinalIgnoreCase);
         });
 
-        return new ScanResult(Hashing(matched), tallies);
+        return new ScanResult(Hashing(matched), tallies, reconciled);
     }
 
     /// <summary>
@@ -163,7 +205,10 @@ public sealed class FolderScanner
     /// arrive at HQ as a sentence, not as an absence.
     /// </remarks>
     private static IEnumerable<Target> Targets(
-        AgentConfiguration configuration, Dictionary<long, LinkTally> tallies)
+        AgentConfiguration configuration,
+        SweepPlan sweep,
+        DateTimeOffset now,
+        Dictionary<long, LinkTally> tallies)
     {
         // One compiled glob per distinct pattern, for the length of this
         // scan. Several stations sharing a naming convention is the norm,
@@ -187,14 +232,6 @@ public sealed class FolderScanner
 
                 tallies[link.Id] = tally;
 
-                if (!ListingStrategies.IsEnumerate(link.Config.ListingStrategy))
-                {
-                    tally.Note(
-                        $"This station is set to {link.Config.ListingStrategy}, which this version of the agent does not do.");
-
-                    continue;
-                }
-
                 if (string.IsNullOrWhiteSpace(link.Config.LocalFolderPath))
                 {
                     tally.Note("No local folder is set for this station.");
@@ -217,29 +254,144 @@ public sealed class FolderScanner
                     continue;
                 }
 
-                var glob = link.Config.FilePattern ?? "";
+                Target? target = ListingStrategies.IsDirectFetch(link.Config.ListingStrategy)
+                    ? Fetching(link, tally, configuration.Sync.Limits, sweep, now)
+                    : ListingStrategies.IsEnumerate(link.Config.ListingStrategy)
+                        ? Walking(link, tally, configuration.Sync.Limits, patterns, sweep)
+                        : Unknown(link, tally);
 
-                if (!patterns.TryGetValue(glob, out var pattern))
+                if (target is not null)
                 {
-                    pattern = FilePattern.For(glob);
-                    patterns[glob] = pattern;
+                    yield return target;
                 }
-
-                if (pattern.IsEmpty)
-                {
-                    tally.Note("No file pattern is set for this station, so no file can be said to be its own.");
-
-                    continue;
-                }
-
-                yield return new Target(link, pattern, tally, configuration.Sync.Limits);
             }
         }
     }
 
+    /// <summary>One station whose files are found by walking its folder.</summary>
+    private static Walked? Walking(
+        StationLinkConfig link,
+        LinkTally tally,
+        AgentLimits limits,
+        Dictionary<string, FilePattern> patterns,
+        SweepPlan sweep)
+    {
+        var glob = link.Config.FilePattern ?? "";
+
+        if (!patterns.TryGetValue(glob, out var pattern))
+        {
+            pattern = FilePattern.For(glob);
+            patterns[glob] = pattern;
+        }
+
+        if (pattern.IsEmpty)
+        {
+            tally.Note("No file pattern is set for this station, so no file can be said to be its own.");
+
+            return null;
+        }
+
+        // A sweep is a lower floor and nothing else. ADL's watermark is what
+        // makes an ordinary cycle cheap; the collection start date is as far
+        // back as this station's files were ever wanted, and once a day that
+        // is what the folder is offered against instead. Everything the
+        // watermark can miss -- a filesystem with no creation time, a
+        // vendor's archiving job putting a month back, a clock that was wrong
+        // when the file was written -- is caught by that and not by reasoning
+        // about it here.
+        var reconciling = sweep.Includes(link.Id);
+        var floor = reconciling ? Lower(link.Watermark, link.Admin.StartDate) : link.Watermark;
+
+        return new Walked(link, tally, limits, reconciling, pattern, floor);
+    }
+
+    /// <summary>
+    /// The lower of two floors, where absent means no floor at all.
+    /// </summary>
+    /// <remarks>
+    /// A sweep must never end up offering <em>less</em> than an ordinary
+    /// cycle, which is why this is not simply the collection start date. ADL
+    /// pulls the watermark below that date on purpose when an operator asks
+    /// for a pruned file to be sent again, and a sweep that took the start
+    /// date alone would raise the floor back over the very file that was
+    /// asked for.
+    /// </remarks>
+    private static DateTimeOffset? Lower(DateTimeOffset? left, DateTimeOffset? right)
+    {
+        if (left is null || right is null)
+        {
+            return null;
+        }
+
+        return left < right ? left : right;
+    }
+
+    /// <summary>One station whose filenames are built rather than found.</summary>
+    private static Fetched? Fetching(
+        StationLinkConfig link,
+        LinkTally tally,
+        AgentLimits limits,
+        SweepPlan sweep,
+        DateTimeOffset now)
+    {
+        // The floor the names are built back to. ADL's watermark is the same
+        // collection start date under a different name today, and taking the
+        // watermark first is what will keep this station cheap the day ADL
+        // starts raising it.
+        var floor = link.Watermark ?? link.Admin.StartDate;
+
+        // What reconciling means for a station with no folder to re-walk: it
+        // stops being cut short of its own backlog. An ordinary cycle looks
+        // at the newest twenty thousand names; once a day it looks at all of
+        // them, which is what finds a file copied in three weeks late.
+        var reconciling = sweep.Includes(link.Id);
+        var mostNames = reconciling ? ExpectedFiles.MostPerSweep : ExpectedFiles.MostPerCycle;
+
+        var expected = ExpectedFiles.For(link.Config, floor, now, mostNames);
+
+        if (expected.Problem is not null)
+        {
+            tally.Note(expected.Problem);
+
+            return null;
+        }
+
+        if (expected.Truncated && reconciling)
+        {
+            // Even the deep pass stopped short, which no station that is busy
+            // rather than misconfigured can manage. This one is the only case
+            // where backlog really is out of reach, so it is the only one
+            // worth telling an operator to act on.
+            tally.Note(
+                $"This station expects more files than the {ExpectedFiles.MostPerSweep} even a full "
+                + "reconciliation looks for, so its oldest are out of reach. Move its collection start date "
+                + "forward in ADL, or widen its file interval.");
+        }
+
+        return new Fetched(link, tally, limits, reconciling, expected.Names);
+    }
+
+    /// <summary>
+    /// A station set to something this agent has never heard of.
+    /// </summary>
+    /// <remarks>
+    /// Said rather than guessed at. A newer ADL naming a strategy this
+    /// version does not implement is the one case where doing the familiar
+    /// thing anyway would be worst: the folder it names may be enormous, and
+    /// walking it is exactly what the unknown strategy was chosen to avoid.
+    /// </remarks>
+    private static Walked? Unknown(StationLinkConfig link, LinkTally tally)
+    {
+        tally.Note(
+            $"This station is set to {link.Config.ListingStrategy}, which this version of the agent does not know. "
+            + "Update the agent, or set it back to enumerate in ADL.");
+
+        return null;
+    }
+
     /// <summary>One folder, walked once, offered to everything that shares it.</summary>
     private void Walk(
-        string folder, List<Target> targets, DateTimeOffset now, List<Match> matched)
+        string folder, List<Walked> targets, DateTimeOffset now, List<Match> matched)
     {
         var entries = 0;
 
@@ -251,7 +403,7 @@ public sealed class FolderScanner
             {
                 if (target.Pattern.Matches(facts.Name))
                 {
-                    Consider(target, facts, now, matched);
+                    Consider(target, facts, target.Floor, now, matched);
                 }
             }
         }
@@ -267,15 +419,47 @@ public sealed class FolderScanner
         }
     }
 
+    /// <summary>One station's expected filenames, asked about one at a time.</summary>
+    /// <remarks>
+    /// No message when nothing is found, and that is the difference between
+    /// this and <see cref="Walk"/>. A walk that finds nothing has learned
+    /// something -- the folder is wrong, or the pattern is -- but a
+    /// constructed name that is not there has learned nothing at all: the
+    /// newest expected file is always missing, because the interval it
+    /// belongs to has not finished. Only a station that finds nothing across
+    /// its whole window is worth a sentence.
+    /// </remarks>
+    private void Fetch(Fetched target, DateTimeOffset now, List<Match> matched)
+    {
+        var folder = target.Folder;
+
+        foreach (var name in target.Names)
+        {
+            if (_files.Describe(folder, name) is { } facts)
+            {
+                // No floor. What put this file in the cycle was the clock in
+                // its name, and filtering it again on the timestamps the
+                // filesystem happens to carry would drop the backfill the
+                // names were built to find.
+                Consider(target, facts, floor: null, now, matched);
+            }
+        }
+
+        if (target.Tally.Scanned == 0)
+        {
+            target.Tally.Note(
+                $"None of the {target.Names.Count} filenames this station expects are in {folder}. "
+                + "Check the folder, the file prefix, the datetime format and the filename timezone.");
+        }
+    }
+
     /// <summary>One entry, against one station's rules.</summary>
     private void Consider(
-        Target target, FileFacts facts, DateTimeOffset now, List<Match> matched)
+        Target target, FileFacts facts, DateTimeOffset? floor, DateTimeOffset now, List<Match> matched)
     {
         target.Tally.Saw();
 
-        var watermark = target.Link.Watermark;
-
-        if (watermark is not null && facts.WindowTimestamp < watermark)
+        if (floor is not null && facts.WindowTimestamp < floor)
         {
             // Behind the floor ADL put under this station. Nothing is wrong;
             // this is how the window keeps a settled folder cheap.
@@ -339,11 +523,42 @@ public sealed class FolderScanner
     /// <summary>A file that belongs to a station and is ready to go.</summary>
     private sealed record Match(FileFacts Facts, Target Target);
 
-    /// <summary>One station link's share of one folder's walk.</summary>
-    private sealed record Target(
-        StationLinkConfig Link, FilePattern Pattern, LinkTally Tally, AgentLimits Limits)
+    /// <summary>
+    /// One station link's share of one cycle.
+    /// </summary>
+    /// <param name="Reconciling">
+    /// True when this station is offering everything it can rather than only
+    /// what the candidate window admits. What that means differs by strategy;
+    /// what it means to the cycle is the same, which is why it is here.
+    /// </param>
+    private abstract record Target(
+        StationLinkConfig Link, LinkTally Tally, AgentLimits Limits, bool Reconciling)
     {
         /// <summary>The folder this station's files are in, as ADL spells it.</summary>
         public string Folder => Link.Config.LocalFolderPath.Trim();
     }
+
+    /// <summary>A station whose files are found by walking its folder.</summary>
+    /// <param name="Floor">
+    /// The oldest a file's own timestamp may be, or <c>null</c> for no floor
+    /// at all.
+    /// </param>
+    private sealed record Walked(
+        StationLinkConfig Link,
+        LinkTally Tally,
+        AgentLimits Limits,
+        bool Reconciling,
+        FilePattern Pattern,
+        DateTimeOffset? Floor)
+        : Target(Link, Tally, Limits, Reconciling);
+
+    /// <summary>A station whose filenames are built rather than found.</summary>
+    /// <param name="Names">The filenames to ask the filesystem about, newest first.</param>
+    private sealed record Fetched(
+        StationLinkConfig Link,
+        LinkTally Tally,
+        AgentLimits Limits,
+        bool Reconciling,
+        IReadOnlyList<string> Names)
+        : Target(Link, Tally, Limits, Reconciling);
 }

@@ -81,16 +81,29 @@ public sealed class WindowsFileMetadataSource : IFileMetadataSource
         }
     }
 
-    public FileFacts? Describe(string path)
+    public FileFacts? Describe(string folderPath, string fileName)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(fileName))
         {
+            return null;
+        }
+
+        if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            // Not a filename this filesystem can hold, so nothing is there to
+            // describe. Refused here rather than joined and opened, because
+            // some of these characters do not mean "invalid" to Windows so
+            // much as "something else entirely": a colon names an alternate
+            // data stream, and a station whose filename format carries one
+            // (the FTP plugin offers YYYY-MM-DDTHH:MM:SS, which is a fine
+            // name on the Unix servers it was written for) would otherwise
+            // have the agent reading a stream of the folder itself.
             return null;
         }
 
         try
         {
-            var info = new FileInfo(path);
+            var info = new FileInfo(Path.Combine(folderPath, fileName));
 
             if (!info.Exists)
             {
