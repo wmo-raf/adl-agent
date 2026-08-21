@@ -266,6 +266,15 @@ public sealed class FakeAdlServer : IDisposable
 
     private (int Status, object Body) Pair(RecordedRequest request)
     {
+        if (string.IsNullOrEmpty(request.Body))
+        {
+            return (400, new
+            {
+                code = "invalid_pairing_code",
+                detail = "That pairing code is not recognised. Ask your ADL administrator to issue a new one.",
+            });
+        }
+
         var code = JsonDocument.Parse(request.Body).RootElement
             .TryGetProperty("pairing_code", out var value)
             ? value.GetString()
@@ -303,6 +312,15 @@ public sealed class FakeAdlServer : IDisposable
 
     private (int Status, object Body) Heartbeat(RecordedRequest request)
     {
+        if (string.IsNullOrEmpty(request.Body))
+        {
+            return (400, new
+            {
+                code = "invalid_heartbeat",
+                detail = "Send an object describing the machine.",
+            });
+        }
+
         var beat = JsonSerializer.Deserialize<HeartbeatRequest>(request.Body, AgentJson.Options)
             ?? new HeartbeatRequest();
 
@@ -333,12 +351,25 @@ public sealed class FakeAdlServer : IDisposable
             .Where(key => key is not null)
             .ToDictionary(key => key!, key => request.Headers[key] ?? "", StringComparer.OrdinalIgnoreCase);
 
+        var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        // ADL is a Django application behind WSGI, and WSGI has no way to
+        // read a request body that arrives without a Content-Length: a
+        // chunked body reaches the view as nothing at all. HttpListener is
+        // more forgiving than that, and being more forgiving here would mean
+        // the tests pass while every POST the agent makes silently arrives
+        // empty at a real instance -- which is exactly what happened once.
+        if (request.ContentLength64 < 0)
+        {
+            body = "";
+        }
+
         return new RecordedRequest
         {
             Method = request.HttpMethod,
             Path = (request.Url?.AbsolutePath ?? "").Replace(ApiPath, "", StringComparison.Ordinal).TrimStart('/'),
             Headers = headers,
-            Body = await reader.ReadToEndAsync().ConfigureAwait(false),
+            Body = body,
         };
     }
 
@@ -349,6 +380,13 @@ public sealed class FakeAdlServer : IDisposable
         response.StatusCode = status;
         response.ContentType = "application/json";
         response.ContentLength64 = json.Length;
+
+        // Every call gets a fresh connection. Keep-alive would leave the
+        // agent holding a pooled socket to a server the test has since taken
+        // away, and the outage it is trying to simulate would arrive as a
+        // truncated answer instead of a refused connection -- a race, and one
+        // that only shows up on a loaded machine.
+        response.KeepAlive = false;
 
         await response.OutputStream.WriteAsync(json).ConfigureAwait(false);
 

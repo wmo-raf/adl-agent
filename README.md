@@ -105,6 +105,37 @@ Both talk to the already-running service over the `adl-agent` named pipe,
 using the same control protocol the tray app will use. The device appears in
 the ADL admin's fleet listing within a heartbeat.
 
+## Trying it against a local ADL
+
+With the [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin) dev
+stack running (`docker compose up`, admin on `http://127.0.0.1:8099`):
+
+```bash
+# 1. create a device in the ADL admin (Agent Devices -> Add) and issue its
+#    pairing code, or from the plugin repo:
+docker compose exec adl adl shell -c \
+  "from adl_agent_plugin.models import AgentDevice; \
+   d,_ = AgentDevice.objects.get_or_create(name='Dev laptop'); \
+   print(d.issue_pairing_code())"
+
+# 2. run the agent (loopback is the one place plain HTTP is allowed)
+dotnet run --project src/AdlAgent.Windows -- \
+  --Agent:AdlBaseUrl=http://127.0.0.1:8099 \
+  --Agent:StateDirectory=/tmp/adl-agent-state
+
+# 3. in another terminal
+dotnet bin/.../adl-agent.dll pair XXXX-XXXX
+dotnet bin/.../adl-agent.dll status
+```
+
+`status` should report `Paired` and, within a few seconds, `Fleet: online`.
+The device then shows its version, last-seen and clock skew in the admin's
+Agent Devices listing.
+
+On macOS and Linux pass `--Agent:StateDirectory`: the Windows head keeps state
+under the platform's common application data folder, which is not writable
+there.
+
 ## Known gaps
 
 - **The device token is stored unencrypted** in `state.json` under

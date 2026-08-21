@@ -14,10 +14,12 @@ namespace AdlAgent.Windows.Platform;
 public sealed class NamedPipeControlClient
 {
     private readonly TimeSpan _connectTimeout;
+    private readonly string _pipeName;
 
-    public NamedPipeControlClient(TimeSpan? connectTimeout = null)
+    public NamedPipeControlClient(TimeSpan? connectTimeout = null, string? pipeName = null)
     {
         _connectTimeout = connectTimeout ?? TimeSpan.FromSeconds(5);
+        _pipeName = pipeName ?? NamedPipeControlSurface.PipeName;
     }
 
     /// <summary>
@@ -31,7 +33,7 @@ public sealed class NamedPipeControlClient
         ControlRequest request, CancellationToken cancellationToken = default)
     {
         using var pipe = new NamedPipeClientStream(
-            ".", NamedPipeControlSurface.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            ".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
 
         await pipe.ConnectAsync((int)_connectTimeout.TotalMilliseconds, cancellationToken)
             .ConfigureAwait(false);

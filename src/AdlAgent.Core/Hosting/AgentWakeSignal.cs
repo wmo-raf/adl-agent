@@ -20,6 +20,18 @@ public sealed class AgentWakeSignal
     private readonly Lock _gate = new();
 
     private TaskCompletionSource _pending = NewSource();
+    private int _waiting;
+
+    /// <summary>
+    /// How many loops are currently asleep on this signal.
+    /// </summary>
+    /// <remarks>
+    /// A diagnostic, and the one thing that makes the cadence testable
+    /// without guessing: a test driving a fake clock has to know the loops
+    /// have reached their timers before it moves time, or it is asserting on
+    /// a race rather than on a cadence.
+    /// </remarks>
+    public int Waiting => Volatile.Read(ref _waiting);
 
     /// <summary>Wake every loop that is currently waiting.</summary>
     public void Set()
@@ -57,18 +69,28 @@ public sealed class AgentWakeSignal
         using var timing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var elapsed = Task.Delay(delay, time, timing.Token);
-        var finished = await Task.WhenAny(woken, elapsed).ConfigureAwait(false);
 
-        if (finished == woken)
+        Interlocked.Increment(ref _waiting);
+
+        try
         {
-            return true;
+            var finished = await Task.WhenAny(woken, elapsed).ConfigureAwait(false);
+
+            if (finished == woken)
+            {
+                return true;
+            }
+
+            // Awaited rather than dropped so that a cancelled wait throws
+            // here instead of quietly reading as "the interval passed".
+            await elapsed.ConfigureAwait(false);
+
+            return false;
         }
-
-        // Awaited rather than dropped so that a cancelled wait throws here
-        // instead of quietly reading as "the interval passed".
-        await elapsed.ConfigureAwait(false);
-
-        return false;
+        finally
+        {
+            Interlocked.Decrement(ref _waiting);
+        }
     }
 
     private static TaskCompletionSource NewSource() =>

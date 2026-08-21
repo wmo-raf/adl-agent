@@ -28,15 +28,23 @@ public sealed class NamedPipeControlSurface : IControlSurface
     public const string PipeName = "adl-agent";
 
     private readonly ILogger<NamedPipeControlSurface> _logger;
+    private readonly string _pipeName;
 
-    public NamedPipeControlSurface(ILogger<NamedPipeControlSurface> logger)
+    /// <param name="pipeName">
+    /// Overridable so a test can serve on a name of its own. A machine runs
+    /// one agent, so the default is the only name that is ever used in the
+    /// field.
+    /// </param>
+    public NamedPipeControlSurface(
+        ILogger<NamedPipeControlSurface> logger, string? pipeName = null)
     {
         _logger = logger;
+        _pipeName = pipeName ?? PipeName;
     }
 
     public async Task ServeAsync(ControlRequestHandler handler, CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Control surface listening on the {Pipe} pipe.", PipeName);
+        _logger.LogInformation("Control surface listening on the {Pipe} pipe.", _pipeName);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -46,7 +54,7 @@ public sealed class NamedPipeControlSurface : IControlSurface
             // a service running as LocalSystem be reached by the technician's
             // own logon session.
             using var pipe = new NamedPipeServerStream(
-                PipeName,
+                _pipeName,
                 PipeDirection.InOut,
                 maxNumberOfServerInstances: 1,
                 PipeTransmissionMode.Byte,

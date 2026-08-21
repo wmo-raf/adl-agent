@@ -106,6 +106,31 @@ public class PairingTests
     }
 
     [Fact]
+    public async Task Every_body_is_measured_before_it_is_sent()
+    {
+        await using var agent = new AgentHarness();
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var posts = agent.Server.Requests.Where(request => request.Method == "POST").ToList();
+
+        Assert.Equal(2, posts.Count);
+
+        // ADL is a Django application behind WSGI, which cannot read a
+        // request body that arrives without a Content-Length: a streamed body
+        // goes out chunked and reaches the view as nothing at all. The call
+        // then fails as though the agent had sent an empty request, and
+        // nothing in the answer says why.
+        Assert.All(posts, post =>
+        {
+            Assert.NotNull(post.Header("Content-Length"));
+            Assert.True(int.Parse(post.Header("Content-Length")!) > 0);
+            Assert.NotEmpty(post.Body);
+        });
+    }
+
+    [Fact]
     public async Task An_unpaired_machine_says_nothing_to_ADL()
     {
         await using var agent = new AgentHarness();

@@ -21,7 +21,12 @@ public static class AgentCli
         args.Length > 0 && args[0] is "pair" or "status";
 
     /// <summary>Run the verb. Returns the process exit code.</summary>
-    public static async Task<int> RunAsync(string[] args, TextWriter output)
+    /// <param name="client">
+    /// The way to reach the running agent. Supplied by tests so they never
+    /// depend on whether this machine happens to have an agent running.
+    /// </param>
+    public static async Task<int> RunAsync(
+        string[] args, TextWriter output, NamedPipeControlClient? client = null)
     {
         var request = args[0] switch
         {
@@ -45,7 +50,9 @@ public static class AgentCli
 
         try
         {
-            response = await new NamedPipeControlClient().AskAsync(request).ConfigureAwait(false);
+            client ??= new NamedPipeControlClient();
+
+            response = await client.AskAsync(request).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is TimeoutException or IOException)
         {

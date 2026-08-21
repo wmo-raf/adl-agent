@@ -11,25 +11,31 @@ namespace AdlAgent.Core.Tests;
 /// it before there is a tray.
 /// </summary>
 /// <remarks>
-/// One class, because they share the machine-wide pipe name and must not run
-/// at the same time as each other.
+/// Each test serves on a pipe name of its own, so the suite neither collides
+/// with itself nor cares whether the machine running it happens to have a
+/// real agent installed.
 /// </remarks>
-[Collection("named pipe")]
 public class ControlTransportTests
 {
+    // Short on purpose: a pipe name becomes a unix socket path on macOS and
+    // Linux, and that path has 104 characters to play with including the
+    // temp directory it lands in.
+    private readonly string _pipeName = $"adl-t{Guid.NewGuid():N}"[..13];
+
     [Fact]
     public async Task The_pipe_carries_a_command_to_the_agent_and_the_answer_back()
     {
         using var stopping = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
-        var surface = new NamedPipeControlSurface(NullLogger<NamedPipeControlSurface>.Instance);
+        var surface = new NamedPipeControlSurface(
+            NullLogger<NamedPipeControlSurface>.Instance, _pipeName);
 
         var serving = surface.ServeAsync(
             (request, _) => Task.FromResult(ControlResponse.Success(
                 new JsonObject { ["echoed"] = request.Command })),
             stopping.Token);
 
-        var response = await new NamedPipeControlClient(TimeSpan.FromSeconds(10))
+        var response = await new NamedPipeControlClient(TimeSpan.FromSeconds(10), _pipeName)
             .AskAsync(new ControlRequest(ControlProtocol.StatusCommand), stopping.Token);
 
         Assert.True(response.Ok);
@@ -44,7 +50,8 @@ public class ControlTransportTests
     {
         using var stopping = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
-        var surface = new NamedPipeControlSurface(NullLogger<NamedPipeControlSurface>.Instance);
+        var surface = new NamedPipeControlSurface(
+            NullLogger<NamedPipeControlSurface>.Instance, _pipeName);
         ControlRequest? received = null;
 
         var serving = surface.ServeAsync(
@@ -63,7 +70,8 @@ public class ControlTransportTests
             stopping.Token);
 
         var output = new StringWriter();
-        var exitCode = await AgentCli.RunAsync(["pair", "KX7M-93QA"], output);
+        var exitCode = await AgentCli.RunAsync(
+            ["pair", "KX7M-93QA"], output, new NamedPipeControlClient(TimeSpan.FromSeconds(10), _pipeName));
 
         Assert.Equal(0, exitCode);
         Assert.Equal(ControlProtocol.PairCommand, received!.Command);
@@ -79,10 +87,11 @@ public class ControlTransportTests
     {
         var output = new StringWriter();
 
-        // Nothing is serving the pipe: the service is not running, which is
+        // Nothing is serving this pipe: the service is not running, which is
         // the commonest thing to be wrong and deserves a sentence rather than
         // a stack trace.
-        var exitCode = await AgentCli.RunAsync(["status"], output);
+        var exitCode = await AgentCli.RunAsync(
+            ["status"], output, new NamedPipeControlClient(TimeSpan.FromSeconds(1), _pipeName));
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not answering", output.ToString());

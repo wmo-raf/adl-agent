@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using AdlAgent.Core.Serialization;
 using Microsoft.Extensions.Logging;
@@ -52,8 +53,7 @@ public sealed class AdlApiClient : IAdlApiClient
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "pair/")
         {
-            Content = JsonContent.Create(
-                new { pairing_code = pairingCode }, options: AgentJson.Options),
+            Content = Body(new { pairing_code = pairingCode }),
         };
 
         return SendAsync<PairResponse>(request, cancellationToken);
@@ -73,13 +73,32 @@ public sealed class AdlApiClient : IAdlApiClient
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "heartbeat/")
         {
-            Content = JsonContent.Create(heartbeat, options: AgentJson.Options),
+            Content = Body(heartbeat),
         };
 
         Authorize(request, token);
 
         return SendAsync<HeartbeatResponse>(request, cancellationToken);
     }
+
+    /// <summary>
+    /// One JSON body, measured before it is sent.
+    /// </summary>
+    /// <remarks>
+    /// Buffered into a string rather than streamed, purely so the request
+    /// carries a <c>Content-Length</c>. A streamed body goes out chunked, and
+    /// ADL is a Django application behind WSGI, where a chunked request body
+    /// is not merely awkward -- it never reaches the view at all. The call
+    /// then fails as though the agent had sent nothing, which is exactly what
+    /// it did, and nothing in the answer says so.
+    /// <para>
+    /// The bodies here are a pairing code and a heartbeat. Buffering them
+    /// costs nothing. When file uploads land they will need their own
+    /// arrangement, and this is the reason why.
+    /// </para>
+    /// </remarks>
+    private static StringContent Body<T>(T value) =>
+        new(JsonSerializer.Serialize(value, AgentJson.Options), Encoding.UTF8, "application/json");
 
     private static void Authorize(HttpRequestMessage request, string token)
     {

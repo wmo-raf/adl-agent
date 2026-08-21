@@ -111,19 +111,25 @@ public sealed class AgentHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Move the agent's clock on, having first let the loops get to their
-    /// timers.
+    /// Move the agent's clock on, once every loop is asleep on its timer.
     /// </summary>
     /// <remarks>
-    /// The small real-time yield is doing something specific: a loop that is
-    /// still between "beat sent" and "start waiting" has no timer for the
-    /// fake clock to fire, so advancing before it gets there would leave it
-    /// waiting the full interval from the new now. Waiting a moment first is
-    /// what makes the cadence assertions mean what they say.
+    /// The wait is the whole point. A loop still between "beat sent" and
+    /// "start waiting" has no timer for the fake clock to fire, so advancing
+    /// before it gets there would leave it waiting the full interval from the
+    /// new now -- and the test would fail, or worse pass, depending on how
+    /// busy the machine was. Waiting on the signal's own count makes the
+    /// cadence assertions mean what they say.
     /// </remarks>
-    public async Task AdvanceAsync(TimeSpan by)
+    public async Task AdvanceAsync(TimeSpan by, int loopsAtRest = 2)
     {
-        await Task.Delay(50).ConfigureAwait(false);
+        var wake = Services.GetRequiredService<AgentWakeSignal>();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+
+        while (wake.Waiting < loopsAtRest && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(5).ConfigureAwait(false);
+        }
 
         Time.Advance(by);
     }
