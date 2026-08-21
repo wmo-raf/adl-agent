@@ -31,6 +31,8 @@ public sealed class FakeAdlServer : IDisposable
     private readonly List<RecordedRequest> _requests = [];
     private readonly List<HeartbeatRequest> _heartbeats = [];
     private readonly HashSet<string> _pairingCodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(long StationLink, string Name), StagedFile> _ledger = [];
+    private readonly List<IReadOnlyList<ManifestEntry>> _manifestPages = [];
     private readonly Lock _gate = new();
     private Task _serving;
     private bool _unreachable;
@@ -134,6 +136,103 @@ public sealed class FakeAdlServer : IDisposable
 
     public IReadOnlyList<RecordedRequest> RequestsFor(string path) =>
         Requests.Where(request => request.Path == path).ToList();
+
+    /// <summary>
+    /// Every manifest page that arrived, in order, already parsed.
+    /// </summary>
+    /// <remarks>
+    /// Pages rather than entries, because how the agent divided its
+    /// candidates is itself behaviour under test: a cycle that offered nine
+    /// hundred files in one call would be refused by a real instance.
+    /// </remarks>
+    public IReadOnlyList<IReadOnlyList<ManifestEntry>> ManifestPages
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _manifestPages.ToList();
+            }
+        }
+    }
+
+    /// <summary>The file ledger: what this instance holds, per station link.</summary>
+    public IReadOnlyDictionary<(long StationLink, string Name), StagedFile> Ledger
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new Dictionary<(long, string), StagedFile>(_ledger);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Names this instance refuses to accept, however good the bytes are.
+    /// </summary>
+    /// <remarks>
+    /// A refusal an agent has to survive rather than a bug to reproduce: ADL
+    /// turns away a file whose hash no longer matches -- a vendor process
+    /// appended to it mid-upload -- and the contract is that the next cycle
+    /// simply offers it again. Removing a name here is that next cycle
+    /// succeeding.
+    /// </remarks>
+    public HashSet<string> RefusedUploads { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Station links this instance no longer recognises as the device's, and
+    /// station links an administrator has since switched off.
+    /// </summary>
+    /// <remarks>
+    /// Set independently of <see cref="Config"/> because the situation they
+    /// describe is precisely the one where the two disagree: the machine is
+    /// offering files from a configuration it cached before HQ moved the
+    /// station somewhere else.
+    /// </remarks>
+    public HashSet<long> StationLinksUnknownToAdl { get; } = [];
+
+    public HashSet<long> StationLinksDisabledInAdl { get; } = [];
+
+    /// <summary>
+    /// Filenames this instance will not read as a manifest entry.
+    /// </summary>
+    /// <remarks>
+    /// The reason is left unsaid on purpose: what matters is the shape of the
+    /// refusal, not which rule was broken. ADL refuses such a manifest whole
+    /// -- "an agent that had half its manifest accepted would believe the
+    /// other half was already held" -- and names the offending entries by
+    /// position, which is the only thing that lets an agent get the rest of
+    /// the page through.
+    /// </remarks>
+    public HashSet<string> UnreadableNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Entries this instance takes in one manifest, whatever it advertises.</summary>
+    /// <remarks>
+    /// Set below <see cref="AgentLimits.ManifestEntries"/> to be an instance
+    /// whose stated limit is a lie -- the case where an agent that believed
+    /// the number would be refused on every page of every cycle for ever.
+    /// </remarks>
+    public int? ManifestEntriesActuallyAccepted { get; set; }
+
+    /// <summary>What ADL holds for one station link and name, if anything.</summary>
+    public StagedFile? Held(long stationLinkId, string name) =>
+        Ledger.TryGetValue((stationLinkId, name), out var staged) ? staged : null;
+
+    /// <summary>Put a file in the ledger, as an earlier cycle would have left it.</summary>
+    public void Stage(long stationLinkId, string name, byte[] bytes)
+    {
+        lock (_gate)
+        {
+            _ledger[(stationLinkId, name)] = new StagedFile
+            {
+                StationLinkId = stationLinkId,
+                Name = name,
+                Bytes = bytes,
+                Hash = Sha256(bytes),
+            };
+        }
+    }
 
     /// <summary>Issue a pairing code, as an administrator would in the admin.</summary>
     public void AddPairingCode(string code)
@@ -261,6 +360,8 @@ public sealed class FakeAdlServer : IDisposable
         "pair/" => Pair(request),
         "sync/" => Authenticated(request, _ => (200, (object)Config)),
         "heartbeat/" => Authenticated(request, Heartbeat),
+        "manifest/" => Authenticated(request, Manifest),
+        "files/" => Authenticated(request, Upload),
         _ => (404, new { code = "not_found", detail = $"No endpoint at {request.Path}." }),
     };
 
@@ -343,15 +444,210 @@ public sealed class FakeAdlServer : IDisposable
         });
     }
 
-    private async Task<RecordedRequest> ReadAsync(HttpListenerRequest request)
+    private (int Status, object Body) Manifest(RecordedRequest request)
     {
-        using var reader = new StreamReader(request.InputStream, Encoding.UTF8);
+        ManifestRequest? offered;
 
+        try
+        {
+            offered = JsonSerializer.Deserialize<ManifestRequest>(request.Body, AgentJson.Options);
+        }
+        catch (JsonException)
+        {
+            offered = null;
+        }
+
+        if (offered is null)
+        {
+            return (400, new { code = "invalid_body", detail = "Send an object with a \"files\" list." });
+        }
+
+        var unreadable = offered.Files
+            .Select((entry, index) => (entry, index))
+            .Where(offer => UnreadableNames.Contains(offer.entry.Name))
+            .Select(offer => new
+            {
+                index = offer.index,
+                detail = $"{offer.entry.Name} could not be read as a manifest entry.",
+            })
+            .ToList();
+
+        if (unreadable.Count > 0)
+        {
+            // All or nothing, and by position -- exactly as the plugin's
+            // parse_entries does it.
+            return (400, new
+            {
+                code = "invalid_entry",
+                detail = $"{unreadable.Count} of the files offered could not be read.",
+                errors = unreadable,
+            });
+        }
+
+        if (offered.Files.Count > (ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries))
+        {
+            // Refused, never truncated: an agent told about the first five
+            // hundred of its files would take the silence about the rest for
+            // "already held" and never offer them again.
+            return (400, new
+            {
+                code = "manifest_too_large",
+                detail = "Offer at most "
+                    + (ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries)
+                    + " files per manifest, in pages.",
+                limit = ManifestEntriesActuallyAccepted ?? Config.Limits.ManifestEntries,
+            });
+        }
+
+        lock (_gate)
+        {
+            _manifestPages.Add(offered.Files.ToList());
+        }
+
+        var links = Config.Connections
+            .SelectMany(connection => connection.StationLinks)
+            .ToDictionary(link => link.Id);
+
+        var requested = new List<RequestedFile>();
+        var unknown = new List<long>();
+        var disabled = new List<long>();
+
+        foreach (var entry in offered.Files)
+        {
+            if (StationLinksUnknownToAdl.Contains(entry.StationLinkId) ||
+                !links.TryGetValue(entry.StationLinkId, out var link))
+            {
+                Remember(unknown, entry.StationLinkId);
+            }
+            else if (!link.Admin.Enabled || StationLinksDisabledInAdl.Contains(entry.StationLinkId))
+            {
+                Remember(disabled, entry.StationLinkId);
+            }
+            else if (Held(entry.StationLinkId, entry.Name)?.Hash != entry.Hash)
+            {
+                requested.Add(new RequestedFile
+                {
+                    StationLinkId = entry.StationLinkId,
+                    Name = entry.Name,
+                    Hash = entry.Hash,
+                });
+            }
+        }
+
+        return (200, new ManifestResponse
+        {
+            ConfigVersion = Config.ConfigVersion,
+            Limits = Config.Limits,
+            Requested = requested,
+            UnknownStationLinks = unknown,
+            DisabledStationLinks = disabled,
+        });
+    }
+
+    private (int Status, object Body) Upload(RecordedRequest request)
+    {
+        var form = request.Form;
+
+        if (form?.File is null)
+        {
+            return (400, new { code = "file_missing", detail = "Attach the file itself as \"file\"." });
+        }
+
+        var name = form.Field("name") ?? "";
+        var declaredHash = form.Field("hash") ?? "";
+        var declaredSize = long.TryParse(form.Field("size"), out var size) ? size : -1;
+        var stationLinkId = long.TryParse(form.Field("station_link_id"), out var id) ? id : 0;
+
+        if (form.Field("mtime") is null or "")
+        {
+            return (400, new { code = "invalid_entry", detail = "Missing: mtime." });
+        }
+
+        if (form.File.LongLength > Config.Limits.FileBytes)
+        {
+            return (413, new
+            {
+                code = "file_too_large",
+                detail = $"Files must be at most {Config.Limits.FileBytes} bytes.",
+                limit = Config.Limits.FileBytes,
+            });
+        }
+
+        if (declaredSize != form.File.LongLength)
+        {
+            return (400, new
+            {
+                code = "size_mismatch",
+                detail = $"The file is {form.File.LongLength} bytes, not the {declaredSize} it was offered as.",
+            });
+        }
+
+        // The check that makes this a seam worth testing against: ADL keeps
+        // nothing it cannot describe truthfully, so the bytes are hashed here
+        // rather than taken on the agent's word.
+        var actualHash = Sha256(form.File);
+
+        if (actualHash != declaredHash || RefusedUploads.Contains(name))
+        {
+            return (400, new
+            {
+                code = "hash_mismatch",
+                detail = "The file does not hash to what it was offered as. Offer it again next cycle.",
+            });
+        }
+
+        StagedFile staged;
+
+        lock (_gate)
+        {
+            staged = new StagedFile
+            {
+                StationLinkId = stationLinkId,
+                Name = name,
+                Bytes = form.File,
+                Hash = actualHash,
+            };
+
+            // In place: a file that grew keeps one ledger row, which is what
+            // makes the next manifest say "unchanged" rather than offering
+            // both versions forever.
+            _ledger[(stationLinkId, name)] = staged;
+        }
+
+        return (201, new UploadResponse
+        {
+            StationLinkId = stationLinkId,
+            Name = name,
+            Size = staged.Bytes.LongLength,
+            Hash = actualHash,
+            Status = "received",
+            ReceivedAt = ServerTime,
+            ConfigVersion = Config.ConfigVersion,
+        });
+    }
+
+    private static void Remember(List<long> ids, long stationLinkId)
+    {
+        if (!ids.Contains(stationLinkId))
+        {
+            ids.Add(stationLinkId);
+        }
+    }
+
+    private static string Sha256(byte[] bytes) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+
+    private static async Task<RecordedRequest> ReadAsync(HttpListenerRequest request)
+    {
         var headers = request.Headers.AllKeys
             .Where(key => key is not null)
             .ToDictionary(key => key!, key => request.Headers[key] ?? "", StringComparer.OrdinalIgnoreCase);
 
-        var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+
+        await request.InputStream.CopyToAsync(buffer).ConfigureAwait(false);
+
+        var raw = buffer.ToArray();
 
         // ADL is a Django application behind WSGI, and WSGI has no way to
         // read a request body that arrives without a Content-Length: a
@@ -361,15 +657,19 @@ public sealed class FakeAdlServer : IDisposable
         // empty at a real instance -- which is exactly what happened once.
         if (request.ContentLength64 < 0)
         {
-            body = "";
+            raw = [];
         }
+
+        var form = MultipartForm.Parse(request.ContentType, raw);
 
         return new RecordedRequest
         {
             Method = request.HttpMethod,
             Path = (request.Url?.AbsolutePath ?? "").Replace(ApiPath, "", StringComparison.Ordinal).TrimStart('/'),
             Headers = headers,
-            Body = body,
+            Body = form is null ? Encoding.UTF8.GetString(raw) : "",
+            Form = form,
+            ContentLength = request.ContentLength64,
         };
     }
 
@@ -446,4 +746,15 @@ public sealed class FakeAdlServer : IDisposable
             },
         ],
     };
+}
+
+/// <summary>One file ADL holds, as the ledger and the staging store see it.</summary>
+public sealed record StagedFile
+{
+    public required long StationLinkId { get; init; }
+    public required string Name { get; init; }
+    public required byte[] Bytes { get; init; }
+    public required string Hash { get; init; }
+
+    public string Text => System.Text.Encoding.UTF8.GetString(Bytes);
 }

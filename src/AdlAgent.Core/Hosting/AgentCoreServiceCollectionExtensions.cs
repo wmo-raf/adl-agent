@@ -2,6 +2,7 @@ using System.Security.Authentication;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.State;
@@ -61,6 +62,9 @@ public static class AgentCoreServiceCollectionExtensions
 
         services.TryAddSingleton<AgentSession>();
         services.TryAddSingleton<ConfigurationService>();
+        services.TryAddSingleton<FileHashCache>();
+        services.TryAddSingleton<FolderScanner>();
+        services.TryAddSingleton<UploadCycle>();
         services.TryAddSingleton<AgentCadence>();
         services.TryAddSingleton<AgentWakeSignal>();
         services.TryAddSingleton<HeartbeatMonitor>();
@@ -73,7 +77,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<ICycleReportSource>(
             static provider => provider.GetRequiredService<CycleReportStore>());
 
-        services.AddHostedService<ConfigurationSyncLoop>();
+        services.AddHostedService<UploadCycleLoop>();
         services.AddHostedService<HeartbeatLoop>();
         services.AddHostedService<AgentControlService>();
 

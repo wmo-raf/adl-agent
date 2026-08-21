@@ -34,7 +34,7 @@ public class RevocationTests
 
         await agent.HeartbeatLoop.BeatAsync();
         await agent.Configuration.RefreshAsync();
-        await agent.SyncLoop.SyncAsync();
+        await agent.Cycle.RunAsync();
 
         // Not one more request: the machine has been told to stop, and
         // hammering an instance with calls that can only be refused is how a

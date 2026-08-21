@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -81,6 +82,51 @@ public sealed class AdlApiClient : IAdlApiClient
         return SendAsync<HeartbeatResponse>(request, cancellationToken);
     }
 
+    public Task<ManifestResponse> ManifestAsync(
+        string token, IReadOnlyList<ManifestEntry> files, CancellationToken cancellationToken = default)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "manifest/")
+        {
+            Content = Body(new ManifestRequest { Files = files }),
+        };
+
+        Authorize(request, token);
+
+        return SendAsync<ManifestResponse>(request, cancellationToken);
+    }
+
+    public async Task<UploadResponse> UploadFileAsync(
+        string token, ManifestEntry entry, string path, CancellationToken cancellationToken = default)
+    {
+        // Opened here rather than by the caller so that a file which vanished
+        // between the manifest and its turn to be sent fails as an I/O error
+        // on one file, with the stream closed on the way out either way.
+        await using var file = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 64 * 1024,
+            useAsync: true);
+
+        using var body = new MultipartFormDataContent
+        {
+            { new StringContent(entry.StationLinkId.ToString(CultureInfo.InvariantCulture)), "station_link_id" },
+            { new StringContent(entry.Name), "name" },
+            { new StringContent(entry.Size.ToString(CultureInfo.InvariantCulture)), "size" },
+            { new StringContent(entry.Mtime.ToString("O", CultureInfo.InvariantCulture)), "mtime" },
+            { new StringContent(entry.Hash), "hash" },
+            { new StreamContent(file), "file", entry.Name },
+        };
+
+        // Every part has a length it can state -- the strings trivially, the
+        // file because it is seekable -- so the request goes out with a
+        // Content-Length. That is not a nicety: ADL is a Django application
+        // behind WSGI, where a chunked request body reaches the view as
+        // nothing at all.
+        var request = new HttpRequestMessage(HttpMethod.Post, "files/") { Content = body };
+
+        Authorize(request, token);
+
+        return await SendAsync<UploadResponse>(request, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// One JSON body, measured before it is sent.
     /// </summary>
@@ -92,9 +138,10 @@ public sealed class AdlApiClient : IAdlApiClient
     /// then fails as though the agent had sent nothing, which is exactly what
     /// it did, and nothing in the answer says so.
     /// <para>
-    /// The bodies here are a pairing code and a heartbeat. Buffering them
-    /// costs nothing. When file uploads land they will need their own
-    /// arrangement, and this is the reason why.
+    /// The bodies here are a pairing code, a heartbeat and a manifest page.
+    /// Buffering them costs nothing. A file upload cannot be buffered at all,
+    /// and states its own length instead -- see
+    /// <see cref="UploadFileAsync"/>.
     /// </para>
     /// </remarks>
     private static StringContent Body<T>(T value) =>
@@ -175,7 +222,7 @@ public sealed class AdlApiClient : IAdlApiClient
     private async Task<AdlRequestException> ReadFailureAsync(
         HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var (code, detail) = await ReadErrorEnvelopeAsync(response, cancellationToken)
+        var (code, detail, rejected) = await ReadErrorEnvelopeAsync(response, cancellationToken)
             .ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -186,7 +233,7 @@ public sealed class AdlApiClient : IAdlApiClient
             return new DeviceRevokedException(code, detail);
         }
 
-        return new AdlRequestException(response.StatusCode, code, detail);
+        return new AdlRequestException(response.StatusCode, code, detail, rejected);
     }
 
     /// <summary>
@@ -197,11 +244,12 @@ public sealed class AdlApiClient : IAdlApiClient
     /// a reverse proxy in front of ADL is an HTML page, and the agent still
     /// has to say something a technician can act on.
     /// </remarks>
-    private static async Task<(string Code, string Detail)> ReadErrorEnvelopeAsync(
-        HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<(string Code, string Detail, IReadOnlyList<RejectedEntry> Rejected)>
+        ReadErrorEnvelopeAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var fallback = ($"http_{(int)response.StatusCode}",
-            $"ADL answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+            $"ADL answered {(int)response.StatusCode} {response.ReasonPhrase}.",
+            (IReadOnlyList<RejectedEntry>)[]);
 
         try
         {
@@ -216,7 +264,8 @@ public sealed class AdlApiClient : IAdlApiClient
 
             return (
                 string.IsNullOrWhiteSpace(envelope.Code) ? fallback.Item1 : envelope.Code,
-                envelope.Detail);
+                envelope.Detail,
+                envelope.Errors);
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
@@ -228,5 +277,8 @@ public sealed class AdlApiClient : IAdlApiClient
     {
         public string Code { get; init; } = "";
         public string Detail { get; init; } = "";
+
+        /// <summary>Present when ADL refused a batch and said which entries.</summary>
+        public IReadOnlyList<RejectedEntry> Errors { get; init; } = [];
     }
 }

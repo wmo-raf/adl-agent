@@ -10,7 +10,21 @@ public sealed record RecordedRequest
 
     public required IReadOnlyDictionary<string, string> Headers { get; init; }
 
+    /// <summary>The body as text, for the JSON endpoints. Empty for an upload.</summary>
     public required string Body { get; init; }
+
+    /// <summary>The form an upload arrived as, or <c>null</c> for every other call.</summary>
+    public MultipartForm? Form { get; init; }
+
+    /// <summary>
+    /// What the request said its body was, or <c>-1</c> when it said nothing.
+    /// </summary>
+    /// <remarks>
+    /// Recorded because a body with no declared length is the failure this
+    /// agent has already shipped once: ADL is a Django application behind
+    /// WSGI, and a chunked request body reaches the view as nothing at all.
+    /// </remarks>
+    public long ContentLength { get; init; } = -1;
 
     public string? Header(string name) =>
         Headers.TryGetValue(name, out var value) ? value : null;

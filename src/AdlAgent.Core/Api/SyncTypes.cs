@@ -116,11 +116,34 @@ public sealed record StationLinkAppConfig
     public TimeSpan StabilityWindow => TimeSpan.FromSeconds(StabilityWindowSeconds);
 }
 
-/// <summary>How the agent finds a station's files. ADL's vocabulary, verbatim.</summary>
+/// <summary>
+/// How the agent finds a station's files. ADL's vocabulary, verbatim.
+/// </summary>
+/// <remarks>
+/// These are the values ADL stores and sends, not a spelling chosen here:
+/// the plugin's <c>AgentListingStrategy</c> is a Django <c>TextChoices</c>
+/// whose stored form is lower case, and the label an administrator sees in
+/// the admin ("Enumerate — scan the folder...") is a different string
+/// entirely. Getting this wrong is not a cosmetic mistake: a link whose
+/// strategy the agent does not recognise is one it will not scan, and a
+/// fleet would go quiet everywhere at once.
+/// </remarks>
 public static class ListingStrategies
 {
-    public const string Enumerate = "ENUMERATE";
-    public const string DirectFetch = "DIRECT_FETCH";
+    public const string Enumerate = "enumerate";
+    public const string DirectFetch = "direct_fetch";
+
+    /// <summary>
+    /// True when this station's files are found by walking its folder.
+    /// </summary>
+    /// <remarks>
+    /// Case is ignored deliberately. The cost of being wrong is a station
+    /// that silently collects nothing, and there is no reading of
+    /// "ENUMERATE" from an ADL instance that could mean anything else.
+    /// </remarks>
+    public static bool IsEnumerate(string? strategy) =>
+        string.IsNullOrWhiteSpace(strategy) ||
+        string.Equals(strategy, Enumerate, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record StationLinkAdminConfig
