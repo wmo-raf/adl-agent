@@ -1,5 +1,4 @@
 using AdlAgent.Core.Hosting;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace AdlAgent.Core.Configuration;
@@ -20,12 +19,10 @@ namespace AdlAgent.Core.Configuration;
 /// heartbeat has to survive to report.
 /// </para>
 /// </remarks>
-public sealed class ConfigurationSyncLoop : BackgroundService
+public sealed class ConfigurationSyncLoop : AgentLoop
 {
     private readonly ConfigurationService _configuration;
     private readonly AgentCadence _cadence;
-    private readonly AgentWakeSignal _wake;
-    private readonly TimeProvider _time;
     private readonly ILogger<ConfigurationSyncLoop> _logger;
 
     public ConfigurationSyncLoop(
@@ -34,31 +31,17 @@ public sealed class ConfigurationSyncLoop : BackgroundService
         AgentWakeSignal wake,
         TimeProvider time,
         ILogger<ConfigurationSyncLoop> logger)
+        : base(wake, time)
     {
         _configuration = configuration;
         _cadence = cadence;
-        _wake = wake;
-        _time = time;
         _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            await SyncAsync(stoppingToken).ConfigureAwait(false);
+    protected override TimeSpan Interval => _cadence.CheckInterval;
 
-            try
-            {
-                await _wake.WaitAsync(_cadence.CheckInterval, _time, stoppingToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-        }
-    }
+    protected override Task RunOnceAsync(CancellationToken cancellationToken) =>
+        SyncAsync(cancellationToken);
 
     /// <summary>One pass. Never throws, for the same reason the heartbeat does not.</summary>
     public async Task SyncAsync(CancellationToken cancellationToken = default)
@@ -71,8 +54,8 @@ public sealed class ConfigurationSyncLoop : BackgroundService
             if (configuration is not null && !configuration.FromCache)
             {
                 _cadence.Adopt(
-                    configuration.Sync.Device.HeartbeatIntervalMinutes,
-                    configuration.Sync.Device.CheckIntervalMinutes);
+                    heartbeatMinutes: configuration.HeartbeatIntervalMinutes,
+                    checkMinutes: configuration.CheckIntervalMinutes);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

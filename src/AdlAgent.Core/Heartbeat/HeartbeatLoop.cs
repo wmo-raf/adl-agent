@@ -24,8 +24,15 @@ namespace AdlAgent.Core.Heartbeat;
 /// machine that is off, which is the one lie this agent must never tell.
 /// </para>
 /// </remarks>
-public sealed class HeartbeatLoop : BackgroundService
+public sealed class HeartbeatLoop : AgentLoop
 {
+    /// <summary>
+    /// The skew worth saying something about locally. ADL raises its own
+    /// advisory at the same distance; this is the half the person standing at
+    /// the machine can act on.
+    /// </summary>
+    private const int WorryingClockSkewSeconds = 300;
+
     private readonly IAdlApiClient _client;
     private readonly AgentSession _session;
     private readonly ConfigurationService _configuration;
@@ -33,7 +40,6 @@ public sealed class HeartbeatLoop : BackgroundService
     private readonly VolumeSpaceReader _volumes;
     private readonly HeartbeatMonitor _monitor;
     private readonly AgentCadence _cadence;
-    private readonly AgentWakeSignal _wake;
     private readonly IHostLifecycle _host;
     private readonly TimeProvider _time;
     private readonly ILogger<HeartbeatLoop> _logger;
@@ -50,6 +56,7 @@ public sealed class HeartbeatLoop : BackgroundService
         IHostLifecycle host,
         TimeProvider time,
         ILogger<HeartbeatLoop> logger)
+        : base(wake, time)
     {
         _client = client;
         _session = session;
@@ -58,29 +65,15 @@ public sealed class HeartbeatLoop : BackgroundService
         _volumes = volumes;
         _monitor = monitor;
         _cadence = cadence;
-        _wake = wake;
         _host = host;
         _time = time;
         _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            await BeatAsync(stoppingToken).ConfigureAwait(false);
+    protected override TimeSpan Interval => _cadence.HeartbeatInterval;
 
-            try
-            {
-                await _wake.WaitAsync(_cadence.HeartbeatInterval, _time, stoppingToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-        }
-    }
+    protected override Task RunOnceAsync(CancellationToken cancellationToken) =>
+        BeatAsync(cancellationToken);
 
     /// <summary>
     /// Send one beat. Never throws; a failure is a fact about this machine's
@@ -106,9 +99,11 @@ public sealed class HeartbeatLoop : BackgroundService
                 .ConfigureAwait(false);
 
             _monitor.RecordSuccess(response, sentAt);
-            _cadence.Adopt(response.HeartbeatIntervalMinutes, response.CheckIntervalMinutes);
+            _cadence.Adopt(
+                heartbeatMinutes: response.HeartbeatIntervalMinutes,
+                checkMinutes: response.CheckIntervalMinutes);
 
-            if (response.ClockSkewSeconds is { } skew && Math.Abs(skew) >= 300)
+            if (response.ClockSkewSeconds is { } skew && Math.Abs(skew) >= WorryingClockSkewSeconds)
             {
                 _logger.LogWarning(
                     "This machine's clock is {Skew} seconds away from ADL's. File windows are measured against it, so fix the clock.",

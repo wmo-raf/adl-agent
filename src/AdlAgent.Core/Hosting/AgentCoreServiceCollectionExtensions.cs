@@ -1,3 +1,4 @@
+using System.Security.Authentication;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
@@ -39,12 +40,20 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
 
         services.AddHttpClient(AdlApiClient.HttpClientName, static (provider, http) =>
-        {
-            var options = provider.GetRequiredService<IOptions<AgentOptions>>().Value;
+            {
+                var options = provider.GetRequiredService<IOptions<AgentOptions>>().Value;
 
-            http.BaseAddress = options.ResolveApiBaseAddress();
-            http.Timeout = options.RequestTimeout;
-        });
+                http.BaseAddress = options.ResolveApiBaseAddress();
+                http.Timeout = options.RequestTimeout;
+            })
+            .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+            {
+                // The floor the upload endpoint promises. Stated rather than
+                // left to the machine's defaults, because the machines this
+                // runs on are old -- Server 2016 is the tested floor and 2012
+                // is out there -- and their defaults are older still.
+                SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+            });
 
         services.TryAddSingleton<IAdlApiClient, AdlApiClient>();
 

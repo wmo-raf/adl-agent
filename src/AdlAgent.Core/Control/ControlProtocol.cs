@@ -22,6 +22,18 @@ namespace AdlAgent.Core.Control;
 /// </remarks>
 public static class ControlProtocol
 {
+    /// <summary>
+    /// The longest line either end will read.
+    /// </summary>
+    /// <remarks>
+    /// A cap because the control surface serves one client at a time: a local
+    /// process that connects and then never sends a newline would otherwise
+    /// grow a buffer without limit and hold the only slot, and the technician
+    /// would find a tray that never answers on a service that is working
+    /// perfectly. Far larger than any real message.
+    /// </remarks>
+    public const int MaxMessageBytes = 64 * 1024;
+
     /// <summary>Ask what the agent is doing. No payload.</summary>
     public const string StatusCommand = "status";
 
@@ -55,6 +67,30 @@ public static class ControlProtocol
 
         return JsonSerializer.Deserialize<ControlResponse>(line, AgentJson.Options);
     }
+
+    /// <summary>
+    /// Say one thing and wait for the answer -- the client half of the
+    /// conversation, in one call.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in either head because both of them need it and it is
+    /// the same code: the tray, the Linux CLI, and the <c>adl-agent pair</c>
+    /// verb are three clients of one protocol, and a second implementation is
+    /// a second thing that can drift.
+    /// </remarks>
+    public static async Task<ControlResponse> AskAsync(
+        Stream stream, ControlRequest request, CancellationToken cancellationToken = default)
+    {
+        await WriteRequestAsync(stream, request, cancellationToken).ConfigureAwait(false);
+
+        var response = await ReadResponseAsync(stream, cancellationToken).ConfigureAwait(false);
+
+        return response ?? Failure(
+            "no_answer", "The agent closed the connection without answering.");
+    }
+
+    private static ControlResponse Failure(string error, string detail) =>
+        ControlResponse.Failure(error, detail);
 
     public static Task WriteRequestAsync(
         Stream stream, ControlRequest request, CancellationToken cancellationToken = default)
@@ -94,6 +130,12 @@ public static class ControlProtocol
             if (buffer[0] == (byte)'\n')
             {
                 return Encoding.UTF8.GetString(line.ToArray());
+            }
+
+            if (line.Length >= MaxMessageBytes)
+            {
+                throw new InvalidDataException(
+                    $"A control message longer than {MaxMessageBytes} bytes arrived without a newline.");
             }
 
             line.WriteByte(buffer[0]);

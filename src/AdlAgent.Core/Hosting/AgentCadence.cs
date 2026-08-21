@@ -24,7 +24,11 @@ public sealed class AgentCadence
     public static readonly TimeSpan DefaultHeartbeatInterval = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan DefaultCheckInterval = TimeSpan.FromMinutes(10);
 
-    private static readonly TimeSpan Shortest = TimeSpan.FromMinutes(1);
+    /// <summary>
+    /// The longest interval worth obeying. There is no lower bound to state:
+    /// the wire carries whole minutes, so the shortest number that is not
+    /// rejected outright is already a minute.
+    /// </summary>
     private static readonly TimeSpan Longest = TimeSpan.FromHours(24);
 
     private readonly ILogger<AgentCadence> _logger;
@@ -92,11 +96,11 @@ public sealed class AgentCadence
 
         var asked = TimeSpan.FromMinutes(minutes.Value);
 
-        if (asked < Shortest || asked > Longest)
+        if (asked > Longest)
         {
             _logger.LogWarning(
-                "ADL asked for an interval of {Asked} minutes, which is outside {Shortest}-{Longest}; keeping {Fallback}.",
-                minutes, Shortest, Longest, fallback);
+                "ADL asked for an interval of {Asked} minutes, which is longer than {Longest}; keeping {Fallback}.",
+                minutes, Longest, fallback);
 
             return fallback;
         }

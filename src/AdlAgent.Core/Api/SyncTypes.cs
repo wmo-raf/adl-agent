@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace AdlAgent.Core.Api;
 
 /// <summary>What ADL says about this machine. Never carries a credential.</summary>
@@ -104,6 +106,13 @@ public sealed record StationLinkAppConfig
     public int StabilityWindowSeconds { get; init; } = 60;
 
     /// <summary>The stability window as the readiness probe wants it.</summary>
+    /// <remarks>
+    /// Kept off the wire. This record is what the config endpoint will accept
+    /// when the app starts writing its tier back, and ADL refuses any key
+    /// outside the app-editable list -- a convenience property serialising
+    /// itself into the body would turn every write into a 400.
+    /// </remarks>
+    [JsonIgnore]
     public TimeSpan StabilityWindow => TimeSpan.FromSeconds(StabilityWindowSeconds);
 }
 

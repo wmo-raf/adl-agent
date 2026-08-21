@@ -51,33 +51,27 @@ public sealed class ConfigurationService
     }
 
     /// <summary>
+    /// What the agent is working from and when ADL was last reached, read at
+    /// one instant.
+    /// </summary>
+    public ConfigurationSnapshot Snapshot()
+    {
+        EnsureCacheLoaded();
+
+        lock (_gate)
+        {
+            return new ConfigurationSnapshot(_current, _lastSyncedAt);
+        }
+    }
+
+    /// <summary>
     /// The configuration in force, without going to the network. Null only
     /// on a machine that has never completed a sync.
     /// </summary>
-    public AgentConfiguration? Current
-    {
-        get
-        {
-            EnsureCacheLoaded();
-
-            lock (_gate)
-            {
-                return _current;
-            }
-        }
-    }
+    public AgentConfiguration? Current => Snapshot().Configuration;
 
     /// <summary>When ADL was last actually reached. Not when the cache was read.</summary>
-    public DateTimeOffset? LastSyncedAt
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _lastSyncedAt;
-            }
-        }
-    }
+    public DateTimeOffset? LastSyncedAt => Snapshot().LastSyncedAt;
 
     /// <summary>
     /// Ask ADL for this device's world; fall back to the cache if it cannot
@@ -204,3 +198,8 @@ public sealed class ConfigurationService
         return stale;
     }
 }
+
+/// <summary>What the agent is working from, as of one instant.</summary>
+public sealed record ConfigurationSnapshot(
+    AgentConfiguration? Configuration,
+    DateTimeOffset? LastSyncedAt);

@@ -37,13 +37,17 @@ public sealed class AgentOptions
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// The versioned agent surface, under ADL's plugin mount. Configurable
-    /// only so that a future contract version does not need a new release to
-    /// be pointed at.
+    /// The versioned agent surface, under ADL's plugin mount. Fixed: the
+    /// mount point is part of the contract, and a machine pointed at a
+    /// different one is misconfigured rather than differently configured.
     /// </summary>
-    public string ApiPath { get; set; } = "plugins/api/agent/v1/";
+    public const string ApiPath = "plugins/api/agent/v1/";
 
     /// <summary>The base address every call is made against.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// The configured URL is missing, unparseable, or plain HTTP to somewhere
+    /// other than this machine.
+    /// </exception>
     public Uri ResolveApiBaseAddress()
     {
         if (string.IsNullOrWhiteSpace(AdlBaseUrl))
@@ -52,8 +56,23 @@ public sealed class AgentOptions
                 "No ADL URL is configured. Set Agent:AdlBaseUrl to the address of the ADL instance this machine sends to.");
         }
 
-        var root = AdlBaseUrl.TrimEnd('/') + "/";
+        if (!Uri.TryCreate(AdlBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var root))
+        {
+            throw new InvalidOperationException(
+                $"Agent:AdlBaseUrl is not a URL: '{AdlBaseUrl}'.");
+        }
 
-        return new Uri(new Uri(root), ApiPath.TrimStart('/'));
+        if (root.Scheme != Uri.UriSchemeHttps && !root.IsLoopback)
+        {
+            // The whole product is one outbound HTTPS call carrying a bearer
+            // token and a country's observations. Refusing plain HTTP here is
+            // cheaper than discovering a fleet was configured without it.
+            // Loopback stays allowed, because that is a test fixture, not a
+            // network.
+            throw new InvalidOperationException(
+                $"Agent:AdlBaseUrl must be https, not '{root.Scheme}'. The device token travels on every call.");
+        }
+
+        return new Uri(root, ApiPath);
     }
 }

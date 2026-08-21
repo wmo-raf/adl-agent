@@ -39,43 +39,32 @@ public sealed class AgentSession
         _state = store.Load();
     }
 
-    public PairingState State
+    /// <summary>
+    /// Everything about this machine's standing, read at one instant.
+    /// </summary>
+    /// <remarks>
+    /// The whole answer under one lock, because the parts contradict each
+    /// other if they are read a moment apart: a status showing "unpaired"
+    /// beside a device name is a screen a technician would be right not to
+    /// believe.
+    /// </remarks>
+    public SessionSnapshot Snapshot()
     {
-        get
+        lock (_gate)
         {
-            lock (_gate)
-            {
-                if (string.IsNullOrEmpty(_state.Token))
-                {
-                    return PairingState.Unpaired;
-                }
+            var state = string.IsNullOrEmpty(_state.Token)
+                ? PairingState.Unpaired
+                : _state.RePairNeeded ? PairingState.RePairNeeded : PairingState.Paired;
 
-                return _state.RePairNeeded ? PairingState.RePairNeeded : PairingState.Paired;
-            }
+            return new SessionSnapshot(state, _state.Device, _state.PairedAt);
         }
     }
 
-    public DeviceSummary? Device
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _state.Device;
-            }
-        }
-    }
+    public PairingState State => Snapshot().State;
 
-    public DateTimeOffset? PairedAt
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _state.PairedAt;
-            }
-        }
-    }
+    public DeviceSummary? Device => Snapshot().Device;
+
+    public DateTimeOffset? PairedAt => Snapshot().PairedAt;
 
     /// <summary>
     /// The token to call ADL with, or <c>null</c> when this machine has no
@@ -182,3 +171,9 @@ public sealed class AgentSession
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+/// <summary>This machine's standing with ADL, as of one instant.</summary>
+public sealed record SessionSnapshot(
+    PairingState State,
+    DeviceSummary? Device,
+    DateTimeOffset? PairedAt);

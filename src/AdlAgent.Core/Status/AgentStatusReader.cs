@@ -31,29 +31,34 @@ public sealed class AgentStatusReader
 
     public AgentStatusSnapshot Read()
     {
-        var device = _session.Device;
-        var configuration = _configuration.Current;
-        var state = _session.State;
+        // Three reads, each internally consistent: what this machine's
+        // standing is, what it is working from, and how its reporting is
+        // going. Assembling the tray's picture from loose properties is what
+        // would let it show a machine as unpaired beside the name of the
+        // device it is paired to.
+        var session = _session.Snapshot();
+        var configuration = _configuration.Snapshot();
+        var heartbeat = _heartbeat.Snapshot();
 
         return new AgentStatusSnapshot
         {
             AgentVersion = Core.AgentVersion.Current,
             AdlUrl = _options.AdlBaseUrl,
-            PairingState = state.ToString(),
-            RePairNeeded = state == Pairing.PairingState.RePairNeeded,
-            DeviceId = device?.Id,
-            DeviceName = device?.Name,
-            PairedAt = _session.PairedAt,
-            LastSyncedAt = _configuration.LastSyncedAt,
-            ConfigFromCache = configuration?.FromCache ?? false,
-            ConfigVersion = configuration?.Version,
-            StationLinkCount = configuration?.StationLinks.Count() ?? 0,
-            LastHeartbeatAt = _heartbeat.LastSuccessAt,
-            FleetStatus = _heartbeat.FleetStatus,
-            ClockSkewSeconds = _heartbeat.ClockSkewSeconds,
+            PairingState = session.State.ToString(),
+            RePairNeeded = session.State == Pairing.PairingState.RePairNeeded,
+            DeviceId = session.Device?.Id,
+            DeviceName = session.Device?.Name,
+            PairedAt = session.PairedAt,
+            LastSyncedAt = configuration.LastSyncedAt,
+            ConfigFromCache = configuration.Configuration?.FromCache ?? false,
+            ConfigVersion = configuration.Configuration?.Version,
+            StationLinkCount = configuration.Configuration?.StationLinks.Count() ?? 0,
+            LastHeartbeatAt = heartbeat.LastSuccessAt,
+            FleetStatus = heartbeat.FleetStatus,
+            ClockSkewSeconds = heartbeat.ClockSkewSeconds,
             CheckIntervalMinutes = (int)_cadence.CheckInterval.TotalMinutes,
             HeartbeatIntervalMinutes = (int)_cadence.HeartbeatInterval.TotalMinutes,
-            LastError = _heartbeat.LastError,
+            LastError = heartbeat.LastError,
         };
     }
 }

@@ -76,8 +76,12 @@ variable, `Agent__AdlBaseUrl`):
 { "Agent": { "AdlBaseUrl": "https://adl.example.org" } }
 ```
 
-Run `adl-agent.exe` directly to run it as a console process, or install it as
-a service:
+It must be `https` — the device token travels on every call, and the agent
+refuses to start against plain HTTP to anywhere but this machine. TLS 1.2 is
+the floor.
+
+Run `adl-agent.exe` with no arguments to run it as a console process, or
+install it as a service:
 
 ```powershell
 sc.exe create "ADL Agent" binPath= "C:\Program Files\ADL Agent\adl-agent.exe" start= auto
@@ -89,23 +93,31 @@ without administrator rights, come with #282.)
 
 ### Pairing
 
-Until the tray app lands, pairing goes over the control surface directly —
-one JSON object per line on the `adl-agent` named pipe:
+Ask your ADL administrator to create the device in the admin and give you the
+pairing code, then, on the machine:
 
 ```powershell
-$pipe = New-Object System.IO.Pipes.NamedPipeClientStream '.', 'adl-agent', 'InOut'
-$pipe.Connect()
-$writer = New-Object System.IO.StreamWriter $pipe; $writer.AutoFlush = $true
-$reader = New-Object System.IO.StreamReader $pipe
-
-$writer.WriteLine('{"command":"pair","payload":{"pairing_code":"KX7M-93QA"}}')
-$reader.ReadLine()
-
-$writer.WriteLine('{"command":"status"}')
-$reader.ReadLine()
+adl-agent pair KX7M-93QA
+adl-agent status
 ```
 
-The device appears in the ADL admin's fleet listing within a heartbeat.
+Both talk to the already-running service over the `adl-agent` named pipe,
+using the same control protocol the tray app will use. The device appears in
+the ADL admin's fleet listing within a heartbeat.
+
+## Known gaps
+
+- **The device token is stored unencrypted** in `state.json` under
+  `%ProgramData%\ADL Agent`, with whatever ACL that folder inherits. Locking
+  the directory down belongs with the installer (#282); until then, treat any
+  local account on the machine as able to read it.
+- **The named pipe uses the default ACL**, which is enough for an
+  administrator running the agent interactively but not for a technician's
+  logon session reaching a service running as LocalSystem. The explicit ACL
+  lands with the tray (#281).
+- Pairing is not confirmed against ADL before `pair` reports success — the
+  token is stored and proven by the sync and heartbeat that follow within a
+  second or two, which `adl-agent status` then shows.
 
 ## Testing approach
 

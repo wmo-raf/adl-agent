@@ -28,4 +28,10 @@ public sealed record AgentConfiguration
     /// <summary>Every station link on this device, across all its connections.</summary>
     public IEnumerable<StationLinkConfig> StationLinks =>
         Sync.Connections.SelectMany(connection => connection.StationLinks);
+
+    /// <summary>How often ADL wants this machine to report that it is alive.</summary>
+    public int HeartbeatIntervalMinutes => Sync.Device.HeartbeatIntervalMinutes;
+
+    /// <summary>How often ADL wants this machine to look at its folders.</summary>
+    public int CheckIntervalMinutes => Sync.Device.CheckIntervalMinutes;
 }

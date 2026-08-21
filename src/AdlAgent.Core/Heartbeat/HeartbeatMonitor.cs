@@ -22,14 +22,24 @@ public sealed class HeartbeatMonitor
     private int? _clockSkewSeconds;
     private string? _lastError;
 
+    /// <summary>How the last beat went, read at one instant.</summary>
+    public HeartbeatSnapshot Snapshot()
+    {
+        lock (_gate)
+        {
+            return new HeartbeatSnapshot(
+                _lastAttemptAt, _lastSuccessAt, _fleetStatus, _clockSkewSeconds, _lastError);
+        }
+    }
+
     /// <summary>When a beat was last tried, whether or not it arrived.</summary>
-    public DateTimeOffset? LastAttemptAt => Read(() => _lastAttemptAt);
+    public DateTimeOffset? LastAttemptAt => Snapshot().LastAttemptAt;
 
     /// <summary>When ADL last answered a beat.</summary>
-    public DateTimeOffset? LastSuccessAt => Read(() => _lastSuccessAt);
+    public DateTimeOffset? LastSuccessAt => Snapshot().LastSuccessAt;
 
     /// <summary>ADL's own word for this device at that moment: online, degraded, offline.</summary>
-    public string? FleetStatus => Read(() => _fleetStatus);
+    public string? FleetStatus => Snapshot().FleetStatus;
 
     /// <summary>
     /// How far this machine's clock is from ADL's, as ADL measured it. Worth
@@ -37,10 +47,10 @@ public sealed class HeartbeatMonitor
     /// against this clock, so a skew is a quiet data-loss risk and the person
     /// standing here is the only one who can fix it.
     /// </summary>
-    public int? ClockSkewSeconds => Read(() => _clockSkewSeconds);
+    public int? ClockSkewSeconds => Snapshot().ClockSkewSeconds;
 
     /// <summary>Why the last beat did not arrive, if it did not.</summary>
-    public string? LastError => Read(() => _lastError);
+    public string? LastError => Snapshot().LastError;
 
     public void RecordSuccess(HeartbeatResponse response, DateTimeOffset at)
     {
@@ -62,12 +72,12 @@ public sealed class HeartbeatMonitor
             _lastError = error;
         }
     }
-
-    private T Read<T>(Func<T> read)
-    {
-        lock (_gate)
-        {
-            return read();
-        }
-    }
 }
+
+/// <summary>How the machine's own reporting is going, as of one instant.</summary>
+public sealed record HeartbeatSnapshot(
+    DateTimeOffset? LastAttemptAt,
+    DateTimeOffset? LastSuccessAt,
+    string? FleetStatus,
+    int? ClockSkewSeconds,
+    string? LastError);

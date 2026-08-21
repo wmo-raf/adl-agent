@@ -50,7 +50,13 @@ public sealed class AgentWakeSignal
             woken = _pending.Task;
         }
 
-        var elapsed = Task.Delay(delay, time, cancellationToken);
+        // The timer is cancelled on the way out, not abandoned. A loop woken
+        // early would otherwise leave a live timer behind for the rest of
+        // the interval, and this runs for months: one orphan per pairing is
+        // nothing, one per wake-up on a chatty tray is a leak.
+        using var timing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var elapsed = Task.Delay(delay, time, timing.Token);
         var finished = await Task.WhenAny(woken, elapsed).ConfigureAwait(false);
 
         if (finished == woken)

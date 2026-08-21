@@ -17,8 +17,10 @@ namespace AdlAgent.Core.State;
 /// re-paired by someone in the building. Keeping them apart means a bad
 /// write to the noisy one can never take the precious one with it.
 /// <para>
-/// Both are written to a temporary file and moved into place, so a crash
-/// mid-write leaves the previous contents rather than half of the new ones.
+/// Both are flushed to the disk under a temporary name and then moved into
+/// place, so a crash mid-write leaves the previous contents rather than half
+/// of the new ones. Country servers lose power; a token file that survives
+/// the outage as a truncated fragment is a machine somebody has to visit.
 /// </para>
 /// </remarks>
 public sealed class FileAgentStateStore : IAgentStateStore
@@ -28,7 +30,13 @@ public sealed class FileAgentStateStore : IAgentStateStore
 
     private readonly string _directory;
     private readonly ILogger<FileAgentStateStore> _logger;
-    private readonly Lock _writeLock = new();
+
+    /// <summary>
+    /// Held for reads as well as writes: a read that caught its own writer
+    /// mid-move would report the file as absent, and "absent" for the token
+    /// file means an unpaired machine.
+    /// </summary>
+    private readonly Lock _fileLock = new();
 
     public FileAgentStateStore(
         IOptions<AgentOptions> options,
@@ -60,12 +68,15 @@ public sealed class FileAgentStateStore : IAgentStateStore
 
         try
         {
-            if (!File.Exists(path))
+            lock (_fileLock)
             {
-                return null;
-            }
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
 
-            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), AgentJson.Options);
+                return JsonSerializer.Deserialize<T>(File.ReadAllText(path), AgentJson.Options);
+            }
         }
         catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -81,14 +92,24 @@ public sealed class FileAgentStateStore : IAgentStateStore
 
     private void Write<T>(string fileName, T value)
     {
-        lock (_writeLock)
+        lock (_fileLock)
         {
             Directory.CreateDirectory(_directory);
 
             var path = Path.Combine(_directory, fileName);
             var temporary = path + ".tmp";
 
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value, AgentJson.Options));
+            using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(file))
+            {
+                writer.Write(JsonSerializer.Serialize(value, AgentJson.Options));
+                writer.Flush();
+
+                // On the disk, not merely in the operating system's hands,
+                // before anything is moved over the file that is still good.
+                file.Flush(flushToDisk: true);
+            }
+
             File.Move(temporary, path, overwrite: true);
         }
     }

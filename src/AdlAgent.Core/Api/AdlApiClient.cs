@@ -88,6 +88,8 @@ public sealed class AdlApiClient : IAdlApiClient
 
     private async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        using var pending = request;
+
         request.Headers.TryAddWithoutValidation(VersionHeader, AgentVersion.Current);
 
         using var http = _clients.CreateClient(HttpClientName);
