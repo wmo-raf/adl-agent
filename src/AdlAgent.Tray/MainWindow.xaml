@@ -1,0 +1,258 @@
+<Window x:Class="AdlAgent.Tray.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ADL Agent"
+        Height="620" Width="900"
+        MinHeight="480" MinWidth="720"
+        WindowStartupLocation="CenterScreen"
+        Background="#F6F7F9">
+
+    <DockPanel LastChildFill="True" Margin="12">
+
+        <!-- The header: what this machine is, in one line, always visible. -->
+        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#DCE0E6" BorderThickness="1"
+                Padding="14,10" CornerRadius="4">
+            <StackPanel>
+                <TextBlock Text="{Binding Headline}" FontSize="14" TextWrapping="Wrap" />
+                <TextBlock Margin="0,4,0,0" Foreground="#5A6472" TextWrapping="Wrap">
+                    <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" />
+                    <Run Text="  ·  last heartbeat " /><Run Text="{Binding LastHeartbeat, Mode=OneWay}" />
+                    <Run Text="  ·  last synced " /><Run Text="{Binding LastSynced, Mode=OneWay}" />
+                    <Run Text="  ·  scans " /><Run Text="{Binding CheckInterval, Mode=OneWay}" />
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- The banner: only there when a person has something to do. -->
+        <Border DockPanel.Dock="Top" Margin="0,10,0,0" Background="#FFF4D6" BorderBrush="#E4C877"
+                BorderThickness="1" Padding="14,10" CornerRadius="4"
+                Visibility="{Binding HasAlert, Converter={StaticResource Visible}}">
+            <TextBlock Text="{Binding Alert}" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- The answer to the last button pressed. -->
+        <TextBlock DockPanel.Dock="Bottom" Margin="2,10,2,0" Foreground="#33475B"
+                   TextWrapping="Wrap" Text="{Binding Message}" />
+
+        <TabControl Margin="0,10,0,0" Background="White">
+
+            <!-- ============ Pairing (story 2) ============ -->
+            <TabItem Header="Pairing">
+                <StackPanel Margin="16" MaxWidth="560" HorizontalAlignment="Left">
+                    <TextBlock TextWrapping="Wrap" Foreground="#5A6472">
+                        Your ADL administrator creates this machine in the ADL admin and gives you a
+                        pairing code. Paste it here. Nothing else about ADL needs setting up on this
+                        machine, and no password is ever stored on it.
+                    </TextBlock>
+
+                    <TextBlock Style="{StaticResource Caption}" Text="Pairing code" />
+                    <TextBox Style="{StaticResource Entry}" FontFamily="Consolas" FontSize="16"
+                             Text="{Binding PairingCode, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <Button Content="Pair this machine" HorizontalAlignment="Left" Padding="14,6"
+                            Command="{Binding PairCommand}" />
+
+                    <TextBlock Style="{StaticResource Caption}" Text="This machine" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="State" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="Paired" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairedAt}" />
+                    </Grid>
+                </StackPanel>
+            </TabItem>
+
+            <!-- ============ Stations (stories 6, 7, 9) ============ -->
+            <TabItem Header="Stations">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" MinHeight="140" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <DataGrid Grid.Row="0" AutoGenerateColumns="False" IsReadOnly="True"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
+                              ItemsSource="{Binding Stations}"
+                              SelectedItem="{Binding SelectedStation, Mode=TwoWay}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Station" Width="150" Binding="{Binding StationName}" />
+                            <DataGridTextColumn Header="Connection" Width="130" Binding="{Binding ConnectionName}" />
+                            <DataGridTextColumn Header="Folder" Width="*" Binding="{Binding LocalFolderPath}" />
+                            <DataGridTextColumn Header="Pattern" Width="140" Binding="{Binding FilePattern}" />
+                            <DataGridTextColumn Header="Last cycle" Width="150" Binding="{Binding LastCycle}" />
+                            <DataGridTextColumn Header="Problem" Width="200" Binding="{Binding Error}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- The editor for whichever station is selected. -->
+                    <ScrollViewer Grid.Row="1" MaxHeight="260" VerticalScrollBarVisibility="Auto"
+                                  Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
+                        <StackPanel Margin="0,12,0,0" DataContext="{Binding SelectedStation}">
+
+                            <TextBlock Style="{StaticResource Caption}">
+                                <Run Text="{Binding StationName, Mode=OneWay}" />
+                                <Run Text=" — where this station's files are on this machine" />
+                            </TextBlock>
+
+                            <TextBlock Foreground="#5A6472" TextWrapping="Wrap" Margin="0,2,0,6">
+                                The decoder, the variable mappings and the collection start date stay in the
+                                ADL admin. What is set here is where the files are and how they are named.
+                            </TextBlock>
+
+                            <TextBlock Style="{StaticResource Field}" Text="Local folder path" />
+                            <TextBox Style="{StaticResource Entry}"
+                                     Text="{Binding LocalFolderPath, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Style="{StaticResource Field}" Text="File pattern" />
+                            <TextBox Style="{StaticResource Entry}"
+                                     Text="{Binding FilePattern, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <CheckBox Margin="0,6,0,4" Content="Files sit under dated sub-folders"
+                                      IsChecked="{Binding DirStructuredByDate, Mode=TwoWay}" />
+
+                            <StackPanel Visibility="{Binding DirStructuredByDate, Converter={StaticResource Visible}}">
+                                <TextBlock Foreground="#8A5A00" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    This version of the agent does not walk dated sub-folders. Until it does,
+                                    point the folder above at where the files actually are and clear this box.
+                                </TextBlock>
+
+                                <TextBlock Style="{StaticResource Field}" Text="How far down the tree" />
+                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="200"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding DateGranularity, Mode=TwoWay}">
+                                    <ComboBoxItem Tag="year" Content="Year" />
+                                    <ComboBoxItem Tag="month" Content="Month" />
+                                    <ComboBoxItem Tag="day" Content="Day" />
+                                    <ComboBoxItem Tag="hour" Content="Hour" />
+                                </ComboBox>
+
+                                <TextBlock Style="{StaticResource Field}" Text="Month folder format" />
+                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding MonthDirFormat, Mode=TwoWay}">
+                                    <ComboBoxItem Tag="m" Content="01 to 12" />
+                                    <ComboBoxItem Tag="n" Content="1 to 12" />
+                                    <ComboBoxItem Tag="M" Content="Jan" />
+                                    <ComboBoxItem Tag="b" Content="jan" />
+                                    <ComboBoxItem Tag="F" Content="January" />
+                                    <ComboBoxItem Tag="f" Content="january" />
+                                </ComboBox>
+                            </StackPanel>
+
+                            <TextBlock Style="{StaticResource Field}" Text="How files are found" />
+                            <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
+                                      SelectedValuePath="Tag"
+                                      SelectedValue="{Binding ListingStrategy, Mode=TwoWay}">
+                                <ComboBoxItem Tag="enumerate" Content="Scan the folder (default)" />
+                                <ComboBoxItem Tag="direct_fetch" Content="Build the filenames (Direct Fetch)" />
+                            </ComboBox>
+
+                            <!-- Only for the stations that build their filenames. -->
+                            <StackPanel Visibility="{Binding IsDirectFetch, Converter={StaticResource Visible}}">
+                                <TextBlock Style="{StaticResource Field}" Text="Filename prefix" />
+                                <TextBox Style="{StaticResource Entry}"
+                                         Text="{Binding DirectFetchPrefix, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource Field}" Text="File interval (minutes)" />
+                                <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
+                                         Text="{Binding DirectFetchIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource Field}" Text="Filename datetime format" />
+                                <TextBox Style="{StaticResource Entry}" Width="240" HorizontalAlignment="Left"
+                                         Text="{Binding DirectFetchDatetimeFormat, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource Field}" Text="Filename timezone" />
+                                <TextBox Style="{StaticResource Entry}" Width="240" HorizontalAlignment="Left"
+                                         Text="{Binding DirectFetchDatetimeTimezone, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Style="{StaticResource Field}" Text="File extension" />
+                                <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
+                                         Text="{Binding DirectFetchFileExtension, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+
+                            <TextBlock Style="{StaticResource Field}" Text="Leave a file alone for (seconds) after it was last written" />
+                            <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
+                                     Text="{Binding StabilityWindowSeconds, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <!-- Story 7: the count, live, before anything is saved. -->
+                            <Border Background="#EEF3F8" BorderBrush="#CFD9E4" BorderThickness="1"
+                                    Padding="10,7" CornerRadius="3" Margin="0,4,0,8">
+                                <TextBlock Text="{Binding MatchSummary}" TextWrapping="Wrap" />
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                                Margin="0,8,0,0"
+                                Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
+                        <Button Content="Save to ADL" Padding="14,6"
+                                Command="{Binding SaveStationCommand}" />
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ============ Status (stories 23, 27) ============ -->
+            <TabItem Header="Status">
+                <Grid Margin="16" HorizontalAlignment="Left">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" MinWidth="320" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Pairing" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding FleetStatus}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Last heartbeat" />
+                    <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastHeartbeat}" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Last synced" />
+                    <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
+                    <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
+                    <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
+                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
+                    <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
+                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                    <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
+
+                    <Button Grid.Row="9" Grid.Column="1" Content="Refresh now" Padding="14,6"
+                            HorizontalAlignment="Left" Margin="0,14,0,0"
+                            Command="{Binding RefreshCommand}" />
+                </Grid>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>

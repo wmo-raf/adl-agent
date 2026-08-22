@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace AdlAgent.Core.Api;
 
 /// <summary>
@@ -23,6 +25,32 @@ public interface IAdlApiClient
     /// <exception cref="DeviceRevokedException">The token is no longer good.</exception>
     /// <exception cref="AdlUnreachableException">ADL could not be reached.</exception>
     Task<SyncResponse> SyncAsync(string token, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Change one station link's app-tier settings.
+    /// </summary>
+    /// <remarks>
+    /// The one call the agent makes on someone else's behalf: a technician
+    /// standing at the machine says where this station's files are and how
+    /// they are named, and it is written to ADL rather than kept here.
+    /// <para>
+    /// The changes travel as they were given rather than as a filled-in
+    /// record. Sending a whole <see cref="StationLinkAppConfig"/> would make
+    /// every write assert a value for every field, including the ones a newer
+    /// ADL knows about and this version of the agent does not -- and each
+    /// such write would quietly reset them to this agent's defaults. Naming
+    /// only what changed is also what lets ADL answer
+    /// <c>read_only_fields</c> with the field the person actually typed.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="DeviceRevokedException">The token is no longer good.</exception>
+    /// <exception cref="AdlRequestException">ADL would not write those settings.</exception>
+    /// <exception cref="AdlUnreachableException">ADL could not be reached.</exception>
+    Task<ConfigWriteResponse> UpdateStationLinkConfigAsync(
+        string token,
+        long stationLinkId,
+        JsonObject changes,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Say that this machine is alive, and how it is doing.</summary>
     /// <exception cref="DeviceRevokedException">The token is no longer good.</exception>

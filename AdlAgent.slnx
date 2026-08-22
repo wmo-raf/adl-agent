@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AdlAgent.Core/AdlAgent.Core.csproj" />
+    <Project Path="src/AdlAgent.Tray/AdlAgent.Tray.csproj" />
     <Project Path="src/AdlAgent.Windows/AdlAgent.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">

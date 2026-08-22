@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <!-- For the notification area itself: WPF has no tray API, and WinForms'
+         NotifyIcon is what every WPF tray application uses. It costs nothing
+         extra, because both live in the Windows Desktop runtime this already
+         carries. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF and WinForms each contribute implicit usings, and both of them
+         define Application. Explicit usings, so that which one a file means
+         is stated in the file rather than decided by import order. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- The Windows Desktop reference packs restore on any operating system,
+         so this project (XAML markup compilation included) builds on the
+         Linux and macOS machines the rest of this repository builds on, and
+         on the Linux CI runner. Only running it needs Windows. Without it,
+         either this project breaks the build for everyone not on Windows or
+         it sits outside the solution, and then nobody finds out about a
+         broken binding until they happen to be on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <RootNamespace>AdlAgent.Tray</RootNamespace>
+    <AssemblyName>adl-agent-tray</AssemblyName>
+    <Description>The ADL Agent's tray and configuration window: pairing, folder binding, live pattern validation and status, over the agent's control surface.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- The same self-contained single file the service publishes as, for the
+         same reason: nothing may need installing first on a country
+         server. -->
+    <PublishSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+    <EnableCompressionInSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</EnableCompressionInSingleFile>
+    <!-- WPF's native components (the renderer, the ink stack, the D3D shader
+         compiler) are not managed assemblies and stay beside the executable
+         unless this says otherwise. One file, because what an installer has
+         to place and an update feed has to replace should be one thing. -->
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(RuntimeIdentifier)' != ''">true</IncludeNativeLibrariesForSelfExtract>
+    <!-- The tray references the service project, which is itself an
+         executable, and a self-contained publish refuses that by default.
+         The check exists so that a self-contained program cannot ship a
+         framework-dependent executable it might launch; this one never
+         launches the service, it only uses the named-pipe client and the
+         control link that live beside it. Both are published self-contained
+         for the same runtime, and the technician starts the tray while
+         Windows starts the service. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The Windows head, for the named-pipe client and the typed control
+         link. The tray is part of that head: it is the Windows view of the
+         control surface, and the Linux head's view is a CLI beside it. -->
+    <ProjectReference Include="..\AdlAgent.Windows\AdlAgent.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

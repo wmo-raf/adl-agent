@@ -64,6 +64,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<ConfigurationService>();
         services.TryAddSingleton<FileHashCache>();
         services.TryAddSingleton<FolderScanner>();
+        services.TryAddSingleton<FolderPreview>();
         services.TryAddSingleton<ReconciliationSweep>();
         services.TryAddSingleton<UploadCycle>();
         services.TryAddSingleton<AgentCadence>();
@@ -71,6 +72,8 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<HeartbeatMonitor>();
         services.TryAddSingleton<VolumeSpaceReader>();
         services.TryAddSingleton<AgentStatusReader>();
+        services.TryAddSingleton<AgentStationsReader>();
+        services.TryAddSingleton<StationLinkConfigWriter>();
 
         // The cycle's report is written by the scan loop and read by the
         // heartbeat, so one instance is registered under both faces.

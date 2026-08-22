@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Serialization;
 
@@ -362,6 +363,8 @@ public sealed class FakeAdlServer : IDisposable
         "heartbeat/" => Authenticated(request, Heartbeat),
         "manifest/" => Authenticated(request, Manifest),
         "files/" => Authenticated(request, Upload),
+        _ when request.Path.StartsWith("station-links/", StringComparison.Ordinal) =>
+            Authenticated(request, StationLinkConfig),
         _ => (404, new { code = "not_found", detail = $"No endpoint at {request.Path}." }),
     };
 
@@ -624,6 +627,175 @@ public sealed class FakeAdlServer : IDisposable
             ReceivedAt = ServerTime,
             ConfigVersion = Config.ConfigVersion,
         });
+    }
+
+    /// <summary>
+    /// The tier a machine may write, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the plugin's <c>AgentStationLink.APP_EDITABLE_FIELDS</c>
+    /// exactly, because refusing the admin tier is the behaviour under test:
+    /// an agent that could write a decoder choice or a collection start date
+    /// would put the meaning of a country's data on the machine that happens
+    /// to hold the files, which is the one thing decision #260 rules out.
+    /// It is also, by design, the wire form of
+    /// <see cref="StationLinkAppConfig"/> -- if the two ever disagree, one
+    /// of them is wrong.
+    /// </remarks>
+    public static IReadOnlySet<string> AppEditableFields { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "local_folder_path",
+        "file_pattern",
+        "dir_structured_by_date",
+        "date_granularity",
+        "month_dir_format",
+        "listing_strategy",
+        "direct_fetch_prefix",
+        "direct_fetch_interval_minutes",
+        "direct_fetch_datetime_format",
+        "direct_fetch_datetime_timezone",
+        "direct_fetch_file_extension",
+        "stability_window_seconds",
+    };
+
+    /// <summary>
+    /// <c>PATCH station-links/{id}/config/</c> -- the app's tier, written
+    /// from the machine.
+    /// </summary>
+    /// <remarks>
+    /// Last-write-wins and never 409, exactly as decision #266 has it: the
+    /// answer carries the configuration that now stands and the version it
+    /// stands at, and the version moves so that an agent can see its own
+    /// write landed.
+    /// </remarks>
+    private (int Status, object Body) StationLinkConfig(RecordedRequest request)
+    {
+        var parts = request.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length != 3 || parts[2] != "config" || !long.TryParse(parts[1], out var stationLinkId))
+        {
+            return (404, new { code = "not_found", detail = $"No endpoint at {request.Path}." });
+        }
+
+        if (request.Method != "PATCH")
+        {
+            return (405, new
+            {
+                code = "method_not_allowed",
+                detail = "Station link configuration is written with PATCH.",
+            });
+        }
+
+        JsonObject? changes;
+
+        try
+        {
+            changes = JsonNode.Parse(string.IsNullOrEmpty(request.Body) ? "null" : request.Body) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            changes = null;
+        }
+
+        if (changes is null)
+        {
+            return (400, new
+            {
+                code = "invalid_body",
+                detail = "Send an object of station link settings to change.",
+            });
+        }
+
+        var refused = changes.Select(change => change.Key)
+            .Where(name => !AppEditableFields.Contains(name))
+            .ToList();
+
+        if (refused.Count > 0)
+        {
+            return (400, new
+            {
+                code = "read_only_fields",
+                detail = string.Join(", ", refused)
+                    + " is managed in the ADL admin and cannot be set from the app",
+                fields = refused,
+            });
+        }
+
+        lock (_gate)
+        {
+            var link = Config.Connections
+                .SelectMany(connection => connection.StationLinks)
+                .FirstOrDefault(candidate => candidate.Id == stationLinkId);
+
+            if (link is null || StationLinksUnknownToAdl.Contains(stationLinkId))
+            {
+                // The plugin's own answer, verbatim: one code for a link that
+                // does not exist and for one belonging to another machine,
+                // because a device has no business learning the ids of other
+                // machines' work.
+                return (404, new
+                {
+                    code = "not_found",
+                    detail = "No station link with that id is configured for this device.",
+                });
+            }
+
+            var written = Merge(link.Config, changes);
+
+            // ADL validates the tier it was sent before storing it, and a
+            // station link with no folder is the refusal a technician is
+            // likeliest to meet: they cleared the box to retype it and
+            // pressed Save. The plugin raises this from `full_clean`, so the
+            // shape -- a code, a sentence, and the offending fields -- is
+            // what an agent has to render.
+            if (string.IsNullOrWhiteSpace(written.LocalFolderPath))
+            {
+                return (400, new
+                {
+                    code = "invalid_config",
+                    detail = "The settings sent do not describe a folder the agent can read.",
+                    errors = new Dictionary<string, string[]>
+                    {
+                        ["local_folder_path"] = ["This field cannot be blank."],
+                    },
+                });
+            }
+
+            Config = Config with
+            {
+                ConfigVersion = Config.ConfigVersion + 1,
+                Connections = Config.Connections
+                    .Select(connection => connection with
+                    {
+                        StationLinks = connection.StationLinks
+                            .Select(candidate => candidate.Id == stationLinkId
+                                ? candidate with { Config = written }
+                                : candidate)
+                            .ToList(),
+                    })
+                    .ToList(),
+            };
+
+            return (200, new ConfigWriteResponse
+            {
+                StationLinkId = stationLinkId,
+                ConfigVersion = Config.ConfigVersion,
+                Config = written,
+            });
+        }
+    }
+
+    /// <summary>The stored settings with the named ones changed.</summary>
+    private static StationLinkAppConfig Merge(StationLinkAppConfig stored, JsonObject changes)
+    {
+        var merged = JsonSerializer.SerializeToNode(stored, AgentJson.Options)!.AsObject();
+
+        foreach (var change in changes)
+        {
+            merged[change.Key] = change.Value?.DeepClone();
+        }
+
+        return JsonSerializer.Deserialize<StationLinkAppConfig>(merged, AgentJson.Options)!;
     }
 
     private static void Remember(List<long> ids, long stationLinkId)
