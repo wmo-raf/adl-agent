@@ -1,3 +1,7 @@
+using System.IO.Pipes;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Control;
 using AdlAgent.Windows;
@@ -123,6 +127,59 @@ public class ControlTransportTests
 
         Assert.Equal("That pairing code is not recognised.", described);
     }
+
+    [Fact]
+    public void The_pipe_is_opened_to_the_technician_and_closed_to_the_network()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // There is no Windows security descriptor to inspect on a Linux
+            // or macOS runner, and the surface asks for none there. CI runs
+            // this same suite on windows-latest, which is where this test
+            // does its work.
+            return;
+        }
+
+        AssertTheLocalUiCanReachTheServiceAndNobodyElseCan();
+    }
+
+    /// <summary>
+    /// The assertions themselves, apart from the guard, because the platform
+    /// analyser reasons about a method at a time: an
+    /// <c>OperatingSystem.IsWindows()</c> check does not reach into the
+    /// lambdas below it.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void AssertTheLocalUiCanReachTheServiceAndNobodyElseCan()
+    {
+        var rules = NamedPipeControlSurface.LocalUiSecurity()
+            .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier))
+            .Cast<PipeAccessRule>()
+            .ToList();
+
+        // The service runs as LocalSystem so that data flows with nobody
+        // logged on; the technician's tray runs in their own session. Without
+        // this rule the two cannot speak, and the tray reports a working
+        // service as absent.
+        Assert.Contains(rules, rule =>
+            Is(rule, WellKnownSidType.InteractiveSid) &&
+            rule.AccessControlType == AccessControlType.Allow &&
+            rule.PipeAccessRights.HasFlag(PipeAccessRights.ReadWrite));
+
+        Assert.Contains(rules, rule =>
+            Is(rule, WellKnownSidType.LocalSystemSid) &&
+            rule.AccessControlType == AccessControlType.Allow);
+
+        // Named pipes are published over SMB through IPC$, and this one can
+        // pair the device and move where a station's data is read from.
+        Assert.Contains(rules, rule =>
+            Is(rule, WellKnownSidType.NetworkSid) &&
+            rule.AccessControlType == AccessControlType.Deny);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool Is(PipeAccessRule rule, WellKnownSidType who) =>
+        rule.IdentityReference is SecurityIdentifier sid && sid.IsWellKnown(who);
 
     [Fact]
     public async Task A_local_client_that_never_finishes_its_sentence_cannot_wedge_the_agent()

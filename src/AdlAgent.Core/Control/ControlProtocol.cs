@@ -40,6 +40,43 @@ public static class ControlProtocol
     /// <summary>Redeem a pairing code. Payload: <c>{"pairing_code": "..."}</c>.</summary>
     public const string PairCommand = "pair";
 
+    /// <summary>
+    /// Every station ADL has linked to this machine, with its local binding
+    /// and what the last cycle did for it. No payload.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="StatusCommand"/> because the two are drawn at
+    /// different rates and cost different amounts: the tray polls the status
+    /// line every few seconds and reads the station list when a technician
+    /// opens the window.
+    /// </remarks>
+    public const string StationsCommand = "stations";
+
+    /// <summary>
+    /// Count what a folder and a pattern would match, without saving either.
+    /// </summary>
+    /// <remarks>
+    /// Payload is a station link's app-tier settings, any subset of them:
+    /// <c>{"station_link_id": 11, "file_pattern": "GARISSA_*.dat"}</c> reads
+    /// the rest from what ADL holds for that station, and a payload with no
+    /// <c>station_link_id</c> is previewed exactly as it was given. Story 7,
+    /// and the reason a pattern typed at the machine is right before it is
+    /// saved rather than a day later.
+    /// </remarks>
+    public const string PreviewCommand = "preview";
+
+    /// <summary>
+    /// Write a station's app-tier settings through to ADL. Payload:
+    /// <c>{"station_link_id": 11, "config": {...}}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Through to ADL, and nowhere else. ADL is the single source of truth
+    /// for durable configuration (decision #260), so this command is a
+    /// write-through and never a local override: a write ADL did not accept
+    /// did not happen.
+    /// </remarks>
+    public const string ConfigureCommand = "configure";
+
     /// <summary>Read one request, or <c>null</c> when the client hung up.</summary>
     public static async Task<ControlRequest?> ReadRequestAsync(
         Stream stream, CancellationToken cancellationToken = default)
@@ -86,8 +123,23 @@ public static class ControlProtocol
         var response = await ReadResponseAsync(stream, cancellationToken).ConfigureAwait(false);
 
         return response ?? Failure(
-            "no_answer", "The agent closed the connection without answering.");
+            NoAnswerError, "The agent closed the connection without answering.");
     }
+
+    /// <summary>
+    /// The agent accepted the connection and then closed it without saying
+    /// anything.
+    /// </summary>
+    /// <remarks>
+    /// Not a refusal, despite arriving as one: it means the conversation was
+    /// lost rather than that anything was decided. The surface serves one
+    /// client at a time and lets go of its pipe between clients, so a client
+    /// that connected in the instant before that happens is dropped without
+    /// an answer -- as is one that connected while the service was stopping.
+    /// A caller that can ask again should, which is why the code is named
+    /// here rather than written twice.
+    /// </remarks>
+    public const string NoAnswerError = "no_answer";
 
     private static ControlResponse Failure(string error, string detail) =>
         ControlResponse.Failure(error, detail);

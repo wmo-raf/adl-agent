@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AdlAgent.Core.Serialization;
 using Microsoft.Extensions.Logging;
 
@@ -67,6 +68,25 @@ public sealed class AdlApiClient : IAdlApiClient
         Authorize(request, token);
 
         return SendAsync<SyncResponse>(request, cancellationToken);
+    }
+
+    public Task<ConfigWriteResponse> UpdateStationLinkConfigAsync(
+        string token,
+        long stationLinkId,
+        JsonObject changes,
+        CancellationToken cancellationToken = default)
+    {
+        var path = string.Create(
+            CultureInfo.InvariantCulture, $"station-links/{stationLinkId}/config/");
+
+        var request = new HttpRequestMessage(HttpMethod.Patch, path)
+        {
+            Content = Body(changes),
+        };
+
+        Authorize(request, token);
+
+        return SendAsync<ConfigWriteResponse>(request, cancellationToken);
     }
 
     public Task<HeartbeatResponse> HeartbeatAsync(

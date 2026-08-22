@@ -1,0 +1,35 @@
+<Application x:Class="AdlAgent.Tray.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <!--
+        No StartupUri: the tray is a notification-area program, and it starts
+        with an icon rather than a window. OnExplicitShutdown for the same
+        reason: closing the window must leave the tray there, because the
+        service goes on collecting either way and a technician who closed a
+        window should not have to find out how to get the icon back.
+    -->
+    <Application.Resources>
+        <BooleanToVisibilityConverter x:Key="Visible" />
+
+        <Style x:Key="Field" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,6,12,2" />
+            <Setter Property="Foreground" Value="#5A6472" />
+        </Style>
+
+        <Style x:Key="Value" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,6,0,2" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="Entry" TargetType="TextBox">
+            <Setter Property="Margin" Value="0,2,0,8" />
+            <Setter Property="Padding" Value="4,3" />
+        </Style>
+
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,8,0,0" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Application.Resources>
+</Application>

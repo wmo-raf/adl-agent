@@ -94,16 +94,49 @@ lets the cheap path be cheap.
   is a companion change in
   [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin).
 
-Still to come: the WPF tray (#281), installers and auto-update (#282).
+The tray and configuration app ([wmo-raf/adl#281](https://github.com/wmo-raf/adl/issues/281))
+— everything a station technician does on the machine itself, without an ADL
+login.
+
+- **pair** — paste the code, see the device name ADL knows this machine by.
+- **the station list** — every station ADL has linked to this device, with its
+  local folder binding, what the last cycle did for it, and the sentence
+  explaining any station that collected nothing.
+- **live pattern validation** — the count of files a folder and a pattern
+  would match, answered while they are being typed, by the same glob and the
+  same filename builder the cycle itself uses. "Two files here, none of them
+  matching" and "nothing here at all" are told apart, because they are
+  different mistakes. A `DIRECT_FETCH` station is previewed by asking about
+  the newest few hundred names it expects, and still lists nothing.
+- **config written through to ADL** — the app tier (folder, pattern,
+  strategy, the Direct Fetch settings, the stability window) is written to
+  ADL and read straight back, so an administrator sees it in the admin and
+  the `config_version` moves. A write ADL did not accept did not happen: it
+  is never applied locally instead.
+- **re-pair on revocation** — a `401` becomes an instruction rather than a
+  failed action, on the same screen that just refused.
+
+The tray is thin by construction. Its only route to any fact is a command
+the service implements, so it cannot show something the service does not
+know; and the commands are what the tests drive, because the window itself
+is layout.
+
+Still to come: installers and auto-update (#282).
 
 ## Structure
 
 ```
 src/AdlAgent.Core      platform-neutral: everything that makes the agent the agent
 src/AdlAgent.Windows   the Windows head: service host, Windows providers, named pipe
+src/AdlAgent.Tray      the technician's window and notification-area icon
 tests/AdlAgent.TestSupport  the fake ADL server and the fake platform providers
 tests/AdlAgent.Core.Tests   behaviour, driven at the seams
 ```
+
+The tray compiles on any operating system (`EnableWindowsTargeting`), which
+is why it is in the solution rather than beside it: a broken binding is found
+by the Linux CI job and by whoever is working on a Mac, not by the next
+person who happens to be on Windows. Running it needs Windows.
 
 `AdlAgent.Core` contains no platform conditional, anywhere. Platform
 specifics enter through four named seams, implemented per head and injected
@@ -127,13 +160,14 @@ Requires the .NET SDK pinned in `global.json` (10.0).
 dotnet build
 dotnet test
 
-# what gets installed on a country server: one self-contained file
-dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish
+# what gets installed on a country server: two self-contained files
+dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish/service
+dotnet publish src/AdlAgent.Tray/AdlAgent.Tray.csproj -c Release -r win-x64 -o publish/tray
 ```
 
-The published `adl-agent.exe` carries the .NET runtime inside it, so nothing
-needs to be preinstalled on the target machine. Windows Server 2016 is the
-tested floor; 2012/2012 R2 are best-effort legacy.
+`adl-agent.exe` and `adl-agent-tray.exe` each carry the .NET runtime inside
+them, so nothing needs to be preinstalled on the target machine. Windows
+Server 2016 is the tested floor; 2012/2012 R2 are best-effort legacy.
 
 ## Running it
 
@@ -159,10 +193,24 @@ sc.exe start "ADL Agent"
 (The MSI that does this properly, and the per-user tier for technicians
 without administrator rights, come with #282.)
 
+### The tray
+
+`adl-agent-tray.exe` is what a station technician uses. It puts an icon in the
+notification area — green when the machine is paired, synced and ADL is
+answering; amber when something wants a person; red when the service is not
+running — and opens a window with three tabs: **Pairing**, **Stations**, and
+**Status**.
+
+It is a per-user program and asks for no administrator rights. Start it at
+logon (a shortcut in the Startup folder, until the installer in #282 does it
+properly). It can be closed at any time; the service goes on collecting and
+sending with nobody logged on, which is what it is a service for.
+
 ### Pairing
 
 Ask your ADL administrator to create the device in the admin and give you the
-pairing code, then, on the machine:
+pairing code, then paste it into the tray's Pairing tab — or, on a machine
+with no desktop:
 
 ```powershell
 adl-agent pair KX7M-93QA
@@ -170,8 +218,28 @@ adl-agent status
 ```
 
 Both talk to the already-running service over the `adl-agent` named pipe,
-using the same control protocol the tray app will use. The device appears in
-the ADL admin's fleet listing within a heartbeat.
+using the same control protocol the tray uses. The device appears in the ADL
+admin's fleet listing within a heartbeat.
+
+### The control surface
+
+One protocol, one JSON object per line, five commands — served over a named
+pipe on Windows and (later) a unix socket on Linux, and implemented once in
+the core so that both heads mean the same thing by each of them:
+
+| Command | What it does |
+|---|---|
+| `status` | What this machine is: pairing state, fleet status, cadences, last error |
+| `pair` | Redeem a pairing code |
+| `stations` | Every station ADL linked to this device, its local binding, and its last cycle |
+| `preview` | Count what a folder and a pattern would match, saving nothing |
+| `configure` | Write one station's app-tier settings through to ADL |
+
+The pipe carries an explicit ACL: the service's own account and the machine's
+administrators in full, the technician's interactive logon session enough to
+hold the conversation, and the network denied outright — Windows publishes
+named pipes over SMB, and this one can pair the device and move where a
+station's data is read from.
 
 ## Trying it against a local ADL
 
@@ -226,10 +294,6 @@ there.
   `%ProgramData%\ADL Agent`, with whatever ACL that folder inherits. Locking
   the directory down belongs with the installer (#282); until then, treat any
   local account on the machine as able to read it.
-- **The named pipe uses the default ACL**, which is enough for an
-  administrator running the agent interactively but not for a technician's
-  logon session reaching a service running as LocalSystem. The explicit ACL
-  lands with the tray (#281).
 - Pairing is not confirmed against ADL before `pair` reports success — the
   token is stored and proven by the sync and heartbeat that follow within a
   second or two, which `adl-agent status` then shows.
@@ -241,6 +305,14 @@ there.
   local time may be unable to resolve it. It reports the timezone it could
   not resolve rather than looking for the wrong filenames, so the station
   shows a reason in the fleet listing instead of going quiet.
+- **The tray does not start itself.** There is no logon entry and no shortcut
+  until the installer lands (#282); a technician starts `adl-agent-tray.exe`
+  by hand, or somebody puts it in the Startup folder.
+- **The tray's window is not automated.** That is the spec's decision and the
+  window holds nothing worth automating, but it does mean layout and binding
+  mistakes are found by looking rather than by CI. Everything underneath —
+  the pipe, the protocol, the five commands, the typed answers the window
+  binds to — is under test.
 - **Date-structured folders are not walked.** ADL lets a station link say its
   files sit under dated sub-folders (`dir_structured_by_date`, with a
   granularity and a month format); the cycle walks only the folder itself. No
@@ -262,3 +334,11 @@ are all things a substituted message handler would paper over. The fake
 platform providers let a Linux CI runner describe Windows filesystem
 behaviour (a backfilled file carrying an old last-write time, a vendor
 process holding its output open) that it could not otherwise produce.
+
+The local UI is tested the same way and at the same distance. The control
+commands run against a real named pipe (a unix socket off Windows) with the
+real control service on the other end and the fake ADL behind it, so what is
+under test is the conversation a technician's window actually has: paste this
+code, list these stations, count this pattern, write this folder to ADL. The
+WPF window above that line is not automated, per the spec — what it holds is
+layout.

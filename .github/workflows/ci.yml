@@ -41,8 +41,12 @@ jobs:
           path: "**/TestResults/*.trx"
 
   publish:
-    # The thing that actually gets installed on a country server: one file,
-    # with the runtime inside it, needing nothing preinstalled.
+    # What actually gets installed on a country server: two files, each with
+    # the runtime inside it, needing nothing preinstalled. The service is the
+    # product; the tray is what the technician sees, and it is published
+    # beside it rather than inside it because the two run as different
+    # accounts -- the service as LocalSystem with nobody logged on, the tray
+    # in the technician's own session.
     needs: test
     runs-on: windows-latest
     steps:
@@ -52,7 +56,13 @@ jobs:
         with:
           global-json-file: global.json
 
-      - run: dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish
+      # Separate folders: the tray's publish carries a few of the service
+      # project's own artefacts along with it (it references that project),
+      # and an installer should be given two clean directories rather than
+      # one it has to pick apart.
+      - run: dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish/service
+
+      - run: dotnet publish src/AdlAgent.Tray/AdlAgent.Tray.csproj -c Release -r win-x64 -o publish/tray
 
       - uses: actions/upload-artifact@v4
         with:
