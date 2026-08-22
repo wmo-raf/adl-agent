@@ -103,6 +103,22 @@ jobs:
           name: adl-agent-win-x64
           path: publish/
 
+      # Whether Windows will actually run what was just packaged.
+      #
+      # Nothing above this line finds out. The tray's manifest is not read by
+      # a compiler, its window is not automated, and the job builds an
+      # installer around a program it never starts -- which is how a tray
+      # that could not start at all was packaged, released and installed on a
+      # country server before anyone knew. Starting it here is cheap and it
+      # is the only step that would have said so.
+      #
+      # After the uploads on purpose: the job still fails, and the release
+      # job still refuses to run, but the binary that would not start is
+      # attached to the run for whoever has to work out why.
+      - name: Prove the tray starts
+        shell: pwsh
+        run: ./packaging/verify-tray-starts.ps1
+
   release:
     # Publishing a version, once, in the one place every ADL instance
     # mirrors from.
