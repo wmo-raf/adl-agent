@@ -46,6 +46,7 @@ public partial class App : Application
     private const string OnlyInstance = "Local\\adl-agent-tray";
 
     private Mutex? _theOnlyOne;
+    private BindingTrace? _bindings;
     private TrayPresence? _tray;
     private ShellViewModel? _shell;
     private MainWindow? _window;
@@ -69,6 +70,10 @@ public partial class App : Application
 
             return;
         }
+
+        // Before the first window exists, so that the bindings evaluated as
+        // it opens -- which is most of them -- are the ones this can report.
+        _bindings = BindingTrace.StartIfAsked();
 
         _shell = new ShellViewModel(new AgentControlLink());
         _tray = new TrayPresence();
@@ -96,6 +101,7 @@ public partial class App : Application
     {
         _timer?.Stop();
         _tray?.Dispose();
+        _bindings?.Dispose();
 
         if (_theOnlyOne is not null)
         {

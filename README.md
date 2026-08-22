@@ -206,6 +206,24 @@ logon (a shortcut in the Startup folder, until the installer in #282 does it
 properly). It can be closed at any time; the service goes on collecting and
 sending with nobody logged on, which is what it is a service for.
 
+#### Finding a broken binding
+
+A WPF binding whose path is wrong neither throws nor draws: the label is
+empty, and looks exactly like one whose value the service did not send.
+Nothing catches that — XAML compiles with the path unchecked, and the window
+is deliberately not automated — so the tray can be asked to write WPF's own
+binding failures to a file:
+
+```powershell
+$env:ADL_AGENT_TRAY_BINDING_LOG = "$env:TEMP\adl-tray-bindings.log"
+.\adl-agent-tray.exe
+```
+
+An empty file (past its header) means every binding in the window resolved.
+Off unless that variable is set: a binding is right or wrong for the whole
+fleet at once, so this is a tool for whoever is building or testing the tray,
+not something to write to a technician's disk every session.
+
 ### Pairing
 
 Ask your ADL administrator to create the device in the admin and give you the
@@ -321,10 +339,12 @@ there.
   until the installer lands (#282); a technician starts `adl-agent-tray.exe`
   by hand, or somebody puts it in the Startup folder.
 - **The tray's window is not automated.** That is the spec's decision and the
-  window holds nothing worth automating, but it does mean layout and binding
-  mistakes are found by looking rather than by CI. Everything underneath —
-  the pipe, the protocol, the five commands, the typed answers the window
-  binds to — is under test.
+  window holds nothing worth automating, but it does mean layout mistakes are
+  found by looking rather than by CI. Broken bindings at least announce
+  themselves — see *Finding a broken binding* above — but nothing checks that
+  the window is laid out sensibly except a person opening it. Everything
+  underneath — the pipe, the protocol, the five commands, the typed answers
+  the window binds to — is under test.
 - **Date-structured folders are not walked.** ADL lets a station link say its
   files sit under dated sub-folders (`dir_structured_by_date`, with a
   granularity and a month format); the cycle walks only the folder itself. No
