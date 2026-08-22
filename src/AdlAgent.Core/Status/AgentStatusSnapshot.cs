@@ -51,4 +51,28 @@ public sealed record AgentStatusSnapshot
 
     /// <summary>Why the last attempt to reach ADL failed, if it did.</summary>
     public string? LastError { get; init; }
+
+    // ---------- what this machine is running, and what it could be ----------
+    //
+    // Here rather than left to the log because it answers the question a
+    // technician standing at a machine actually has when HQ says "you are on
+    // an old version": is this machine trying to update itself, and if it is
+    // not, why not. The four states that answer it -- nothing published,
+    // pinned, up to date, and could not fetch it -- want four different
+    // people to do something, and only one of them is the technician.
+
+    /// <summary>The last update check's outcome, by name.</summary>
+    public string UpdateState { get; init; } = "";
+
+    /// <summary>The version ADL last offered this machine, if any.</summary>
+    public string? UpdateVersion { get; init; }
+
+    /// <summary>True when an operator has pinned this machine to a version.</summary>
+    public bool UpdatePinned { get; init; }
+
+    /// <summary>One sentence about the last check, ADL's own where it had one.</summary>
+    public string UpdateDetail { get; init; } = "";
+
+    /// <summary>When the last update check ran, or <c>null</c> before the first.</summary>
+    public DateTimeOffset? UpdateCheckedAt { get; init; }
 }

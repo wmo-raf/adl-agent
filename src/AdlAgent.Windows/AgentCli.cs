@@ -95,6 +95,11 @@ public static class AgentCli
             $"Version:  {Text(status, "agent_version")}",
         };
 
+        if (Text(status, "update_detail") is { Length: > 0 } update and not "-")
+        {
+            lines.Add($"Updates:  {update}");
+        }
+
         if (status["config_from_cache"]?.GetValue<bool>() == true)
         {
             lines.Add("Note:     working from the cached configuration; ADL was not reachable.");

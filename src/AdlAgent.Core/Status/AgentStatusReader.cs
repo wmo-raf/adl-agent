@@ -2,6 +2,7 @@ using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
+using AdlAgent.Core.Update;
 using Microsoft.Extensions.Options;
 
 namespace AdlAgent.Core.Status;
@@ -13,6 +14,7 @@ public sealed class AgentStatusReader
     private readonly ConfigurationService _configuration;
     private readonly HeartbeatMonitor _heartbeat;
     private readonly AgentCadence _cadence;
+    private readonly UpdateService _updates;
     private readonly AgentOptions _options;
 
     public AgentStatusReader(
@@ -20,12 +22,14 @@ public sealed class AgentStatusReader
         ConfigurationService configuration,
         HeartbeatMonitor heartbeat,
         AgentCadence cadence,
+        UpdateService updates,
         IOptions<AgentOptions> options)
     {
         _session = session;
         _configuration = configuration;
         _heartbeat = heartbeat;
         _cadence = cadence;
+        _updates = updates;
         _options = options.Value;
     }
 
@@ -39,6 +43,7 @@ public sealed class AgentStatusReader
         var session = _session.Snapshot();
         var configuration = _configuration.Snapshot();
         var heartbeat = _heartbeat.Snapshot();
+        var update = _updates.Last;
 
         return new AgentStatusSnapshot
         {
@@ -59,6 +64,11 @@ public sealed class AgentStatusReader
             CheckIntervalMinutes = (int)_cadence.CheckInterval.TotalMinutes,
             HeartbeatIntervalMinutes = (int)_cadence.HeartbeatInterval.TotalMinutes,
             LastError = heartbeat.LastError,
+            UpdateState = update.Outcome.ToString(),
+            UpdateVersion = update.OfferedVersion,
+            UpdatePinned = update.Pinned,
+            UpdateDetail = update.Detail,
+            UpdateCheckedAt = update.At == default ? null : update.At,
         };
     }
 }

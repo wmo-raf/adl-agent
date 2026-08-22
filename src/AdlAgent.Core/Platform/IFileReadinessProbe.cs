@@ -1,7 +1,7 @@
 namespace AdlAgent.Core.Platform;
 
 /// <summary>
-/// Platform seam 2 of 4: is this file safe to read yet?
+/// Platform seam 2 of 5: is this file safe to read yet?
 /// </summary>
 /// <remarks>
 /// The question is one question but the answer is not portable. On Windows a

@@ -102,6 +102,35 @@ public sealed class ShellViewModel : Observable
     public string LastError => _status?.LastError ?? "";
 
     /// <summary>
+    /// What this machine is doing about updating itself, in one sentence.
+    /// </summary>
+    /// <remarks>
+    /// ADL's own words wherever it had any: it is the instance that knows
+    /// whether it is holding nothing, or holding everything except the
+    /// version this machine has been pinned to, and a sentence assembled
+    /// here would only ever be a worse guess at the same thing.
+    /// </remarks>
+    public string UpdateStatus
+    {
+        get
+        {
+            if (_status is null)
+            {
+                return "-";
+            }
+
+            if (!string.IsNullOrWhiteSpace(_status.UpdateDetail))
+            {
+                return _status.UpdateDetail;
+            }
+
+            return _status.UpdateCheckedAt is null
+                ? "Not checked yet."
+                : "Up to date.";
+        }
+    }
+
+    /// <summary>
     /// The one line the tray icon's tooltip and the window header both show.
     /// </summary>
     public string Headline
@@ -478,6 +507,7 @@ public sealed class ShellViewModel : Observable
         nameof(ServiceRunning), nameof(AdlUrl), nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
         nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
-        nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(Headline),
+        nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
+        nameof(Headline),
     ];
 }

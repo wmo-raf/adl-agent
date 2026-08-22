@@ -37,6 +37,25 @@ public sealed class AgentOptions
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Whether this machine may replace itself with a newer agent.
+    /// </summary>
+    /// <remarks>
+    /// On by default, which is decision #262's default and the only setting
+    /// that makes sense for a fleet nobody can log into: the whole reason the
+    /// feed is served by ADL is so that machines with no route to the
+    /// internet still get fixes. The switch exists for the country whose IT
+    /// department deploys software itself and would rather the agent did not,
+    /// and for a machine somebody is debugging.
+    /// <para>
+    /// It is not the fleet-wide brake. Holding a machine back from the
+    /// operator's chair is what the per-device version pin in the ADL admin
+    /// is for (story 29); this is local, and a local setting cannot be
+    /// changed by whoever is watching the fleet.
+    /// </para>
+    /// </remarks>
+    public bool AutoUpdate { get; set; } = true;
+
+    /// <summary>
     /// The versioned agent surface, under ADL's plugin mount. Fixed: the
     /// mount point is part of the contract, and a machine pointed at a
     /// different one is misconfigured rather than differently configured.

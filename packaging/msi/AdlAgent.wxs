@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The service tier's installer (decision #262).
+
+  What this has to get right is not installing files. It is that a machine in
+  a country nobody can reach must come back from an unattended upgrade still
+  paired, still configured, and still running — because the agent installs
+  this over itself (see UpdateService), with nobody watching and no way to
+  intervene if it does not.
+
+  Three things carry that weight, and each is marked in place below:
+
+    * the state directory is Permanent, so the uninstall half of a major
+      upgrade cannot take the device token with it;
+    * the ADL URL is set by a Permanent, conditioned component, so a silent
+      upgrade that is passed no properties leaves the one it was installed
+      with alone;
+    * the service is configured to restart itself on failure, because the
+      failure this product exists to end is a data path that stopped and
+      nobody noticed.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <?ifndef Version?>
+  <?define Version = "0.1.0" ?>
+  <?endif?>
+
+  <?ifndef ServiceDir?>
+  <?define ServiceDir = "publish\service" ?>
+  <?endif?>
+
+  <?ifndef TrayDir?>
+  <?define TrayDir = "publish\tray" ?>
+  <?endif?>
+
+  <Package
+      Name="ADL Agent"
+      Manufacturer="WMO RAF"
+      Version="$(Version)"
+      Scope="perMachine"
+      Compressed="yes"
+      InstallerVersion="500"
+      UpgradeCode="6f3a5f52-6f0a-4a3f-93f1-5a4c0f5f6b21">
+
+    <SummaryInformation
+        Description="ADL Agent — pushes station files from this server to ADL"
+        Manufacturer="WMO RAF" />
+
+    <!--
+      Every release is a major upgrade of the last: the agent fetches a whole
+      new MSI rather than a patch, and Windows Installer compares only the
+      first three fields of a version, which is why an agent version is three
+      numbers (see ReleaseVersion).
+
+      Downgrades are refused. The agent never asks for one — it applies a
+      package only when it is newer than what is running — so a downgrade
+      here means somebody ran an old MSI by hand, and stopping is kinder than
+      half-replacing a working install.
+    -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of the ADL Agent is already installed on this machine." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Where this machine's ADL is. Set at install time:
+
+          msiexec /i AdlAgent.msi ADLURL=https://adl.example.org
+
+      Secure so that it survives elevation, and deliberately not remembered
+      in the MSI's own property table for later runs — see the component
+      below for what makes an unattended upgrade keep it.
+    -->
+    <Property Id="ADLURL" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ADL Agent" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="STATEFOLDER" Name="ADL Agent" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AgentMenuFolder" Name="ADL Agent" />
+    </StandardDirectory>
+
+    <!--
+      The all users Startup folder, because this package is perMachine:
+      Windows Installer resolves the folder properties to their all users
+      variants, so the tray starts for whoever logs on to the server rather
+      than only for the technician who happened to run the installer.
+    -->
+    <StandardDirectory Id="StartupFolder" />
+
+    <Feature Id="Main" Title="ADL Agent" Level="1">
+      <ComponentGroupRef Id="AgentComponents" />
+    </Feature>
+
+    <ComponentGroup Id="AgentComponents">
+
+      <!--
+        The service. One self-contained file with the .NET runtime inside it,
+        because a country server is not a machine anyone can ask to install a
+        framework first.
+      -->
+      <Component Id="AgentService" Directory="INSTALLFOLDER" Bitness="always64">
+        <File Id="AgentExe" Source="$(ServiceDir)\adl-agent.exe" KeyPath="yes" />
+
+        <ServiceInstall
+            Id="AgentServiceInstall"
+            Name="ADL Agent"
+            DisplayName="ADL Agent"
+            Description="Watches this server's vendor folders and sends station files to ADL."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Account="LocalSystem"
+            Vital="yes">
+
+          <!--
+            Delayed, so that a server rebooting at the end of a power cut is
+            not doing this at the same moment as everything else it has to do.
+            The agent has nothing urgent to do in the first minute after a
+            boot: its cadence is minutes, and the folders it reads are not
+            going anywhere.
+          -->
+          <ServiceConfig DelayedAutoStart="yes" OnInstall="yes" OnReinstall="yes" />
+
+          <!--
+            And restart itself, for ever, if it ever stops. This is the whole
+            operational premise: the reverse SSH tunnels this product replaces
+            failed by dying quietly, and a data path that needs somebody
+            in-country to notice it has stopped is the thing being fixed.
+          -->
+          <util:ServiceConfig
+              FirstFailureActionType="restart"
+              SecondFailureActionType="restart"
+              ThirdFailureActionType="restart"
+              RestartServiceDelayInSeconds="60"
+              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <ServiceControl
+            Id="AgentServiceControl"
+            Name="ADL Agent"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+      </Component>
+
+      <!--
+        The technician's window. A separate program from the service on
+        purpose: it runs in the logged-on user's session while the service
+        runs as LocalSystem with nobody logged on, and they talk over a named
+        pipe.
+      -->
+      <Component Id="AgentTray" Directory="INSTALLFOLDER" Bitness="always64">
+        <File Id="AgentTrayExe" Source="$(TrayDir)\adl-agent-tray.exe" KeyPath="yes" />
+      </Component>
+
+      <Component Id="AgentTrayShortcuts" Directory="AgentMenuFolder" Bitness="always64">
+        <Shortcut
+            Id="AgentTrayMenuShortcut"
+            Name="ADL Agent"
+            Description="Pair this machine, bind station folders, and see what the agent is doing."
+            Target="[INSTALLFOLDER]adl-agent-tray.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <!--
+          And at logon, for every user of this machine: the window is how a
+          technician sees that the service is working, and one they have to
+          remember to start is one nobody starts.
+        -->
+        <Shortcut
+            Id="AgentTrayStartupShortcut"
+            Directory="StartupFolder"
+            Name="ADL Agent"
+            Target="[INSTALLFOLDER]adl-agent-tray.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <RemoveFolder Id="RemoveAgentMenuFolder" On="uninstall" />
+
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\WMO RAF\ADL Agent"
+            Name="TrayShortcuts"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+
+      <!--
+        The state directory, and the two things that make it survivable.
+
+        Permanent, because a major upgrade uninstalls the old product before
+        installing the new one, and the device token lives here: a machine
+        that had to be re-paired by hand after every automatic update would
+        be a machine that is never updated. Its contents are not the MSI's to
+        create either — the service writes them — so nothing here is
+        overwritten by an upgrade.
+
+        And locked down, because the token is stored in the clear. Replacing
+        the inherited permissions with these two entries is what stops every
+        local account on a shared vendor server from being able to read a
+        credential that can send data to a national instance.
+      -->
+      <Component Id="AgentState" Directory="STATEFOLDER" Permanent="yes" Bitness="always64">
+        <CreateFolder>
+          <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+          <util:PermissionEx User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\WMO RAF\ADL Agent"
+            Name="StateFolder"
+            Type="string"
+            Value="[STATEFOLDER]"
+            KeyPath="yes" />
+      </Component>
+
+      <!--
+        Where this machine's ADL is, written into the settings file the
+        service reads at start-up.
+
+        A file, and not a machine-wide environment variable, because of when
+        this runs. The Service Control Manager takes its environment block at
+        boot and does not re-read it, so a service installed and started
+        inside one Windows Installer transaction would start without the
+        variable that same transaction had just set — and then fail, restart
+        on the 60-second timer, and fail again until somebody rebooted the
+        server. The file is read by this service, when this service starts.
+
+        Permanent and conditioned, and both halves matter. Conditioned, so an
+        unattended upgrade — which is passed no properties at all, because
+        the agent invokes it — does not install this component and therefore
+        does not touch the value. Permanent, so the uninstall half of that
+        same upgrade does not remove it. Between them, a machine that
+        replaced itself at three in the morning still knows where to report.
+      -->
+      <Component Id="AgentAdlUrl" Directory="STATEFOLDER" Permanent="yes" Bitness="always64"
+                 Condition="ADLURL">
+        <IniFile
+            Id="AgentAdlUrlSetting"
+            Action="addLine"
+            Directory="STATEFOLDER"
+            Name="agent.ini"
+            Section="Agent"
+            Key="AdlBaseUrl"
+            Value="[ADLURL]" />
+
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\WMO RAF\ADL Agent"
+            Name="AdlBaseUrl"
+            Type="string"
+            Value="[ADLURL]"
+            KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Package>
+</Wix>

@@ -5,6 +5,7 @@ using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.State;
+using AdlAgent.Core.Update;
 using AdlAgent.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,10 +70,12 @@ public class ArchitectureTests
             host.Services.GetRequiredService<IFileReadinessProbe>());
         Assert.IsType<Windows.Platform.NamedPipeControlSurface>(
             host.Services.GetRequiredService<IControlSurface>());
+        Assert.IsType<Windows.Platform.WindowsUpdateInstaller>(
+            host.Services.GetRequiredService<IUpdateInstaller>());
     }
 
     [Fact]
-    public void The_Windows_head_runs_the_three_loops_the_agent_is_made_of()
+    public void The_Windows_head_runs_the_four_loops_the_agent_is_made_of()
     {
         using var host = BuildWindowsHost();
 
@@ -81,6 +84,7 @@ public class ArchitectureTests
         Assert.Contains(loops, loop => loop is HeartbeatLoop);
         Assert.Contains(loops, loop => loop is UploadCycleLoop);
         Assert.Contains(loops, loop => loop is AgentControlService);
+        Assert.Contains(loops, loop => loop is UpdateLoop);
 
         // The session and the state store come up too, which is the whole of
         // what a paired machine needs to remember it is paired.

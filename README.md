@@ -121,7 +121,36 @@ the service implements, so it cannot show something the service does not
 know; and the commands are what the tests drive, because the window itself
 is layout.
 
-Still to come: installers and auto-update (#282).
+Installers and auto-update ([wmo-raf/adl#282](https://github.com/wmo-raf/adl/issues/282))
+— how the agent gets onto a machine, and how it stays current on one nobody
+can reach.
+
+- **two installers** — an MSI that installs a Windows Service (delayed
+  auto-start, restarting itself on failure, its state directory locked to
+  SYSTEM and Administrators) and a Velopack per-user install for a technician
+  without administrator rights. Both self-contained: nothing to install first.
+  See [`packaging/`](packaging/README.md).
+- **the feed is ADL** — these machines have one network path, so the update
+  feed is served by the instance they already talk to. The agent asks on every
+  cycle, as the tier it was installed as, and ADL picks the package that tier
+  takes.
+- **the hash is checked, always** — pilots ship unsigned, so the digest ADL
+  states is the whole of what stands between a corrupted or tampered download
+  and a service binary running as LocalSystem. A package that does not match
+  is deleted rather than installed, and is not fetched again until ADL offers
+  something else — not forty megabytes every ten minutes, for ever, to fail
+  the same check.
+- **the pin is ADL's** — an operator pinning a device in the admin means that
+  machine is never *told* a newer release exists. Honouring it is therefore
+  not something an agent could forget. The agent only moves forwards: a pin
+  below the running version holds the machine where it is rather than rolling
+  it back.
+- **updating does not cost the pairing** — the token and the configuration
+  cache live under `%ProgramData%`, which the MSI marks permanent, so the
+  uninstall half of a major upgrade cannot take them with it.
+- **it is the least urgent thing the agent does** — its own loop, its own
+  failures, and nothing it can do to the cycle that ships a country's
+  observations.
 
 ## Structure
 
@@ -131,6 +160,7 @@ src/AdlAgent.Windows   the Windows head: service host, Windows providers, named 
 src/AdlAgent.Tray      the technician's window and notification-area icon
 tests/AdlAgent.TestSupport  the fake ADL server and the fake platform providers
 tests/AdlAgent.Core.Tests   behaviour, driven at the seams
+packaging/             the MSI, the per-user package, and the release index
 ```
 
 The tray compiles on any operating system (`EnableWindowsTargeting`), which
@@ -139,7 +169,7 @@ by the Linux CI job and by whoever is working on a Mac, not by the next
 person who happens to be on Windows. Running it needs Windows.
 
 `AdlAgent.Core` contains no platform conditional, anywhere. Platform
-specifics enter through four named seams, implemented per head and injected
+specifics enter through five named seams, implemented per head and injected
 at the composition root (`WindowsAgentHost.CreateBuilder`):
 
 | Seam | Interface | Windows | Linux (later) |
@@ -148,6 +178,7 @@ at the composition root (`WindowsAgentHost.CreateBuilder`):
 | File readiness | `IFileReadinessProbe` | stability window + shared-read probe | stability window only |
 | Host lifecycle | `IHostLifecycle` | Windows Service; state under `%ProgramData%` | systemd; state under `/var/lib` |
 | Control surface | `IControlSurface` | named pipe | unix domain socket |
+| Replacing itself | `IUpdateInstaller` | Windows Installer, or Velopack for a per-user install | package manager or unit file |
 
 A platform check appearing in the core means a seam is missing. That rule is
 enforced by a test (`ArchitectureTests`), not only by review.
@@ -160,9 +191,14 @@ Requires the .NET SDK pinned in `global.json` (10.0).
 dotnet build
 dotnet test
 
-# what gets installed on a country server: two self-contained files
+# the two self-contained programs
 dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish/service
 dotnet publish src/AdlAgent.Tray/AdlAgent.Tray.csproj -c Release -r win-x64 -o publish/tray
+```
+
+```powershell
+# and what a country server is actually installed from (Windows only)
+./packaging/pack.ps1 -Version 0.2.0
 ```
 
 `adl-agent.exe` and `adl-agent-tray.exe` each carry the .NET runtime inside
@@ -171,8 +207,19 @@ Server 2016 is the tested floor; 2012/2012 R2 are best-effort legacy.
 
 ## Running it
 
-Point the agent at an ADL instance in `appsettings.json` (or by environment
-variable, `Agent__AdlBaseUrl`):
+Point the agent at an ADL instance. An installed machine is configured by its
+installer, which writes `%ProgramData%\ADL Agent\agent.ini`:
+
+```ini
+[Agent]
+AdlBaseUrl=https://adl.example.org
+```
+
+A developer's build reads `appsettings.json`, the environment
+(`Agent__AdlBaseUrl`), or the command line, in that order of increasing
+precedence — the machine's own settings file sits below all three, so
+pointing a build somewhere else never means editing the installed
+configuration back afterwards.
 
 ```json
 { "Agent": { "AdlBaseUrl": "https://adl.example.org" } }
@@ -182,16 +229,19 @@ It must be `https` — the device token travels on every call, and the agent
 refuses to start against plain HTTP to anywhere but this machine. TLS 1.2 is
 the floor.
 
-Run `adl-agent.exe` with no arguments to run it as a console process, or
-install it as a service:
+Run `adl-agent.exe` with no arguments to run it as a console process. On a
+real machine it is installed rather than run, and the installer sets the URL
+for you:
 
 ```powershell
-sc.exe create "ADL Agent" binPath= "C:\Program Files\ADL Agent\adl-agent.exe" start= auto
-sc.exe start "ADL Agent"
+msiexec /i AdlAgent-0.2.0-x64.msi ADLURL=https://adl.example.org
 ```
 
-(The MSI that does this properly, and the per-user tier for technicians
-without administrator rights, come with #282.)
+That is the service tier. A technician without administrator rights runs
+`AdlAgent-0.2.0-Setup.exe` instead, which installs under `%LocalAppData%` and
+starts the agent at logon rather than at boot. Both are built by
+[`packaging/pack.ps1`](packaging/README.md), and both keep themselves current
+from the ADL instance they are paired with.
 
 ### The tray
 
@@ -201,9 +251,8 @@ answering; amber when something wants a person; red when the service is not
 running — and opens a window with three tabs: **Pairing**, **Stations**, and
 **Status**.
 
-It is a per-user program and asks for no administrator rights. Start it at
-logon (a shortcut in the Startup folder, until the installer in #282 does it
-properly). It can be closed at any time; the service goes on collecting and
+It is a per-user program and asks for no administrator rights. The installer
+puts it in the Start menu and starts it at logon. It can be closed at any time; the service goes on collecting and
 sending with nobody logged on, which is what it is a service for.
 
 #### Finding a broken binding
@@ -309,9 +358,11 @@ there.
 ## Known gaps
 
 - **The device token is stored unencrypted** in `state.json` under
-  `%ProgramData%\ADL Agent`, with whatever ACL that folder inherits. Locking
-  the directory down belongs with the installer (#282); until then, treat any
-  local account on the machine as able to read it.
+  `%ProgramData%\ADL Agent`. The MSI replaces that folder's permissions with
+  SYSTEM and Administrators, so on an installed machine the token is only
+  readable by an administrator — but it is readable, in the clear, by any of
+  them. A copy run from a folder somebody unzipped has whatever permissions
+  that folder inherits.
 - Pairing is not confirmed against ADL before `pair` reports success — the
   token is stored and proven by the sync and heartbeat that follow within a
   second or two, which `adl-agent status` then shows.
@@ -335,9 +386,50 @@ there.
   are only covered by reading. They are in a `net10.0-windows` assembly,
   which the `net10.0` test project cannot reference; moving them into a
   platform-neutral library would fix that.
-- **The tray does not start itself.** There is no logon entry and no shortcut
-  until the installer lands (#282); a technician starts `adl-agent-tray.exe`
-  by hand, or somebody puts it in the Startup folder.
+- **Neither installer has been run on a Windows VM yet.** The MSI authoring,
+  the Velopack packaging and the two ways an update is applied were all
+  written and reviewed on machines that cannot execute any of them: WiX
+  refuses to build outside Windows, and `vpk` packs Windows releases only
+  there. Everything above that line — the feed, the pin, the hash check, what
+  is fetched and what is refused — is under test on every push; everything
+  below it is CI-built and unproven until somebody installs it on a clean
+  Server 2016 box, which is what
+  [#282](https://github.com/wmo-raf/adl/issues/282)'s first two acceptance
+  criteria ask for.
+- **The per-user tier shows a console window at logon.** It is the same
+  console program as the service tier, started by a shortcut rather than by
+  the SCM, so it appears as a window in the technician's session. That is
+  honest about what the tier is — a logon process, not a service — but it is
+  a window somebody will eventually close.
+- **A self-update is a child process of the service it replaces.** The agent
+  starts `msiexec`, and Windows Installer stops the service moments later.
+  Nothing kills a child when its parent stops on Windows, so this is the
+  ordinary way a service updates itself; it is also the step with the least
+  margin, and the one to look at first if a machine ever comes back on its
+  old version. Windows Installer's own verbose log is left beside the package
+  under `%ProgramData%\ADL Agent\updates`.
+- **Nothing is signed.** Pilots ship unsigned and attended, with feed-hash
+  verification active from the first build (decision #262). SmartScreen will
+  warn on both installers until
+  [#283](https://github.com/wmo-raf/adl/issues/283) lands signing.
+- **A download that fails part-way starts again from the beginning.** The
+  package endpoint streams and the agent writes to a fresh file; neither
+  resumes. On the links this product exists for, a forty-megabyte installer
+  may take several cycles of luck to land — it costs bandwidth rather than
+  correctness, because a partial file fails its hash and is deleted, but a
+  machine on a bad link can be a long time updating.
+- **Uninstalling leaves the state directory behind**, token included. That is
+  the same permanence that lets an automatic update keep a machine paired, and
+  the two cannot be had separately without the MSI knowing which of the two it
+  is doing. Decommissioning a machine properly means revoking the device in
+  ADL — which is what actually stops it sending — and deleting
+  `%ProgramData%\ADL Agent` by hand.
+- **The two tiers share one state directory.** Both write to
+  `%ProgramData%\ADL Agent`, so installing the per-user tier on a machine
+  that already has the service tier means two agents with one token file, and
+  on a machine where the MSI has locked that folder to administrators the
+  per-user install cannot write to it at all. Nothing stops it today; the two
+  tiers are meant for different machines.
 - **The tray's window is not automated.** That is the spec's decision and the
   window holds nothing worth automating, but it does mean layout mistakes are
   found by looking rather than by CI. Broken bindings at least announce
@@ -366,6 +458,14 @@ are all things a substituted message handler would paper over. The fake
 platform providers let a Linux CI runner describe Windows filesystem
 behaviour (a backfilled file carrying an old last-write time, a vendor
 process holding its output open) that it could not otherwise produce.
+
+The update path is driven the same way. A test publishes a release to the
+fake ADL, pins a device or does not, and reads what the agent did about it:
+which package it asked for, whether it fetched one, and what it handed to the
+installer. The one thing faked at that end is the platform installer itself,
+because the real ones stop this process — so the assertions stop at the
+handover, which is also exactly where the last decision the agent makes
+is: these bytes, hashed, and they are the ones ADL described.
 
 The local UI is tested the same way and at the same distance. The control
 commands run against a real named pipe (a unix socket off Windows) with the

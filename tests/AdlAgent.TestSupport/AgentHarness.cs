@@ -7,6 +7,7 @@ using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.State;
 using AdlAgent.Core.Status;
+using AdlAgent.Core.Update;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -25,7 +26,7 @@ namespace AdlAgent.TestSupport;
 /// composition root forgot fails here, in a test, rather than on a server in
 /// a country nobody can reach.
 /// <para>
-/// Only the four platform seams, the clock and the state store are
+/// Only the five platform seams, the clock and the state store are
 /// substituted -- everything above them is the shipping code, talking real
 /// HTTP.
 /// </para>
@@ -43,18 +44,40 @@ public sealed class AgentHarness : IAsyncDisposable
     /// cached configuration and the sweep log survive, and everything the
     /// agent holds only in memory does not.
     /// </param>
-    public AgentHarness(InMemoryAgentStateStore? store = null)
+    /// <param name="settings">
+    /// Anything else the machine's own settings file would say. The agent
+    /// holds almost no local configuration by design (decision #260), so
+    /// this is a short list: where ADL is, where state goes, and whether
+    /// this machine may replace itself.
+    /// </param>
+    public AgentHarness(
+        InMemoryAgentStateStore? store = null,
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         Store = store ?? new InMemoryAgentStateStore();
         Server = new FakeAdlServer();
+
+        // Its own directory per harness. The only thing the core writes there
+        // is a downloaded update package, and the update path deliberately
+        // clears that folder before each fetch -- shared between the tests
+        // running in parallel, one would delete another's download.
+        HostLifecycle.StateDirectory = Directory
+            .CreateTempSubdirectory("adl-agent-harness").FullName;
         Time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-21T09:00:00Z"));
         Time.AutoAdvanceAmount = TimeSpan.Zero;
 
-        var settings = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Agent:AdlBaseUrl"] = Server.BaseAddress.ToString().TrimEnd('/'),
-            })
+        var configured = new Dictionary<string, string?>
+        {
+            ["Agent:AdlBaseUrl"] = Server.BaseAddress.ToString().TrimEnd('/'),
+        };
+
+        foreach (var setting in settings ?? new Dictionary<string, string?>())
+        {
+            configured[setting.Key] = setting.Value;
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configured)
             .Build();
 
         var services = new ServiceCollection();
@@ -70,8 +93,9 @@ public sealed class AgentHarness : IAsyncDisposable
         services.AddSingleton<IFileMetadataSource>(Files);
         services.AddSingleton<IFileReadinessProbe>(Readiness);
         services.AddSingleton<IControlSurface>(Control);
+        services.AddSingleton<IUpdateInstaller>(Updates);
 
-        services.AddAdlAgentCore(settings);
+        services.AddAdlAgentCore(configuration);
 
         Services = services.BuildServiceProvider();
     }
@@ -87,6 +111,8 @@ public sealed class AgentHarness : IAsyncDisposable
     public FakeFileReadinessProbe Readiness { get; } = new();
 
     public FakeControlSurface Control { get; } = new();
+
+    public FakeUpdateInstaller Updates { get; } = new();
 
     public InMemoryAgentStateStore Store { get; }
 
@@ -112,6 +138,11 @@ public sealed class AgentHarness : IAsyncDisposable
     public UploadCycleLoop CycleLoop => Hosted<UploadCycleLoop>();
 
     public AgentControlService ControlService => Hosted<AgentControlService>();
+
+    /// <summary>One check of what ADL says this machine should be running.</summary>
+    public UpdateService Updater => Services.GetRequiredService<UpdateService>();
+
+    public UpdateLoop UpdateLoop => Hosted<UpdateLoop>();
 
     /// <summary>Start every loop, exactly as the host would.</summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -139,10 +170,13 @@ public sealed class AgentHarness : IAsyncDisposable
     /// <para>
     /// Loops going quiet is the one observable that means "done": a loop
     /// waiting on the wake signal has finished everything the last wake-up
-    /// gave it.
+    /// gave it. There are three of them -- the heartbeat, the scan cycle
+    /// and the update check -- and the default waits for all three, because
+    /// a test that advanced the clock while one was still working would be
+    /// racing it.
     /// </para>
     /// </remarks>
-    public async Task AtRestAsync(int loopsAtRest = 2)
+    public async Task AtRestAsync(int loopsAtRest = 3)
     {
         var wake = Services.GetRequiredService<AgentWakeSignal>();
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
@@ -164,7 +198,7 @@ public sealed class AgentHarness : IAsyncDisposable
     /// busy the machine was. Waiting on the signal's own count makes the
     /// cadence assertions mean what they say.
     /// </remarks>
-    public async Task AdvanceAsync(TimeSpan by, int loopsAtRest = 2)
+    public async Task AdvanceAsync(TimeSpan by, int loopsAtRest = 3)
     {
         await AtRestAsync(loopsAtRest).ConfigureAwait(false);
 
@@ -202,6 +236,14 @@ public sealed class AgentHarness : IAsyncDisposable
 
         Server.Dispose();
         Files.Dispose();
+
+        try
+        {
+            Directory.Delete(HostLifecycle.StateDirectory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private T Hosted<T>() where T : IHostedService =>
