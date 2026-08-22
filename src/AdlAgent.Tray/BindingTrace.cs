@@ -69,7 +69,15 @@ internal sealed class BindingTrace : IDisposable
                 Directory.CreateDirectory(folder);
             }
 
-            var listener = new TextWriterTraceListener(path, "adl-agent-tray-bindings");
+            // A writer of our own, with AutoFlush set, rather than the file
+            // name overload. That overload buffers, and Trace.AutoFlush below
+            // governs writes made through Trace rather than writes made
+            // straight to a listener -- so with it alone the whole trace,
+            // header included, reaches the disk only when this is disposed,
+            // and a run that was killed leaves an empty file. Which is
+            // precisely the run somebody wants to read.
+            var writer = new StreamWriter(path, append: false) { AutoFlush = true };
+            var listener = new TextWriterTraceListener(writer, "adl-agent-tray-bindings");
 
             // Refreshed first: the trace sources read their configuration
             // once, and a listener added to a source that has not been woken
