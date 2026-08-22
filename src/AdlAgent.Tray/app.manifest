@@ -1,35 +1,46 @@
-<?xml version="1.0" encoding="utf-8"?>
-<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
 
   <!--
-    Two statements, both deliberate.
+    A dash in this file is written — and never as two hyphens. Two hyphens
+    inside an XML comment are forbidden by the XML specification, and this
+    file was shipped with a pair of them: Windows refused to start the tray
+    at all, saying "the side-by-side configuration is incorrect", before any
+    of the program ran. It was telling the exact truth. A test asserts this
+    file parses, because nothing else here reads it until it is far too late.
+  -->
 
-    asInvoker: the tray never elevates. It changes nothing on this machine --
-    every setting it edits is written to ADL, and the only local thing it
+  <assemblyIdentity version="1.0.0.0" name="AdlAgent.Tray.app"/>
+
+  <!--
+    asInvoker: the tray never elevates. It changes nothing on this machine.
+    Every setting it edits is written to ADL, and the only local thing it
     touches is a named pipe it is on the allow list for (see
     NamedPipeControlSurface.LocalUiSecurity). A technician without
     administrator rights is exactly who this window is for (story 3), so
     asking them for a password they do not have would defeat it.
-
-    The compatibility list is what stops Windows lying to the application
-    about its own version: without it, Server 2019 reports itself as 6.2, and
-    the version this window shows a technician would be wrong on every
-    machine in the fleet.
   -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
       </requestedPrivileges>
     </security>
   </trustInfo>
 
+  <!--
+    What stops Windows lying to the application about its own version:
+    without this list, Server 2019 reports itself as 6.2, and the version
+    this window shows a technician would be wrong on every machine in the
+    fleet. Windows 8, 8.1 and 10 (which covers Server 2016 and above, the
+    tested floor).
+  -->
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
-      <!-- Windows 10 / Server 2016 and above, which is the tested floor. -->
-      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
-      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}" />
-      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" />
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
     </application>
   </compatibility>
 

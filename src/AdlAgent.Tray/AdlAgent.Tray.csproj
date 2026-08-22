@@ -26,6 +26,14 @@
     <AssemblyName>adl-agent-tray</AssemblyName>
     <Description>The ADL Agent's tray and configuration window: pairing, folder binding, live pattern validation and status, over the agent's control surface.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFO0003 tells a WinForms application to declare its DPI awareness
+         through ApplicationHighDpiMode instead of in its manifest. This is a
+         WPF application that references WinForms only for the notification
+         icon: WPF reads per-monitor awareness from the manifest, and the API
+         that property configures is called from WinForms' own message loop,
+         which this program never starts. Suppressed rather than obeyed,
+         because obeying it would silently leave the window DPI-unaware. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
 
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <!-- The same self-contained single file the service publishes as, for the
