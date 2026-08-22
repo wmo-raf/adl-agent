@@ -1,7 +1,7 @@
 namespace AdlAgent.Core.Platform;
 
 /// <summary>
-/// Platform seam 1 of 4: file metadata.
+/// Platform seam 1 of 5: file metadata.
 /// </summary>
 /// <remarks>
 /// Enumeration lives here rather than in the core because metadata and

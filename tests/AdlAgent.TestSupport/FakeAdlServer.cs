@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Serialization;
+using AdlAgent.Core.Update;
 
 namespace AdlAgent.TestSupport;
 
@@ -34,6 +35,7 @@ public sealed class FakeAdlServer : IDisposable
     private readonly HashSet<string> _pairingCodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(long StationLink, string Name), StagedFile> _ledger = [];
     private readonly List<IReadOnlyList<ManifestEntry>> _manifestPages = [];
+    private readonly List<FakeRelease> _releases = [];
     private readonly Lock _gate = new();
     private Task _serving;
     private bool _unreachable;
@@ -216,6 +218,73 @@ public sealed class FakeAdlServer : IDisposable
     /// </remarks>
     public int? ManifestEntriesActuallyAccepted { get; set; }
 
+    /// <summary>
+    /// Whether this instance serves an update feed at all.
+    /// </summary>
+    /// <remarks>
+    /// Set false to be an ADL whose agent plugin predates the feed. Fleets
+    /// were installed before it existed, and those machines have to go on
+    /// working rather than reporting a failure every cycle for ever.
+    /// </remarks>
+    public bool UpdateFeedServed { get; set; } = true;
+
+    /// <summary>
+    /// The version an operator has pinned this device to, if any.
+    /// </summary>
+    /// <remarks>
+    /// The brake decision #262 gives the fleet operator (story 29), and it is
+    /// enforced here rather than in the agent on purpose: a pinned machine is
+    /// never told a newer release exists, so honouring the pin is not
+    /// something an agent could get wrong.
+    /// </remarks>
+    public string? PinnedVersion { get; set; }
+
+    /// <summary>Every published release this instance holds.</summary>
+    public IReadOnlyList<FakeRelease> Releases
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _releases.ToList();
+            }
+        }
+    }
+
+    /// <summary>Publish a release, as an operator uploading a build would.</summary>
+    /// <param name="statedSha256">
+    /// The hash the feed will claim. Left null it is the truth; set to
+    /// something else it is an instance serving a package that is not what it
+    /// says it is -- a corrupted upload, a tampered mirror -- which the agent
+    /// must refuse rather than install.
+    /// </param>
+    public FakeRelease Publish(
+        string version,
+        byte[] bytes,
+        string kind = UpdateKinds.Msi,
+        string? statedSha256 = null)
+    {
+        var release = new FakeRelease
+        {
+            Version = version,
+            Kind = kind,
+            Bytes = bytes,
+            StatedSha256 = statedSha256 ?? Sha256(bytes),
+            FileName = $"AdlAgent-{version}-x64{UpdateKinds.ExtensionFor(kind)}",
+        };
+
+        lock (_gate)
+        {
+            _releases.RemoveAll(held =>
+                held.Version == version &&
+                string.Equals(held.Kind, kind, StringComparison.Ordinal));
+
+            _releases.Add(release);
+        }
+
+        return release;
+    }
+
     /// <summary>What ADL holds for one station link and name, if anything.</summary>
     public StagedFile? Held(long stationLinkId, string name) =>
         Ledger.TryGetValue((stationLinkId, name), out var staged) ? staged : null;
@@ -363,6 +432,9 @@ public sealed class FakeAdlServer : IDisposable
         "heartbeat/" => Authenticated(request, Heartbeat),
         "manifest/" => Authenticated(request, Manifest),
         "files/" => Authenticated(request, Upload),
+        "update/" when UpdateFeedServed => Authenticated(request, UpdateOfferFor),
+        _ when UpdateFeedServed && request.Path.StartsWith("update/", StringComparison.Ordinal) =>
+            Authenticated(request, UpdatePackage),
         _ when request.Path.StartsWith("station-links/", StringComparison.Ordinal) =>
             Authenticated(request, StationLinkConfig),
         _ => (404, new { code = "not_found", detail = $"No endpoint at {request.Path}." }),
@@ -785,6 +857,129 @@ public sealed class FakeAdlServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// What this device should be running, and where to get it.
+    /// </summary>
+    /// <remarks>
+    /// The tier arrives with the question because the two install tiers take
+    /// different packages, and which one a machine is cannot be known from
+    /// here -- an MSI-installed service and a per-user Velopack install are
+    /// the same device row.
+    /// </remarks>
+    private (int Status, object Body) UpdateOfferFor(RecordedRequest request)
+    {
+        var tier = request.Query.TryGetValue("tier", out var asked) ? asked : UpdateTiers.Service;
+
+        var kind = tier switch
+        {
+            UpdateTiers.Service => UpdateKinds.Msi,
+            UpdateTiers.User => UpdateKinds.VelopackFull,
+            _ => null,
+        };
+
+        if (kind is null)
+        {
+            return (400, new { code = "invalid_tier", detail = $"No such install tier: '{tier}'." });
+        }
+
+        var pinned = !string.IsNullOrWhiteSpace(PinnedVersion);
+        var offered = pinned
+            ? Releases.Where(release => release.Version == PinnedVersion).ToList()
+            : Newest();
+
+        if (offered.Count == 0)
+        {
+            return (200, new UpdateOffer
+            {
+                Version = null,
+                Pinned = pinned,
+                Reason = pinned
+                    ? $"This device is pinned to {PinnedVersion}, which this instance does not hold."
+                    : "This instance holds no published agent release.",
+            });
+        }
+
+        var artifact = offered.FirstOrDefault(
+            release => string.Equals(release.Kind, kind, StringComparison.Ordinal));
+
+        return (200, new UpdateOffer
+        {
+            Version = offered[0].Version,
+            Pinned = pinned,
+            Reason = pinned ? $"This device is pinned to {PinnedVersion}." : "",
+            Artifact = artifact is null ? null : new UpdateArtifact
+            {
+                Kind = artifact.Kind,
+                Path = $"update/{artifact.Version}/{artifact.Kind}/",
+                FileName = artifact.FileName,
+                Sha256 = artifact.StatedSha256,
+                Size = artifact.Bytes.LongLength,
+            },
+        });
+    }
+
+    /// <summary>
+    /// The package itself -- but only the one this device is being offered.
+    /// </summary>
+    /// <remarks>
+    /// The same pin, enforced twice. A feed that refused to mention a newer
+    /// release while still serving it to anyone who guessed the URL would be
+    /// a pin that holds only as long as the agent asks nicely.
+    /// </remarks>
+    private (int Status, object Body) UpdatePackage(RecordedRequest request)
+    {
+        var parts = request.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length != 3)
+        {
+            return (404, new { code = "not_found", detail = $"No endpoint at {request.Path}." });
+        }
+
+        var (version, kind) = (parts[1], parts[2]);
+
+        var offered = string.IsNullOrWhiteSpace(PinnedVersion)
+            ? Newest()
+            : Releases.Where(release => release.Version == PinnedVersion).ToList();
+
+        var release = offered.FirstOrDefault(
+            held => held.Version == version && string.Equals(held.Kind, kind, StringComparison.Ordinal));
+
+        if (release is null)
+        {
+            return (404, new
+            {
+                code = "not_offered",
+                detail = $"This device is not being offered a {kind} package for version {version}.",
+            });
+        }
+
+        return (200, new RawBody(release.Bytes, "application/octet-stream", release.FileName));
+    }
+
+    /// <summary>The newest release held, by version number rather than by upload order.</summary>
+    private List<FakeRelease> Newest()
+    {
+        var releases = Releases
+            .Where(release => ReleaseVersion.TryParse(release.Version, out _))
+            .ToList();
+
+        if (releases.Count == 0)
+        {
+            return [];
+        }
+
+        var newest = releases
+            .Select(release =>
+            {
+                ReleaseVersion.TryParse(release.Version, out var parsed);
+
+                return parsed;
+            })
+            .Max();
+
+        return releases.Where(release => release.Version == newest.ToString()).ToList();
+    }
+
     /// <summary>The stored settings with the named ones changed.</summary>
     private static StationLinkAppConfig Merge(StationLinkAppConfig stored, JsonObject changes)
     {
@@ -834,9 +1029,20 @@ public sealed class FakeAdlServer : IDisposable
 
         var form = MultipartForm.Parse(request.ContentType, raw);
 
+        var query = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var key in request.QueryString.AllKeys)
+        {
+            if (key is not null)
+            {
+                query[key] = request.QueryString[key] ?? "";
+            }
+        }
+
         return new RecordedRequest
         {
             Method = request.HttpMethod,
+            Query = query,
             Path = (request.Url?.AbsolutePath ?? "").Replace(ApiPath, "", StringComparison.Ordinal).TrimStart('/'),
             Headers = headers,
             Body = form is null ? Encoding.UTF8.GetString(raw) : "",
@@ -847,11 +1053,22 @@ public sealed class FakeAdlServer : IDisposable
 
     private static async Task WriteAsync(HttpListenerResponse response, int status, object body)
     {
-        var json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(body, AgentJson.Options));
+        // The update packages are the one answer in this API that is not
+        // JSON, and they have to arrive as the bytes the agent will hash --
+        // serialising them would make every hash check pass against the
+        // wrong thing.
+        var raw = body as RawBody;
+
+        var json = raw?.Bytes ?? Encoding.UTF8.GetBytes(JsonSerializer.Serialize(body, AgentJson.Options));
 
         response.StatusCode = status;
-        response.ContentType = "application/json";
+        response.ContentType = raw?.ContentType ?? "application/json";
         response.ContentLength64 = json.Length;
+
+        if (raw is not null)
+        {
+            response.Headers["Content-Disposition"] = $"attachment; filename=\"{raw.FileName}\"";
+        }
 
         // Every call gets a fresh connection. Keep-alive would leave the
         // agent holding a pooled socket to a server the test has since taken
@@ -930,3 +1147,22 @@ public sealed record StagedFile
 
     public string Text => System.Text.Encoding.UTF8.GetString(Bytes);
 }
+
+/// <summary>One published agent release, as this instance holds it.</summary>
+/// <remarks>
+/// <see cref="StatedSha256"/> is what the feed says rather than what the
+/// bytes are, so that a test can be an instance serving a package that is
+/// not what it claims -- the case where the agent must delete the download
+/// and stay on the version it is running.
+/// </remarks>
+public sealed record FakeRelease
+{
+    public required string Version { get; init; }
+    public required string Kind { get; init; }
+    public required byte[] Bytes { get; init; }
+    public required string StatedSha256 { get; init; }
+    public required string FileName { get; init; }
+}
+
+/// <summary>An answer that is bytes rather than JSON.</summary>
+internal sealed record RawBody(byte[] Bytes, string ContentType, string FileName);

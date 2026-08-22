@@ -3,7 +3,7 @@ using AdlAgent.Core.Control;
 namespace AdlAgent.Core.Platform;
 
 /// <summary>
-/// Platform seam 4 of 4: the transport the local UI talks to the agent over.
+/// Platform seam 4 of 5: the transport the local UI talks to the agent over.
 /// </summary>
 /// <remarks>
 /// The protocol is not part of this seam -- it is defined once in

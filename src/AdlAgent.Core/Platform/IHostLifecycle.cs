@@ -1,7 +1,7 @@
 namespace AdlAgent.Core.Platform;
 
 /// <summary>
-/// Platform seam 3 of 4: what the process is running inside.
+/// Platform seam 3 of 5: what the process is running inside.
 /// </summary>
 /// <remarks>
 /// Registering as a Windows Service or a systemd unit is the head's own job

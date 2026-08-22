@@ -10,6 +10,17 @@ public sealed record RecordedRequest
 
     public required IReadOnlyDictionary<string, string> Headers { get; init; }
 
+    /// <summary>
+    /// The query string, parsed. Empty for every call that has none.
+    /// </summary>
+    /// <remarks>
+    /// The update feed is the one endpoint that takes a parameter rather
+    /// than a body: an agent asking what it should run has to say which
+    /// install tier it is, and that is a GET.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> Query { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>The body as text, for the JSON endpoints. Empty for an upload.</summary>
     public required string Body { get; init; }
 

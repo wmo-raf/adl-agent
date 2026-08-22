@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Serialization;
+using AdlAgent.Core.Update;
 using Microsoft.Extensions.Logging;
 
 namespace AdlAgent.Core.Api;
@@ -145,6 +146,128 @@ public sealed class AdlApiClient : IAdlApiClient
         Authorize(request, token);
 
         return await SendAsync<UploadResponse>(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<UpdateOffer> UpdateOfferAsync(
+        string token, string tier, CancellationToken cancellationToken = default)
+    {
+        var path = string.Create(
+            CultureInfo.InvariantCulture, $"update/?tier={Uri.EscapeDataString(tier)}");
+
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+
+        Authorize(request, token);
+
+        return SendAsync<UpdateOffer>(request, cancellationToken);
+    }
+
+    public async Task DownloadUpdateAsync(
+        string token,
+        string path,
+        string destinationPath,
+        long maxBytes,
+        CancellationToken cancellationToken = default)
+    {
+        // The one answer in this API that is not JSON, so it does not go
+        // through SendAsync: what comes back is tens of megabytes of
+        // installer, and it must reach a file without ever being a string.
+        var request = new HttpRequestMessage(HttpMethod.Get, Relative(path));
+
+        Authorize(request, token);
+        request.Headers.TryAddWithoutValidation(VersionHeader, AgentVersion.Current);
+
+        using var http = _clients.CreateClient(HttpClientName);
+
+        HttpResponseMessage response;
+
+        try
+        {
+            response = await http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new AdlUnreachableException(
+                $"Could not reach ADL at {http.BaseAddress}: {exception.Message}", exception);
+        }
+        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new AdlUnreachableException(
+                $"ADL at {http.BaseAddress} did not answer within {http.Timeout}.", exception);
+        }
+
+        using (request)
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw await ReadFailureAsync(response, cancellationToken).ConfigureAwait(false);
+            }
+
+            await using var source = await response.Content
+                .ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
+            await using var file = new FileStream(
+                destinationPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 64 * 1024, useAsync: true);
+
+            var buffer = new byte[64 * 1024];
+            long written = 0;
+
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                written += read;
+
+                if (written > maxBytes)
+                {
+                    // Stopped here rather than after the hash, because the
+                    // hash cannot be checked until the whole thing has landed
+                    // and the whole thing is what would not fit.
+                    throw new AdlRequestException(
+                        response.StatusCode,
+                        "package_too_large",
+                        $"The package at {path} is longer than the {maxBytes} bytes ADL said it would be.");
+                }
+
+                await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// An artifact path from the feed, as something that can only address
+    /// this instance's own API.
+    /// </summary>
+    /// <remarks>
+    /// The feed states a relative path and this refuses anything else. What
+    /// is being fetched is an executable that will replace a service running
+    /// as LocalSystem, so "which host does this come from" is not a question
+    /// the body of a response gets to answer -- not even the body of a
+    /// response from ADL, which is behind whatever reverse proxy a country's
+    /// IT department has put in front of it.
+    /// </remarks>
+    private static string Relative(string path)
+    {
+        if (path.Length == 0 ||
+            path.StartsWith('/') ||
+            path.StartsWith("\\", StringComparison.Ordinal) ||
+            Uri.TryCreate(path, UriKind.Absolute, out _))
+        {
+            throw new AdlRequestException(
+                HttpStatusCode.BadRequest,
+                "invalid_package_path",
+                $"ADL offered a package at '{path}', which is not a path on this instance's agent API.");
+        }
+
+        return path;
     }
 
     /// <summary>

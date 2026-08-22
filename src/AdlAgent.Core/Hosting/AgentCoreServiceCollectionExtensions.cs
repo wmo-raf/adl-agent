@@ -7,6 +7,7 @@ using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.State;
 using AdlAgent.Core.Status;
+using AdlAgent.Core.Update;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -18,11 +19,12 @@ namespace AdlAgent.Core.Hosting;
 /// Everything the agent is, registered in one call.
 /// </summary>
 /// <remarks>
-/// What is deliberately <em>not</em> here is the four platform seams:
+/// What is deliberately <em>not</em> here is the five platform seams:
 /// <see cref="Platform.IFileMetadataSource"/>,
 /// <see cref="Platform.IFileReadinessProbe"/>,
-/// <see cref="Platform.IHostLifecycle"/> and
-/// <see cref="Platform.IControlSurface"/>. A head registers those in its own
+/// <see cref="Platform.IHostLifecycle"/>,
+/// <see cref="Platform.IControlSurface"/> and
+/// <see cref="Platform.IUpdateInstaller"/>. A head registers those in its own
 /// composition root, and that omission is the architecture: the core cannot
 /// accidentally acquire a platform default, because it has none to fall back
 /// on. A head that forgets one fails to start, loudly, on the machine of
@@ -74,6 +76,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<AgentStatusReader>();
         services.TryAddSingleton<AgentStationsReader>();
         services.TryAddSingleton<StationLinkConfigWriter>();
+        services.TryAddSingleton<UpdateService>();
 
         // The cycle's report is written by the scan loop and read by the
         // heartbeat, so one instance is registered under both faces.
@@ -83,6 +86,7 @@ public static class AgentCoreServiceCollectionExtensions
 
         services.AddHostedService<UploadCycleLoop>();
         services.AddHostedService<HeartbeatLoop>();
+        services.AddHostedService<UpdateLoop>();
         services.AddHostedService<AgentControlService>();
 
         return services;

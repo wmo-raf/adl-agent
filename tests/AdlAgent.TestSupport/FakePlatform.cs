@@ -2,11 +2,12 @@ using AdlAgent.Core.Api;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.State;
+using AdlAgent.Core.Update;
 
 namespace AdlAgent.TestSupport;
 
 /// <summary>
-/// The four platform seams, faked.
+/// The five platform seams, faked.
 /// </summary>
 /// <remarks>
 /// These exist so that a test can describe a filesystem it is not on. The
@@ -342,6 +343,68 @@ public sealed class FakeControlSurface : IControlSurface
             .ConfigureAwait(false);
 
         return await handler(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// An installer that takes the package and does not restart anything.
+/// </summary>
+/// <remarks>
+/// The real ones end this process, which is not something a test can be
+/// asked to survive. What is worth asserting is everything up to that point
+/// -- that the tier travelled, that a package was fetched, that its bytes
+/// were proven before anything was handed the path -- so this records the
+/// handover and returns.
+/// </remarks>
+public sealed class FakeUpdateInstaller : IUpdateInstaller
+{
+    private readonly List<DownloadedUpdate> _applied = [];
+
+    /// <summary>How this install describes itself when asking ADL what to run.</summary>
+    public string Tier { get; set; } = UpdateTiers.Service;
+
+    /// <summary>
+    /// Whether this install is one the agent may replace. Set false to be a
+    /// folder somebody unzipped, or a developer's <c>dotnet run</c>.
+    /// </summary>
+    public bool CanApply { get; set; } = true;
+
+    /// <summary>Set to be an install whose platform installer will not start.</summary>
+    public string? FailsWith { get; set; }
+
+    /// <summary>How many times the platform installer refused a package.</summary>
+    public int RefusedCount { get; private set; }
+
+    /// <summary>Every package handed over, in order.</summary>
+    public IReadOnlyList<DownloadedUpdate> Applied
+    {
+        get
+        {
+            lock (_applied)
+            {
+                return _applied.ToList();
+            }
+        }
+    }
+
+    /// <summary>The bytes of the package handed over, as they were on disk.</summary>
+    public byte[] BytesOf(DownloadedUpdate update) => File.ReadAllBytes(update.Path);
+
+    public Task ApplyAsync(DownloadedUpdate update, CancellationToken cancellationToken = default)
+    {
+        if (FailsWith is not null)
+        {
+            RefusedCount++;
+
+            throw new UpdateFailedException(FailsWith);
+        }
+
+        lock (_applied)
+        {
+            _applied.Add(update);
+        }
+
+        return Task.CompletedTask;
     }
 }
 

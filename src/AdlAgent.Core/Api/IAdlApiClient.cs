@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using AdlAgent.Core.Update;
 
 namespace AdlAgent.Core.Api;
 
@@ -92,4 +93,45 @@ public interface IAdlApiClient
     /// <exception cref="AdlUnreachableException">ADL could not be reached.</exception>
     Task<UploadResponse> UploadFileAsync(
         string token, ManifestEntry entry, string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ask what this machine should be running.
+    /// </summary>
+    /// <remarks>
+    /// The feed is served by this device's own ADL instance and by nothing
+    /// else, which is the point: the machines this product exists for cannot
+    /// reach the internet, so an update channel anywhere but here would be a
+    /// fleet that never updates (story 28).
+    /// </remarks>
+    /// <param name="tier">
+    /// How this install was installed -- see <see cref="Update.UpdateTiers"/>.
+    /// The two tiers take different packages, and ADL picks.
+    /// </param>
+    /// <exception cref="DeviceRevokedException">The token is no longer good.</exception>
+    /// <exception cref="AdlRequestException">This instance serves no update feed.</exception>
+    /// <exception cref="AdlUnreachableException">ADL could not be reached.</exception>
+    Task<UpdateOffer> UpdateOfferAsync(
+        string token, string tier, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetch an offered package to <paramref name="destinationPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// Streamed to disk rather than read into memory -- these are tens of
+    /// megabytes and the machines are small -- and refused the moment it
+    /// grows past the size ADL stated, so a feed answering with something
+    /// else cannot fill a country server's disk before anyone checks its
+    /// hash.
+    /// </remarks>
+    /// <param name="path">The artifact path from the offer, relative to the API base.</param>
+    /// <param name="maxBytes">The size ADL promised. Anything longer is refused mid-stream.</param>
+    /// <exception cref="DeviceRevokedException">The token is no longer good.</exception>
+    /// <exception cref="AdlRequestException">ADL would not serve that package.</exception>
+    /// <exception cref="AdlUnreachableException">ADL could not be reached.</exception>
+    Task DownloadUpdateAsync(
+        string token,
+        string path,
+        string destinationPath,
+        long maxBytes,
+        CancellationToken cancellationToken = default);
 }

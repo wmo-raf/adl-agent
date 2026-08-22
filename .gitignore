@@ -1,6 +1,11 @@
 bin/
 obj/
 publish/
+
+# What packaging/pack.ps1 produces: the installers, and the .wixpdb beside
+# them. Built from the sources here on demand, and published to a GitHub
+# release rather than committed.
+artifacts/
 TestResults/
 *.user
 *.suo

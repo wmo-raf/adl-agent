@@ -226,6 +226,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
@@ -244,10 +246,23 @@
                     <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
                     <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
                     <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
-                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
-                    <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
+                    <!--
+                        What version this machine is on and what it is doing
+                        about it. Here because the alternative, when HQ says a
+                        country is running something old, is a technician
+                        reading service logs to find out whether their machine
+                        is pinned, unable to reach the feed, or simply already
+                        current.
+                    -->
+                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="This version" />
+                    <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AgentVersion}" />
+                    <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
+                    <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                    <TextBlock Grid.Row="10" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
 
-                    <Button Grid.Row="9" Grid.Column="1" Content="Refresh now" Padding="14,6"
+                    <Button Grid.Row="11" Grid.Column="1" Content="Refresh now" Padding="14,6"
                             HorizontalAlignment="Left" Margin="0,14,0,0"
                             Command="{Binding RefreshCommand}" />
                 </Grid>

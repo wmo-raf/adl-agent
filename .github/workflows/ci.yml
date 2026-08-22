@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # Without this a tag push matches nothing and the release job below --
+    # which is the only thing that ever publishes agent-releases.json, and so
+    # the only way any ADL instance learns a version exists -- can never run.
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -40,13 +44,17 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: "**/TestResults/*.trx"
 
-  publish:
-    # What actually gets installed on a country server: two files, each with
-    # the runtime inside it, needing nothing preinstalled. The service is the
-    # product; the tray is what the technician sees, and it is published
-    # beside it rather than inside it because the two run as different
-    # accounts -- the service as LocalSystem with nobody logged on, the tray
-    # in the technician's own session.
+  package:
+    # What actually gets installed on a country server. Two tiers, from one
+    # script: an MSI that installs a Windows Service for a technician with
+    # administrator rights, and a Velopack install for one without (decision
+    # #262, story 3).
+    #
+    # The script is `packaging/pack.ps1` rather than a list of steps here, so
+    # that the packages an NMHS installs can be reproduced by a person on a
+    # Windows machine exactly as this produced them. Working out what went
+    # wrong with an install nobody can reach is hard enough without the build
+    # existing only inside a CI file.
     needs: test
     runs-on: windows-latest
     steps:
@@ -56,15 +64,98 @@ jobs:
         with:
           global-json-file: global.json
 
-      # Separate folders: the tray's publish carries a few of the service
-      # project's own artefacts along with it (it references that project),
-      # and an installer should be given two clean directories rather than
-      # one it has to pick apart.
-      - run: dotnet publish src/AdlAgent.Windows/AdlAgent.Windows.csproj -c Release -r win-x64 -o publish/service
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            # A tagged build is a release, and the tag is the version the
+            # whole fleet will compare itself against.
+            $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          } else {
+            # Anything else builds the version in the repository, so that a
+            # pull request proves the packaging still works without minting a
+            # version number that means nothing.
+            $properties = [xml](Get-Content Directory.Build.props)
+            $version = ($properties.Project.PropertyGroup.VersionPrefix).Trim()
+          }
 
-      - run: dotnet publish src/AdlAgent.Tray/AdlAgent.Tray.csproj -c Release -r win-x64 -o publish/tray
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "'$version' is not three numbers. The update feed refuses anything else."
+          }
 
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build the installers
+        shell: pwsh
+        run: ./packaging/pack.ps1 -Version ${{ steps.version.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adl-agent-packages
+          path: artifacts/
+
+      # The bare programs as well: an installer is not the only way to try a
+      # build, and a self-contained publish is what somebody debugging a
+      # country's machine copies onto it.
       - uses: actions/upload-artifact@v4
         with:
           name: adl-agent-win-x64
           path: publish/
+
+  release:
+    # Publishing a version, once, in the one place every ADL instance
+    # mirrors from.
+    #
+    # This is the seam between the two repositories: the index written here
+    # is what `adl-agent-plugin`'s nightly mirror reads, and the digests in it
+    # are what every agent in every fleet checks its download against before
+    # installing it. Nothing downstream trusts anything that is not in here.
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: adl-agent-packages
+          path: artifacts
+
+      - name: Fetch the index this one supersedes
+        # Best effort, and unremarkable when it fails: the first release has
+        # no predecessor. Merging matters because an instance mirroring for
+        # the first time should still be able to reach the version before
+        # this one, which is what an operator pinning a machine one release
+        # back needs to exist.
+        run: |
+          curl -fsSL -o previous.json \
+            "https://github.com/${{ github.repository }}/releases/latest/download/agent-releases.json" \
+            || echo "No previous index; this index starts the list."
+
+      - name: Write the release index
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          python3 packaging/release-index.py \
+            --artifacts artifacts \
+            --version "$VERSION" \
+            --url-base "https://github.com/${{ github.repository }}/releases/download/$TAG" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --notes "ADL Agent $VERSION" \
+            --previous previous.json \
+            --output artifacts/agent-releases.json
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          gh release create "$TAG" \
+            --title "ADL Agent ${TAG#v}" \
+            --generate-notes \
+            artifacts/*
