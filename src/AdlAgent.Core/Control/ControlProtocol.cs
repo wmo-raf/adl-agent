@@ -77,6 +77,33 @@ public static class ControlProtocol
     /// </remarks>
     public const string ConfigureCommand = "configure";
 
+    /// <summary>
+    /// The agent accepted the connection and then closed it without saying
+    /// anything.
+    /// </summary>
+    /// <remarks>
+    /// Not a refusal, despite arriving as one: it means the conversation was
+    /// lost rather than that anything was decided. The surface serves one
+    /// client at a time and lets go of its pipe between clients, so a client
+    /// that connected in the instant before that happens is dropped without
+    /// an answer -- as is one that connected while the service was stopping.
+    /// A caller that can ask again should, which is why the code is named
+    /// here rather than written twice.
+    /// </remarks>
+    public const string NoAnswerError = "no_answer";
+
+    /// <summary>
+    /// ADL has revoked this machine's token, and the only thing to do about
+    /// it is pair again.
+    /// </summary>
+    /// <remarks>
+    /// Named because it is the one refusal a local UI switches on rather
+    /// than merely shows: every other error code this surface produces is
+    /// read by a person, but this one turns a window's message into an
+    /// instruction, and the two ends must agree on the spelling.
+    /// </remarks>
+    public const string RePairNeededError = "re_pair_needed";
+
     /// <summary>Read one request, or <c>null</c> when the client hung up.</summary>
     public static async Task<ControlRequest?> ReadRequestAsync(
         Stream stream, CancellationToken cancellationToken = default)
@@ -125,21 +152,6 @@ public static class ControlProtocol
         return response ?? Failure(
             NoAnswerError, "The agent closed the connection without answering.");
     }
-
-    /// <summary>
-    /// The agent accepted the connection and then closed it without saying
-    /// anything.
-    /// </summary>
-    /// <remarks>
-    /// Not a refusal, despite arriving as one: it means the conversation was
-    /// lost rather than that anything was decided. The surface serves one
-    /// client at a time and lets go of its pipe between clients, so a client
-    /// that connected in the instant before that happens is dropped without
-    /// an answer -- as is one that connected while the service was stopping.
-    /// A caller that can ask again should, which is why the code is named
-    /// here rather than written twice.
-    /// </remarks>
-    public const string NoAnswerError = "no_answer";
 
     private static ControlResponse Failure(string error, string detail) =>
         ControlResponse.Failure(error, detail);

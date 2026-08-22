@@ -125,10 +125,22 @@ public sealed class NotPairedException : Exception
 public sealed class UnknownStationLinkException : Exception
 {
     public UnknownStationLinkException(long stationLinkId)
-        : base($"This machine has no station link {stationLinkId}. Its station list may be out of date.")
+        : base(Describe(stationLinkId))
     {
         StationLinkId = stationLinkId;
     }
 
     public long StationLinkId { get; }
+
+    /// <summary>
+    /// The sentence for a station this device does not have.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than at each place that says it, because the preview
+    /// command refuses the same thing without anything going wrong -- it is
+    /// answering a question, not failing at one -- and the technician should
+    /// not be told two different things about one situation.
+    /// </remarks>
+    public static string Describe(long stationLinkId) =>
+        $"This machine has no station link {stationLinkId}. Its station list may be out of date.";
 }

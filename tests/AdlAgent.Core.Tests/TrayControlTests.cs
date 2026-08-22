@@ -335,6 +335,59 @@ public class TrayControlTests
     }
 
     [Fact]
+    public async Task Settings_ADL_will_not_store_come_back_as_the_sentence_ADL_wrote()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder, "GARISSA_*.dat"));
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        // Cleared the folder box to retype it, and pressed Save. ADL
+        // validates the tier before storing it, and refuses.
+        var response = await Configure(agent, 11, new JsonObject
+        {
+            ["local_folder_path"] = "",
+        });
+
+        Assert.False(response.Ok);
+        Assert.Equal("invalid_config", response.Error);
+        Assert.Contains("folder", response.Detail);
+
+        // Refused whole: the station is still bound to the folder it was.
+        Assert.Equal(
+            Folder,
+            agent.Configuration.Current!.StationLinks.Single().Config.LocalFolderPath);
+    }
+
+    [Fact]
+    public async Task A_station_ADL_has_since_moved_elsewhere_is_refused_by_ADL_and_survived()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder));
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        // This machine's cached configuration still has the station; ADL has
+        // moved it to another device since. The local check cannot catch this
+        // one, so it is ADL's 404 that has to arrive as something a person
+        // can read.
+        agent.Server.StationLinksUnknownToAdl.Add(11);
+
+        var response = await Configure(agent, 11, new JsonObject
+        {
+            ["file_pattern"] = "*.dat",
+        });
+
+        Assert.False(response.Ok);
+        Assert.Equal("not_found", response.Error);
+        Assert.Contains("station link", response.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task A_write_with_no_ADL_to_write_to_is_not_quietly_applied_here_instead()
     {
         await using var agent = new AgentHarness();

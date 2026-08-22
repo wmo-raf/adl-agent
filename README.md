@@ -305,6 +305,18 @@ there.
   local time may be unable to resolve it. It reports the timezone it could
   not resolve rather than looking for the wrong filenames, so the station
   shows a reason in the fleet listing instead of going quiet.
+- **The check interval is shown but not editable.** Decision #260 puts it in
+  the app tier, and it is per device; the plugin serves no endpoint for it
+  (the only config write is per station link), so there is nothing for the
+  tray to write it through. Editing it needs a companion change in
+  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin) first.
+- **The tray's view models have no tests.** The spec leaves the window
+  unautomated and its layout is not worth automating, but the view models
+  underneath it hold real decisions -- which fields differ from what ADL
+  sent, when a poll may replace a row somebody is typing into -- and those
+  are only covered by reading. They are in a `net10.0-windows` assembly,
+  which the `net10.0` test project cannot reference; moving them into a
+  platform-neutral library would fix that.
 - **The tray does not start itself.** There is no logon entry and no shortcut
   until the installer lands (#282); a technician starts `adl-agent-tray.exe`
   by hand, or somebody puts it in the Startup folder.

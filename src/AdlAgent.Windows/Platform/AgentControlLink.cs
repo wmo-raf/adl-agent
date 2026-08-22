@@ -46,6 +46,19 @@ public sealed class AgentControlLink
     /// </remarks>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
 
+    /// <summary>
+    /// How long to leave between the two attempts a question gets.
+    /// </summary>
+    /// <remarks>
+    /// The surface serves one client at a time and opens a fresh pipe
+    /// instance after each, so there is a short instant between two
+    /// conversations when nothing is listening. A window that redraws itself
+    /// from four commands in a row would otherwise report a working service
+    /// as absent now and then -- which is worse than a slow answer, because
+    /// it is the message that starts a phone call.
+    /// </remarks>
+    private static readonly TimeSpan BetweenAttempts = TimeSpan.FromMilliseconds(150);
+
     private readonly Func<NamedPipeControlClient> _clients;
 
     /// <param name="clients">
@@ -98,19 +111,6 @@ public sealed class AgentControlLink
                 ControlProtocol.ConfigureCommand,
                 new JsonObject { ["station_link_id"] = stationLinkId, ["config"] = config }),
             cancellationToken);
-
-    /// <summary>
-    /// How long to leave between the two attempts a question gets.
-    /// </summary>
-    /// <remarks>
-    /// The surface serves one client at a time and opens a fresh pipe
-    /// instance after each, so there is a short instant between two
-    /// conversations when nothing is listening. A window that redraws itself
-    /// from four commands in a row would otherwise report a working service
-    /// as absent now and then -- which is worse than a slow answer, because
-    /// it is the message that starts a phone call.
-    /// </remarks>
-    private static readonly TimeSpan BetweenAttempts = TimeSpan.FromMilliseconds(150);
 
     private async Task<AgentAnswer<T>> AskAsync<T>(
         ControlRequest request, CancellationToken cancellationToken) where T : class
@@ -222,7 +222,7 @@ public sealed record AgentAnswer<T> where T : class
     /// True when ADL has revoked this machine's token: the one refusal a UI
     /// turns into an instruction rather than a message.
     /// </summary>
-    public bool NeedsRePairing => Error == "re_pair_needed";
+    public bool NeedsRePairing => Error == ControlProtocol.RePairNeededError;
 
     public static AgentAnswer<T> Answered(T value) => new(value, null, null, serviceReached: true);
 

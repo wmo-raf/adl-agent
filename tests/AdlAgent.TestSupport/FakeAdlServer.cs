@@ -729,14 +729,37 @@ public sealed class FakeAdlServer : IDisposable
 
             if (link is null || StationLinksUnknownToAdl.Contains(stationLinkId))
             {
+                // The plugin's own answer, verbatim: one code for a link that
+                // does not exist and for one belonging to another machine,
+                // because a device has no business learning the ids of other
+                // machines' work.
                 return (404, new
                 {
-                    code = "unknown_station_link",
-                    detail = "This device has no station link with that id.",
+                    code = "not_found",
+                    detail = "No station link with that id is configured for this device.",
                 });
             }
 
             var written = Merge(link.Config, changes);
+
+            // ADL validates the tier it was sent before storing it, and a
+            // station link with no folder is the refusal a technician is
+            // likeliest to meet: they cleared the box to retype it and
+            // pressed Save. The plugin raises this from `full_clean`, so the
+            // shape -- a code, a sentence, and the offending fields -- is
+            // what an agent has to render.
+            if (string.IsNullOrWhiteSpace(written.LocalFolderPath))
+            {
+                return (400, new
+                {
+                    code = "invalid_config",
+                    detail = "The settings sent do not describe a folder the agent can read.",
+                    errors = new Dictionary<string, string[]>
+                    {
+                        ["local_folder_path"] = ["This field cannot be blank."],
+                    },
+                });
+            }
 
             Config = Config with
             {

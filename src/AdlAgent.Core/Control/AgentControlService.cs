@@ -146,10 +146,47 @@ public sealed class AgentControlService : BackgroundService
     private ControlResponse Preview(ControlRequest request)
     {
         var payload = request.Payload ?? [];
+        var stationLinkId = StationLinkId(payload);
+        var settings = new JsonObject();
 
-        if (!TryResolveConfig(payload, out var config, out var refusal))
+        // The named station's settings are the ground the typed ones are laid
+        // over. That overlay is what makes the count live: a window sends the
+        // one box somebody is editing and gets an answer for the whole
+        // configuration as it would then stand, rather than having to hold --
+        // and keep in step -- a copy of every other setting ADL sent.
+        if (stationLinkId is not null)
         {
-            return refusal;
+            var link = _configuration.Current?.StationLinks
+                .FirstOrDefault(candidate => candidate.Id == stationLinkId);
+
+            if (link is null)
+            {
+                return ControlResponse.Failure(
+                    "unknown_station_link",
+                    UnknownStationLinkException.Describe(stationLinkId.Value));
+            }
+
+            settings = ToJson(link.Config);
+        }
+
+        foreach (var typed in payload)
+        {
+            if (typed.Key != "station_link_id")
+            {
+                settings[typed.Key] = typed.Value?.DeepClone();
+            }
+        }
+
+        StationLinkAppConfig config;
+
+        try
+        {
+            config = settings.Deserialize<StationLinkAppConfig>(AgentJson.Options)
+                ?? new StationLinkAppConfig();
+        }
+        catch (JsonException exception)
+        {
+            return ControlResponse.Failure("invalid_request", exception.Message);
         }
 
         return ControlResponse.Success(ToJson(_preview.Preview(config, _time.GetUtcNow())));
@@ -189,7 +226,7 @@ public sealed class AgentControlService : BackgroundService
             // Not passed through as ADL's own code: what the technician has
             // to do about a revoked token is the same whatever ADL called it,
             // and it is the one refusal the tray turns into an instruction.
-            return ControlResponse.Failure("re_pair_needed", exception.Detail);
+            return ControlResponse.Failure(ControlProtocol.RePairNeededError, exception.Detail);
         }
         catch (AdlRequestException exception)
         {
@@ -199,68 +236,6 @@ public sealed class AgentControlService : BackgroundService
         {
             return ControlResponse.Failure("adl_unreachable", exception.Message);
         }
-    }
-
-    /// <summary>
-    /// The settings to preview: the named station's, with whatever was typed
-    /// laid over them.
-    /// </summary>
-    /// <remarks>
-    /// The overlay is what makes the count live. A tray sends the one box the
-    /// technician is editing and the station it belongs to, and gets an
-    /// answer for the whole configuration as it would then stand -- rather
-    /// than having to hold, and keep in step, a copy of every other setting
-    /// ADL sent.
-    /// </remarks>
-    private bool TryResolveConfig(
-        JsonObject payload, out StationLinkAppConfig config, out ControlResponse refusal)
-    {
-        config = new StationLinkAppConfig();
-        refusal = ControlResponse.Success();
-
-        var stationLinkId = StationLinkId(payload);
-        var stored = new JsonObject();
-
-        if (stationLinkId is not null)
-        {
-            var link = _configuration.Current?.StationLinks
-                .FirstOrDefault(candidate => candidate.Id == stationLinkId);
-
-            if (link is null)
-            {
-                refusal = ControlResponse.Failure(
-                    "unknown_station_link",
-                    $"This machine has no station link {stationLinkId}. Its station list may be out of date.");
-
-                return false;
-            }
-
-            stored = ToJson(link.Config);
-        }
-
-        foreach (var typed in payload)
-        {
-            if (typed.Key == "station_link_id")
-            {
-                continue;
-            }
-
-            stored[typed.Key] = typed.Value?.DeepClone();
-        }
-
-        try
-        {
-            config = stored.Deserialize<StationLinkAppConfig>(AgentJson.Options)
-                ?? new StationLinkAppConfig();
-        }
-        catch (JsonException exception)
-        {
-            refusal = ControlResponse.Failure("invalid_request", exception.Message);
-
-            return false;
-        }
-
-        return true;
     }
 
     /// <summary>

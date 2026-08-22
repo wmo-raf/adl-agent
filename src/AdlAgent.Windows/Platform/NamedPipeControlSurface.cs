@@ -130,6 +130,15 @@ public sealed class NamedPipeControlSurface : IControlSurface
     /// console or over RDP, which is what Interactive means, while Users
     /// would also cover every service account on the box.
     /// </para>
+    /// <para>
+    /// Public so that a test can read the rules back, which is a departure
+    /// from this suite's habit of asserting only what a client could see.
+    /// It is deliberate: what a client can see is that it connected, and a
+    /// client running as the same account connects under the default ACL
+    /// too -- so the one observation available proves nothing about the
+    /// decision being made here. The alternative is no coverage at all of
+    /// who may pair this machine.
+    /// </para>
     /// </remarks>
     [SupportedOSPlatform("windows")]
     public static PipeSecurity LocalUiSecurity()

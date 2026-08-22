@@ -124,6 +124,38 @@
                             <TextBox Style="{StaticResource Entry}"
                                      Text="{Binding FilePattern, UpdateSourceTrigger=PropertyChanged}" />
 
+                            <CheckBox Margin="0,6,0,4" Content="Files sit under dated sub-folders"
+                                      IsChecked="{Binding DirStructuredByDate, Mode=TwoWay}" />
+
+                            <StackPanel Visibility="{Binding DirStructuredByDate, Converter={StaticResource Visible}}">
+                                <TextBlock Foreground="#8A5A00" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    This version of the agent does not walk dated sub-folders. Until it does,
+                                    point the folder above at where the files actually are and clear this box.
+                                </TextBlock>
+
+                                <TextBlock Style="{StaticResource Field}" Text="How far down the tree" />
+                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="200"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding DateGranularity, Mode=TwoWay}">
+                                    <ComboBoxItem Tag="year" Content="Year" />
+                                    <ComboBoxItem Tag="month" Content="Month" />
+                                    <ComboBoxItem Tag="day" Content="Day" />
+                                    <ComboBoxItem Tag="hour" Content="Hour" />
+                                </ComboBox>
+
+                                <TextBlock Style="{StaticResource Field}" Text="Month folder format" />
+                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding MonthDirFormat, Mode=TwoWay}">
+                                    <ComboBoxItem Tag="m" Content="01 to 12" />
+                                    <ComboBoxItem Tag="n" Content="1 to 12" />
+                                    <ComboBoxItem Tag="M" Content="Jan" />
+                                    <ComboBoxItem Tag="b" Content="jan" />
+                                    <ComboBoxItem Tag="F" Content="January" />
+                                    <ComboBoxItem Tag="f" Content="january" />
+                                </ComboBox>
+                            </StackPanel>
+
                             <TextBlock Style="{StaticResource Field}" Text="How files are found" />
                             <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
                                       SelectedValuePath="Tag"

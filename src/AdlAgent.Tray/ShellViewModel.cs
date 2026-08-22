@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 using AdlAgent.Windows.Platform;
+using CorePairingState = AdlAgent.Core.Pairing.PairingState;
 
 namespace AdlAgent.Tray;
 
@@ -37,21 +38,15 @@ public sealed class ShellViewModel : Observable
     private string _alert = "";
     private StationViewModel? _selectedStation;
 
-    /// <summary>The station answer the rows were last built from.</summary>
-    private string _shown = "";
-
-    /// <summary>
-    /// Set for the one refresh that follows a save, where the boxes
-    /// differing from what ADL sent is exactly what was just fixed.
-    /// </summary>
-    private bool _replaceEvenIfEdited;
+    /// <summary>The station list the rows were last built from, as it arrived.</summary>
+    private string _shownStations = "";
 
     public ShellViewModel(AgentControlLink agent)
     {
         _agent = agent;
 
         PairCommand = new AsyncCommand(PairAsync, Failed, () => PairingCode.Trim().Length > 0);
-        RefreshCommand = new AsyncCommand(RefreshAsync, Failed);
+        RefreshCommand = new AsyncCommand(() => RefreshAsync(), Failed);
         SaveStationCommand = new AsyncCommand(
             SaveStationAsync, Failed, () => SelectedStation?.HasChanges == true);
     }
@@ -82,15 +77,15 @@ public sealed class ShellViewModel : Observable
 
     public string PairingState => _status?.PairingState ?? "Unknown";
 
-    public bool IsPaired => _status?.PairingState == "Paired";
+    public bool IsPaired => _status?.PairingState == nameof(CorePairingState.Paired);
 
     public bool NeedsRePairing => _status?.RePairNeeded == true;
 
     public string FleetStatus => _status?.FleetStatus ?? "-";
 
-    public string LastHeartbeat => Moment(_status?.LastHeartbeatAt);
+    public string LastHeartbeat => Display.Moment(_status?.LastHeartbeatAt);
 
-    public string LastSynced => Moment(_status?.LastSyncedAt);
+    public string LastSynced => Display.Moment(_status?.LastSyncedAt);
 
     public string ConfigVersion => _status?.ConfigVersion?.ToString(CultureInfo.CurrentCulture) ?? "-";
 
@@ -102,7 +97,7 @@ public sealed class ShellViewModel : Observable
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"{_status.ClockSkewSeconds} seconds");
 
-    public string PairedAt => Moment(_status?.PairedAt);
+    public string PairedAt => Display.Moment(_status?.PairedAt);
 
     public string LastError => _status?.LastError ?? "";
 
@@ -217,7 +212,14 @@ public sealed class ShellViewModel : Observable
     /// so the window cannot draw a station list beside a status that
     /// disagrees with it.
     /// </remarks>
-    public async Task RefreshAsync()
+    /// <param name="replaceEvenIfEdited">
+    /// Set by the refresh that follows a save, where boxes differing from
+    /// what ADL sent is exactly what has just been fixed. A parameter and not
+    /// a field: the poll can tick during this method's awaits, and a field
+    /// would let that tick inherit the permission and overwrite whatever
+    /// somebody had started typing in the meantime.
+    /// </param>
+    public async Task RefreshAsync(bool replaceEvenIfEdited = false)
     {
         var status = await _agent.StatusAsync().ConfigureAwait(true);
 
@@ -240,7 +242,7 @@ public sealed class ShellViewModel : Observable
             return;
         }
 
-        Show(stations.Value);
+        Show(stations.Value, replaceEvenIfEdited);
     }
 
     /// <summary>Redeem a pairing code (story 2).</summary>
@@ -345,58 +347,56 @@ public sealed class ShellViewModel : Observable
         // should be what ADL holds, including anything it normalised on the
         // way in. This is the refresh that is allowed to replace edited
         // boxes, because the edit in them is the one that just landed.
-        _replaceEvenIfEdited = true;
-
-        try
-        {
-            await RefreshAsync().ConfigureAwait(true);
-        }
-        finally
-        {
-            // Cleared here rather than where it is read, because the refresh
-            // it was set for may not reach the station list at all -- and a
-            // flag left standing would let the next poll, seconds later,
-            // overwrite whatever somebody had started typing by then.
-            _replaceEvenIfEdited = false;
-        }
+        await RefreshAsync(replaceEvenIfEdited: true).ConfigureAwait(true);
     }
 
     /// <summary>
-    /// Replace the list with what the service just said, keeping the
-    /// selection -- but only when there is something new to show and nobody
-    /// is in the middle of typing.
+    /// Replace the rows with what the service just said, keeping the
+    /// selection -- but only when the stations themselves have changed and
+    /// nobody is in the middle of typing.
     /// </summary>
     /// <remarks>
-    /// Both guards matter, and both are about the poll rather than about
-    /// pressing Refresh. This runs every few seconds for as long as the
-    /// window is open, and rebuilding the rows each time would take the
-    /// keyboard focus away from whoever was typing a folder path -- and,
-    /// worse, would replace what they had typed with what ADL still holds.
-    /// A technician cannot type a path into a box that empties itself every
-    /// five seconds.
+    /// Both guards are about the poll rather than about pressing Refresh.
+    /// This runs every few seconds for as long as the window is open, and
+    /// rebuilding the rows each time would take the keyboard focus away from
+    /// whoever was typing a folder path -- and, worse, would replace what they
+    /// had typed with what ADL still holds. A technician cannot type a path
+    /// into a box that empties itself every five seconds.
     /// <para>
-    /// The comparison is against the answer itself rather than a hand-listed
-    /// set of fields, so a field added to the station snapshot is noticed
-    /// here without anybody remembering to add it.
+    /// The comparison is against the stations alone and not the whole answer,
+    /// which also carries the moment of the last sync and the last cycle.
+    /// Those move on every cycle without any station having changed, and
+    /// rebuilding on them would throw away the live match count a technician
+    /// was reading -- occasionally, and for no reason they could see.
+    /// </para>
+    /// <para>
+    /// What it does compare is the stations as they arrived, rather than a
+    /// hand-listed set of fields, so a field added to the station snapshot is
+    /// noticed here without anybody remembering to add it.
     /// </para>
     /// </remarks>
-    private void Show(AgentStationsSnapshot stations)
+    private void Show(AgentStationsSnapshot stations, bool replaceEvenIfEdited)
     {
-        if (!_replaceEvenIfEdited && SelectedStation?.HasChanges == true)
+        if (!replaceEvenIfEdited && SelectedStation?.HasChanges == true)
         {
             return;
         }
 
-        var answer = JsonSerializer.Serialize(stations, AgentJson.Options);
+        var arrived = JsonSerializer.Serialize(stations.Stations, AgentJson.Options);
 
-        if (!_replaceEvenIfEdited && answer == _shown)
+        if (!replaceEvenIfEdited && arrived == _shownStations)
         {
             return;
         }
 
-        _shown = answer;
+        _shownStations = arrived;
 
+        // Carried across the rebuild. The count belongs to the folder and the
+        // pattern, neither of which this is changing, and blanking it would
+        // have the sentence a technician is reading disappear the moment a
+        // cycle finished somewhere behind them.
         var selected = SelectedStation?.StationLinkId;
+        var counted = SelectedStation?.MatchSummary;
 
         SelectedStation = null;
         Stations.Clear();
@@ -406,8 +406,14 @@ public sealed class ShellViewModel : Observable
             Stations.Add(new StationViewModel(station));
         }
 
-        SelectedStation = Stations.FirstOrDefault(station => station.StationLinkId == selected)
-            ?? Stations.FirstOrDefault();
+        var showing = Stations.FirstOrDefault(station => station.StationLinkId == selected);
+
+        if (showing is not null && counted is { Length: > 0 })
+        {
+            showing.KeepCount(counted);
+        }
+
+        SelectedStation = showing ?? Stations.FirstOrDefault();
     }
 
     private void StationEdited(object? sender, EventArgs args)
@@ -432,7 +438,7 @@ public sealed class ShellViewModel : Observable
                 + "pairing code and pair again — nothing is being sent until you do.";
         }
 
-        if (status.PairingState == "Unpaired")
+        if (status.PairingState == nameof(CorePairingState.Unpaired))
         {
             return "This machine is not paired with ADL yet.";
         }
@@ -474,7 +480,4 @@ public sealed class ShellViewModel : Observable
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(Headline),
     ];
-
-    private static string Moment(DateTimeOffset? value) =>
-        value is null ? "-" : value.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
 }

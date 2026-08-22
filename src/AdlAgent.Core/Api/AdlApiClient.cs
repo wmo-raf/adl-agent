@@ -285,11 +285,47 @@ public sealed class AdlApiClient : IAdlApiClient
             return (
                 string.IsNullOrWhiteSpace(envelope.Code) ? fallback.Item1 : envelope.Code,
                 envelope.Detail,
-                envelope.Errors);
+                Rejected(envelope.Errors));
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
             return fallback;
+        }
+    }
+
+    /// <summary>
+    /// The entries of a refused batch, when <c>errors</c> is that.
+    /// </summary>
+    /// <remarks>
+    /// <c>errors</c> does not have one shape across this API, and reading it
+    /// as though it did costs more than the field is worth. A refused
+    /// manifest names its offending entries as a list; a refused
+    /// configuration names its offending fields as an object keyed by field
+    /// name. Deserialising the envelope straight into a list therefore fails
+    /// on the second, and -- because the whole envelope is read at once --
+    /// takes the code and the sentence down with it: a technician who typed
+    /// a folder ADL will not store would be shown "ADL answered 400 Bad
+    /// Request" instead of what ADL actually said about it.
+    /// <para>
+    /// So the field is read as whatever it is, and turned into entries only
+    /// when it is a list of them. What the other shapes carry is already in
+    /// the sentence.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<RejectedEntry> Rejected(JsonNode? errors)
+    {
+        if (errors is not JsonArray entries)
+        {
+            return [];
+        }
+
+        try
+        {
+            return entries.Deserialize<IReadOnlyList<RejectedEntry>>(AgentJson.Options) ?? [];
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            return [];
         }
     }
 
@@ -298,7 +334,10 @@ public sealed class AdlApiClient : IAdlApiClient
         public string Code { get; init; } = "";
         public string Detail { get; init; } = "";
 
-        /// <summary>Present when ADL refused a batch and said which entries.</summary>
-        public IReadOnlyList<RejectedEntry> Errors { get; init; } = [];
+        /// <summary>
+        /// What ADL could not accept, in whatever shape this endpoint says
+        /// it. See <see cref="Rejected"/>.
+        /// </summary>
+        public JsonNode? Errors { get; init; }
     }
 }

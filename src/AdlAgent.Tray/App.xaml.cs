@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -31,6 +32,20 @@ public partial class App : Application
     /// </remarks>
     private static readonly TimeSpan Poll = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// The name the one tray per logon session is held under.
+    /// </summary>
+    /// <remarks>
+    /// <c>Local\</c>, so it is per session rather than machine-wide: a
+    /// server with two administrators on it over RDP should get one icon
+    /// each, not one between them. What it stops is the commoner mistake --
+    /// the same person starting the tray twice and getting two icons, two
+    /// polls, and two clients contending for a control surface that serves
+    /// one at a time.
+    /// </remarks>
+    private const string OnlyInstance = "Local\\adl-agent-tray";
+
+    private Mutex? _theOnlyOne;
     private TrayPresence? _tray;
     private ShellViewModel? _shell;
     private MainWindow? _window;
@@ -39,6 +54,21 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _theOnlyOne = new Mutex(initiallyOwned: true, OnlyInstance, out var isTheOnlyOne);
+
+        if (!isTheOnlyOne)
+        {
+            // Quietly: a technician who double-clicked twice wanted one
+            // window, and the one they already have is about to be in front
+            // of them anyway.
+            _theOnlyOne.Dispose();
+            _theOnlyOne = null;
+
+            Shutdown();
+
+            return;
+        }
 
         _shell = new ShellViewModel(new AgentControlLink());
         _tray = new TrayPresence();
@@ -66,6 +96,12 @@ public partial class App : Application
     {
         _timer?.Stop();
         _tray?.Dispose();
+
+        if (_theOnlyOne is not null)
+        {
+            _theOnlyOne.ReleaseMutex();
+            _theOnlyOne.Dispose();
+        }
 
         base.OnExit(e);
     }
