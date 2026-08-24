@@ -23,6 +23,16 @@ namespace AdlAgent.Tray;
 /// The spec's "tray stays thin: reflects service state, holds no logic" is
 /// enforced by there being nowhere else for a fact to come from.
 /// <para>
+/// Thin is not the same as empty. What is decided here is what to draw from
+/// those answers -- which of them is the state the machine is in, what to
+/// tell somebody to do about it, which fields differ from what ADL sent, and
+/// when a poll may replace a row somebody is typing into -- and that is why
+/// this class is in a <c>net10.0</c> assembly of its own rather than beside
+/// the window. The window is <c>net10.0-windows</c>, which the test project
+/// cannot reference; everything above holds a decision, and a decision
+/// nothing can drive is a decision covered by reading.
+/// </para>
+/// <para>
 /// It is also free of WPF, apart from the collection type the list binds to.
 /// The window below it is layout.
 /// </para>
@@ -35,8 +45,25 @@ public sealed class ShellViewModel : Observable
     private bool _serviceReached;
     private string _pairingCode = "";
     private string _message = "";
-    private string _alert = "";
     private StationViewModel? _selectedStation;
+    private NextStep _nextStep = NextSteps.Unknown;
+    private int _selectedTab = TrayTabs.Pairing;
+
+    /// <summary>
+    /// The stations as ADL last sent them, whatever the rows below are
+    /// showing.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="Stations"/> because the rows are
+    /// deliberately not rebuilt while somebody is typing into one, and the
+    /// line at the top of the window is about what ADL holds rather than about
+    /// what is in a box. A technician who has typed a folder path and not yet
+    /// saved it has not bound anything, and the line should go on saying so.
+    /// </remarks>
+    private IReadOnlyList<AgentStationSnapshot> _linked = [];
+
+    /// <summary>True once the tab has been picked from the machine's state.</summary>
+    private bool _tabChosen;
 
     /// <summary>The station list the rows were last built from, as it arrived.</summary>
     private string _shownStations = "";
@@ -189,26 +216,50 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// The banner: something a technician should act on, or nothing.
+    /// What to do now, and who has to do it: the line at the top of every
+    /// tab.
     /// </summary>
     /// <remarks>
-    /// Deliberately not the same as <see cref="Headline"/>. A working
-    /// machine has a headline and no banner, and a banner that was always
-    /// there would be a banner nobody reads.
+    /// Deliberately not the same as <see cref="Headline"/>, which says what
+    /// this machine <em>is</em>. Both are always there: a technician looking
+    /// at a working machine should read "nothing to do" rather than have to
+    /// infer it from the absence of a banner, and the state a banner appears
+    /// in is not the only state somebody needs telling about.
     /// </remarks>
-    public string Alert
+    public NextStep NextStep
     {
-        get => _alert;
+        get => _nextStep;
         private set
         {
-            if (Set(ref _alert, value))
+            if (Set(ref _nextStep, value))
             {
-                Raise(nameof(HasAlert));
+                Raise(nameof(NoStationsReason));
             }
         }
     }
 
-    public bool HasAlert => Alert.Length > 0;
+    /// <summary>
+    /// Which tab the window is on. Bound both ways: chosen once from the
+    /// machine's state, and the technician's from then on.
+    /// </summary>
+    public int SelectedTab
+    {
+        get => _selectedTab;
+        set => Set(ref _selectedTab, value);
+    }
+
+    /// <summary>True when there are no station rows to draw.</summary>
+    public bool HasNoStations => Stations.Count == 0;
+
+    /// <summary>
+    /// Why the station list is empty, in the words of the reason it is.
+    /// </summary>
+    /// <remarks>
+    /// "ADL has linked nothing to this device yet", "ADL is not answering" and
+    /// "the service is not running" are three different problems wanting three
+    /// different people, and until this they were the same empty grid.
+    /// </remarks>
+    public string NoStationsReason => NextStep.NoStations;
 
     /// <summary>The answer to the last thing a button did.</summary>
     public string Message
@@ -285,23 +336,23 @@ public sealed class ShellViewModel : Observable
         _serviceReached = status.ServiceReached;
         _status = status.Value ?? _status;
 
-        Alert = status.ServiceReached ? AlertFor(_status) : Headline;
-
-        RaiseHeader();
-
-        if (!status.ServiceReached)
+        if (status.ServiceReached)
         {
-            return;
+            var stations = await _agent.StationsAsync().ConfigureAwait(true);
+
+            if (stations.Value is not null)
+            {
+                _linked = stations.Value.Stations;
+
+                Show(stations.Value, replaceEvenIfEdited);
+            }
         }
 
-        var stations = await _agent.StationsAsync().ConfigureAwait(true);
-
-        if (stations.Value is null)
-        {
-            return;
-        }
-
-        Show(stations.Value, replaceEvenIfEdited);
+        // Last, and on every path through the method above -- including the
+        // ones that changed no row. This is the poll, and the line at the top
+        // of the window is what tells a technician that waiting was the right
+        // thing to be doing. It has to move on its own or it is not one.
+        Restate();
     }
 
     /// <summary>Redeem a pairing code (story 2).</summary>
@@ -324,7 +375,7 @@ public sealed class ShellViewModel : Observable
         _status = paired.Value;
         _serviceReached = true;
 
-        RaiseHeader();
+        Restate();
 
         await RefreshAsync().ConfigureAwait(true);
     }
@@ -392,7 +443,13 @@ public sealed class ShellViewModel : Observable
 
             if (written.NeedsRePairing)
             {
-                Alert = "ADL has revoked this machine. Ask for a new pairing code and pair again.";
+                // Read back rather than asserted here. A revoked token is a
+                // fact about the machine that the service already holds, and
+                // the line at the top of the window is drawn from that -- so
+                // this asks now instead of leaving it wrong until the poll
+                // comes round. Editing is safe: the refresh keeps rows that
+                // somebody is typing into.
+                await RefreshAsync().ConfigureAwait(true);
             }
 
             return;
@@ -481,55 +538,47 @@ public sealed class ShellViewModel : Observable
         StationSettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// What is worth a banner, in the order a technician should act on it.
-    /// </summary>
-    private static string AlertFor(AgentStatusSnapshot? status)
-    {
-        if (status is null)
-        {
-            return "";
-        }
-
-        // Before everything else: a machine with no address cannot be paired,
-        // cannot sync and cannot be revoked, so every other banner below
-        // would be describing a state it is not in.
-        if (!status.Configured)
-        {
-            return "No ADL address is configured, so this machine is not sending anything. "
-                + status.ConfigurationHint;
-        }
-
-        if (status.RePairNeeded)
-        {
-            return "ADL has revoked this machine's token. Ask your ADL administrator for a new "
-                + "pairing code and pair again — nothing is being sent until you do.";
-        }
-
-        if (status.PairingState == nameof(CorePairingState.Unpaired))
-        {
-            return "This machine is not paired with ADL yet.";
-        }
-
-        if (status.ConfigFromCache)
-        {
-            return "ADL could not be reached, so the agent is working from the settings it last "
-                + "received. Files already found are still being collected and will be offered "
-                + "when the link returns.";
-        }
-
-        return "";
-    }
-
     private void Failed(Exception exception) =>
         Message = $"Something went wrong in this window: {exception.Message}";
 
-    private void RaiseHeader()
+    /// <summary>
+    /// Re-read everything the window draws from the last answer: the header,
+    /// the next-step line, and -- once -- which tab to be on.
+    /// </summary>
+    private void Restate()
     {
+        NextStep = NextSteps.For(_serviceReached, _status, _linked);
+
+        ChooseTab();
+
         foreach (var property in HeaderProperties)
         {
             Raise(property);
         }
+    }
+
+    /// <summary>
+    /// Open on the tab that matches this machine, once.
+    /// </summary>
+    /// <remarks>
+    /// Once, and from the first answer the service gave. The tray opens its
+    /// window as it starts, and the state that decides the tab is settled by
+    /// then -- but a window that re-decided on every poll would move a
+    /// technician off the tab they had just opened, five seconds after they
+    /// opened it, and would do it again every time a cycle finished. So this
+    /// is a starting point rather than a rule, which is also what makes it
+    /// safe: getting it wrong costs one click.
+    /// </remarks>
+    private void ChooseTab()
+    {
+        if (_tabChosen || _status is null || !_serviceReached)
+        {
+            return;
+        }
+
+        _tabChosen = true;
+
+        SelectedTab = TrayTabs.For(_status);
     }
 
     /// <summary>
@@ -549,6 +598,6 @@ public sealed class ShellViewModel : Observable
         nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
-        nameof(Headline),
+        nameof(Headline), nameof(HasNoStations),
     ];
 }

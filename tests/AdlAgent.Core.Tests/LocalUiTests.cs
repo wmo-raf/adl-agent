@@ -1,8 +1,6 @@
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
 using AdlAgent.TestSupport;
-using AdlAgent.Windows.Platform;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AdlAgent.Core.Tests;
 
@@ -16,23 +14,20 @@ namespace AdlAgent.Core.Tests;
 /// protocol, the commands, and the typed answers the window binds to. What is
 /// left unautomated above this line is layout.
 /// <para>
-/// Each test serves on a pipe name of its own, so the suite neither collides
-/// with itself nor cares whether this machine has a real agent installed.
+/// This file is the protocol half. What the window <em>decides</em> from
+/// those answers is <see cref="GuidedWindowTests"/>, which drives the view
+/// models over the same transport.
 /// </para>
 /// </remarks>
 public class LocalUiTests
 {
     private const string Folder = "C:\\VendorData\\Garissa";
 
-    // Short: a pipe name becomes a unix socket path off Windows, and that
-    // path has 104 characters to play with including the temp directory.
-    private readonly string _pipeName = $"adl-u{Guid.NewGuid():N}"[..13];
-
     [Fact]
     public async Task The_window_reads_the_machines_standing_over_the_pipe()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         await agent.PairAsync();
         await agent.Configuration.RefreshAsync();
@@ -52,10 +47,7 @@ public class LocalUiTests
         // Nothing is serving this pipe. It is the commonest thing to be
         // wrong on a fresh install, and the window must draw it rather than
         // fall over.
-        var link = new AgentControlLink(
-            () => new NamedPipeControlClient(TimeSpan.FromMilliseconds(200), _pipeName));
-
-        var status = await link.StatusAsync();
+        var status = await ServedAgent.NothingServing().StatusAsync();
 
         Assert.False(status.Ok);
         Assert.False(status.ServiceReached);
@@ -66,7 +58,7 @@ public class LocalUiTests
     public async Task The_station_list_arrives_with_each_stations_local_binding()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         agent.Server.Config = SyncConfigs.With(
             SyncConfigs.Link(11, Folder, "GARISSA_*.dat"),
@@ -88,7 +80,7 @@ public class LocalUiTests
     public async Task A_pattern_being_typed_is_counted_against_the_folder_while_it_is_typed()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder, "GARISSA_*.dat"));
 
@@ -122,7 +114,7 @@ public class LocalUiTests
     public async Task A_folder_bound_in_the_window_is_written_through_to_ADL()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, folder: ""));
 
@@ -151,7 +143,7 @@ public class LocalUiTests
     public async Task A_refusal_arrives_as_the_code_the_window_switches_on()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder));
 
@@ -172,7 +164,7 @@ public class LocalUiTests
     public async Task A_revoked_machine_reaches_the_window_as_an_instruction_to_pair_again()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder));
 
@@ -208,7 +200,7 @@ public class LocalUiTests
     public async Task A_pairing_code_that_ADL_will_not_take_is_reported_in_ADLs_own_words()
     {
         await using var agent = new AgentHarness();
-        using var serving = await ServeAsync(agent);
+        using var serving = await ServedAgent.ServingAsync(agent);
 
         var refused = await serving.Link.PairAsync("WRON-GC0D");
 
@@ -220,70 +212,6 @@ public class LocalUiTests
 
     // ---------- helpers ----------
 
-    private async Task<ServedAgent> ServeAsync(AgentHarness agent)
-    {
-        var stopping = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        var surface = new NamedPipeControlSurface(
-            NullLogger<NamedPipeControlSurface>.Instance, _pipeName);
-
-        var serving = surface.ServeAsync(agent.ControlService.HandleAsync, stopping.Token);
-
-        var link = new AgentControlLink(
-            () => new NamedPipeControlClient(TimeSpan.FromSeconds(10), _pipeName));
-
-        // The surface binds its first pipe instance before it will accept
-        // anything; asking before that is a race, not a failure.
-        await WaitUntilListeningAsync(link);
-
-        return new ServedAgent(link, stopping, serving);
-    }
-
-    private static async Task WaitUntilListeningAsync(AgentControlLink link)
-    {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            if ((await link.StatusAsync()).ServiceReached)
-            {
-                return;
-            }
-
-            await Task.Delay(10);
-        }
-    }
-
     private static DateTimeOffset Settled(AgentHarness agent) =>
         agent.Time.GetUtcNow() - TimeSpan.FromMinutes(5);
-
-    private sealed class ServedAgent : IDisposable
-    {
-        private readonly CancellationTokenSource _stopping;
-        private readonly Task _serving;
-
-        public ServedAgent(AgentControlLink link, CancellationTokenSource stopping, Task serving)
-        {
-            Link = link;
-            _stopping = stopping;
-            _serving = serving;
-        }
-
-        public AgentControlLink Link { get; }
-
-        public void Dispose()
-        {
-            _stopping.Cancel();
-
-            try
-            {
-                _serving.Wait(TimeSpan.FromSeconds(5));
-            }
-            catch (AggregateException)
-            {
-            }
-
-            _stopping.Dispose();
-        }
-    }
 }

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The window's namespace, in a second assembly. Both halves of the tray
+         say AdlAgent.Tray because they are one program to whoever is reading
+         them; what is split is the target framework, not the idea. -->
+    <RootNamespace>AdlAgent.Tray</RootNamespace>
+    <Description>What the tray's window shows and what its buttons do, with no window in it: the next-step line, the station rows, and the settings a technician types.</Description>
+    <!-- net10.0, from Directory.Build.props, and that is the whole point of
+         this project existing. These types hold the decisions the window
+         draws (which state the machine is in, what to tell somebody to do
+         about it, which fields differ from what ADL sent, when a poll may
+         replace a row somebody is typing into), and while they sat in the
+         net10.0-windows tray assembly the net10.0 test project could not
+         reference them, so none of it was covered by anything but reading.
+         Nothing here touches WPF: the only pieces of the desktop stack it
+         uses are ICommand and ObservableCollection, both of which are in the
+         base framework on every platform. -->
+    <!-- Not a claim about where these types run: they run anywhere, and the
+         Linux head will use them. It is the runtime identifier of the head
+         they reference, and this project has to be publishable for the same
+         one, because the tray publishes self-contained for win-x64 and
+         reaches the head through here as well as directly. Without it the
+         two paths resolve the head differently and the publish stops with
+         two copies of adl-agent.runtimeconfig.json. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The Windows head, for the typed control link. That is the tray's only
+         route to any fact, and it compiles on any operating system: the
+         named pipe underneath it is the head's business, not this
+         project's. -->
+    <ProjectReference Include="..\AdlAgent.Windows\AdlAgent.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
