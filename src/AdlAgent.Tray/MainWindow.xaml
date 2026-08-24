@@ -23,18 +23,46 @@
             </StackPanel>
         </Border>
 
-        <!-- The banner: only there when a person has something to do. -->
-        <Border DockPanel.Dock="Top" Margin="0,10,0,0" Background="#FFF4D6" BorderBrush="#E4C877"
-                BorderThickness="1" Padding="14,10" CornerRadius="4"
-                Visibility="{Binding HasAlert, Converter={StaticResource Visible}}">
-            <TextBlock Text="{Binding Alert}" TextWrapping="Wrap" />
+        <!--
+            The next step: what to do now and who has to do it, always there,
+            above every tab. Not a banner that appears when something is
+            wrong — a machine with nothing to do says so, because "nothing"
+            is an answer a technician came here for and an empty space is
+            not.
+        -->
+        <Border DockPanel.Dock="Top" Margin="0,10,0,0" BorderThickness="1"
+                Padding="14,10" CornerRadius="4">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <!-- Amber is the default because most of these states want
+                         somebody; the two that do not say so explicitly. -->
+                    <Setter Property="Background" Value="#FFF4D6" />
+                    <Setter Property="BorderBrush" Value="#E4C877" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding NextStep.Attention}" Value="Working">
+                            <Setter Property="Background" Value="#E9F5EC" />
+                            <Setter Property="BorderBrush" Value="#A9CDB4" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding NextStep.Attention}" Value="Stopped">
+                            <Setter Property="Background" Value="#FBE9E9" />
+                            <Setter Property="BorderBrush" Value="#DFAFAF" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding NextStep.Attention}" Value="Unknown">
+                            <Setter Property="Background" Value="#EFF1F3" />
+                            <Setter Property="BorderBrush" Value="#CFD5DB" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding NextStep.Text}" TextWrapping="Wrap" />
         </Border>
 
         <!-- The answer to the last button pressed. -->
         <TextBlock DockPanel.Dock="Bottom" Margin="2,10,2,0" Foreground="#33475B"
                    TextWrapping="Wrap" Text="{Binding Message}" />
 
-        <TabControl Margin="0,10,0,0" Background="White">
+        <TabControl Margin="0,10,0,0" Background="White"
+                    SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
 
             <!-- ============ Pairing (story 2) ============ -->
             <TabItem Header="Pairing">
@@ -81,12 +109,27 @@
             <TabItem Header="Stations">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" MinHeight="140" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <DataGrid Grid.Row="0" AutoGenerateColumns="False" IsReadOnly="True"
+                    <!--
+                        Above the grid rather than inside it, and only when
+                        the grid has nothing in it. A device an administrator
+                        has not linked anything to yet, an ADL that is not
+                        answering and a service that is not running all used
+                        to draw the same nothing — three problems, three
+                        different people to go and find, one blank rectangle.
+                    -->
+                    <Border Grid.Row="0" Margin="0,0,0,10" Padding="12,9" CornerRadius="3"
+                            Background="#EEF3F8" BorderBrush="#CFD9E4" BorderThickness="1"
+                            Visibility="{Binding HasNoStations, Converter={StaticResource Visible}}">
+                        <TextBlock Text="{Binding NoStationsReason}" TextWrapping="Wrap" />
+                    </Border>
+
+                    <DataGrid Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
                               ItemsSource="{Binding Stations}"
@@ -102,7 +145,7 @@
                     </DataGrid>
 
                     <!-- The editor for whichever station is selected. -->
-                    <ScrollViewer Grid.Row="1" MaxHeight="260" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer Grid.Row="2" MaxHeight="260" VerticalScrollBarVisibility="Auto"
                                   Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
                         <StackPanel Margin="0,12,0,0" DataContext="{Binding SelectedStation}">
 
@@ -199,7 +242,7 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
                                 Margin="0,8,0,0"
                                 Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
                         <Button Content="Save to ADL" Padding="14,6"

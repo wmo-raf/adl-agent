@@ -135,22 +135,3 @@ public sealed class TrayPresence : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr handle);
 }
-
-/// <summary>
-/// What the dot means. Three states, because there are three different
-/// things to do about them.
-/// </summary>
-public enum TrayState
-{
-    /// <summary>Nothing has been heard from the service yet.</summary>
-    Unknown,
-
-    /// <summary>Paired, synced, and ADL is answering. Nothing to do.</summary>
-    Working,
-
-    /// <summary>Running, but something wants a person: unpaired, revoked, or ADL unreachable.</summary>
-    NeedsAttention,
-
-    /// <summary>The service is not running. Nothing is being collected.</summary>
-    Stopped,
-}

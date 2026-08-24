@@ -152,12 +152,48 @@ can reach.
   failures, and nothing it can do to the cycle that ships a country's
   observations.
 
+The guided window ([wmo-raf/adl#297](https://github.com/wmo-raf/adl/issues/297))
+— the tray told a technician what the machine *is*, and never what to do about
+it. It opened on Pairing whatever the machine was, and a paired device whose
+administrator had not yet linked any stations showed the same empty grid as
+one whose sync was failing.
+
+- **it opens on the tab that matters** — Pairing while there is a code to
+  paste, Stations once there is not, and the Status tab on a machine that has
+  not been told where its ADL is, because a code box is the one thing that
+  cannot be the answer there. Chosen once, from the first answer the service
+  gives, and never moved again: a window that re-picked on every poll would
+  take somebody off the tab they had just opened, five seconds after they
+  opened it.
+- **one line, always right, on every tab** — what to do now and who has to do
+  it. Paste the code your administrator gave you; wait while ADL links
+  stations to this device; bind a folder to *Kisumu*; nothing, this machine is
+  working. It moves on the poll the window already makes, so an administrator
+  linking a station in another building arrives on the screen by itself.
+- **not a wizard, on purpose** — the moments that need guidance are not only
+  on day one. A station linked six months later lands in exactly the same
+  unbound state as the first one, and a wizard that ran once is not there for
+  it. A line that is always right guides both, and it does not put a second
+  copy of the folder-binding screen beside the first to drift away from it.
+- **an empty station list says which emptiness it is** — "ADL has not linked
+  any stations to this device yet", "ADL is not answering" and "the ADL Agent
+  service is not running" are three problems wanting three different people,
+  and until this they were one blank rectangle.
+- **the dot in the corner is the line's colour** — taken from the same
+  sentence rather than decided again beside it, so the tray cannot sit amber
+  above a window saying there is nothing to do.
+- **and the decisions are under test** — the view models moved out of the
+  `net10.0-windows` tray assembly into one the `net10.0` test project can
+  reference, which is what makes any of the above assertable. See
+  *Testing approach*.
+
 ## Structure
 
 ```
 src/AdlAgent.Core      platform-neutral: everything that makes the agent the agent
 src/AdlAgent.Windows   the Windows head: service host, Windows providers, named pipe
 src/AdlAgent.Tray      the technician's window and notification-area icon
+src/AdlAgent.Tray.ViewModels  what that window shows and what its buttons do
 tests/AdlAgent.TestSupport  the fake ADL server and the fake platform providers
 tests/AdlAgent.Core.Tests   behaviour, driven at the seams
 packaging/             the MSI, the per-user package, and the release index
@@ -167,6 +203,17 @@ The tray compiles on any operating system (`EnableWindowsTargeting`), which
 is why it is in the solution rather than beside it: a broken binding is found
 by the Linux CI job and by whoever is working on a Mac, not by the next
 person who happens to be on Windows. Running it needs Windows.
+
+The split between the last two of those is about testing rather than about
+platforms. `AdlAgent.Tray` is `net10.0-windows` because WPF is, and a
+`net10.0` test project cannot reference one of those — so everything that
+holds a decision (which state the machine is in, what to tell somebody to do
+about it, which fields differ from what ADL sent, when a poll may replace a
+row somebody is typing into) lives in `AdlAgent.Tray.ViewModels`, which is
+plain `net10.0`, and what is left in the window is layout. `ArchitectureTests`
+checks that it stays that way, because the way it comes undone is somebody
+adding the next view model to the project the window is in, where it compiles
+perfectly and can never be tested.
 
 `AdlAgent.Core` contains no platform conditional, anywhere. Platform
 specifics enter through five named seams, implemented per head and injected
@@ -269,9 +316,22 @@ from the ADL instance they are paired with.
 
 `adl-agent-tray.exe` is what a station technician uses. It puts an icon in the
 notification area — green when the machine is paired, synced and ADL is
-answering; amber when something wants a person; red when the service is not
-running — and opens a window with three tabs: **Pairing**, **Stations**, and
-**Status**.
+answering; amber when it is not yet doing its job, whether or not the person
+who can change that is standing at it; red when the service is not running —
+and opens a window with three tabs: **Pairing**, **Stations**, and **Status**.
+
+Amber covers waiting as well as acting, deliberately. A machine paired ten
+seconds ago whose administrator has not linked a station to it yet is not
+collecting anything, and green there would say it was. The line in the window
+is what says whether the next move is the technician's or somebody else's;
+the colour only says whether this machine is working.
+
+It opens on the tab that matches the machine — Pairing while there is a code
+to paste, Stations once there is not — and every tab carries one line at the
+top saying what to do now and who has to do it, including when the answer is
+that there is nothing to do. The line follows the machine on the window's own
+poll, so nobody has to press anything to find out that an administrator has
+linked a station.
 
 It is a per-user program and asks for no administrator rights. The installer
 puts it in the Start menu and starts it at logon. It can be closed at any time; the service goes on collecting and
@@ -394,10 +454,12 @@ there.
   somebody who should not need one. It is a knowing trade rather than an
   oversight — it needs no administrator, which is the property that tier
   cannot give up — and the agent says so on the machine itself: a machine
-  with no address reports that it has none, and the tray shows this command
-  rather than the service tier's answer. Closing it properly means a first-run
-  prompt in the tray, which is
-  [#297](https://github.com/wmo-raf/adl/issues/297)'s territory.
+  with no address reports that it has none, the tray opens on the tab that
+  says so, and its next-step line carries this command rather than the service
+  tier's answer. What it still cannot do is take the address: closing this
+  properly means the tray writing the setting itself, which is more than
+  [#297](https://github.com/wmo-raf/adl/issues/297) did — it made the state
+  legible, not fixable from the window.
 - **The device token is stored unencrypted** in `state.json` under
   `%ProgramData%\ADL Agent`. The MSI replaces that folder's permissions with
   SYSTEM and Administrators, so on an installed machine the token is only
@@ -420,13 +482,6 @@ there.
   (the only config write is per station link), so there is nothing for the
   tray to write it through. Editing it needs a companion change in
   [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin) first.
-- **The tray's view models have no tests.** The spec leaves the window
-  unautomated and its layout is not worth automating, but the view models
-  underneath it hold real decisions -- which fields differ from what ADL
-  sent, when a poll may replace a row somebody is typing into -- and those
-  are only covered by reading. They are in a `net10.0-windows` assembly,
-  which the `net10.0` test project cannot reference; moving them into a
-  platform-neutral library would fix that.
 - **Neither installer has been run on a Windows VM yet.** The MSI authoring,
   the Velopack packaging and the two ways an update is applied were all
   written and reviewed on machines that cannot execute any of them: WiX
@@ -477,7 +532,8 @@ there.
   themselves — see *Finding a broken binding* above — but nothing checks that
   the window is laid out sensibly except a person opening it. Everything
   underneath — the pipe, the protocol, the five commands, the typed answers
-  the window binds to — is under test.
+  the window binds to, and every decision the view models make about them —
+  is under test.
 - **Date-structured folders are not walked.** ADL lets a station link say its
   files sit under dated sub-folders (`dir_structured_by_date`, with a
   granularity and a month format); the cycle walks only the folder itself. No
@@ -512,6 +568,12 @@ The local UI is tested the same way and at the same distance. The control
 commands run against a real named pipe (a unix socket off Windows) with the
 real control service on the other end and the fake ADL behind it, so what is
 under test is the conversation a technician's window actually has: paste this
-code, list these stations, count this pattern, write this folder to ADL. The
-WPF window above that line is not automated, per the spec — what it holds is
-layout.
+code, list these stations, count this pattern, write this folder to ADL.
+
+The window's view models are driven over that same transport, and by the same
+harness: a test arranges an ADL that has linked nothing to this device, or a
+station with no folder, or a folder holding the wrong vendor's files, and
+reads the sentence a technician would be looking at and the tab the window
+would have opened on. That is why they are in a `net10.0` assembly of their
+own — see *Structure*. The WPF window above that line is still not automated,
+per the spec: what is left in it is layout.

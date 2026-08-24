@@ -59,6 +59,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The window's own view models, which are net10.0 and deliberately not
+         here: this assembly is net10.0-windows and the test project cannot
+         reference it, so anything holding a decision lives next door where it
+         can be driven by a test. What is left in this project is layout, the
+         notification icon, and the two timers. -->
+    <ProjectReference Include="..\AdlAgent.Tray.ViewModels\AdlAgent.Tray.ViewModels.csproj" />
     <!-- The Windows head, for the named-pipe client and the typed control
          link. The tray is part of that head: it is the Windows view of the
          control surface, and the Linux head's view is a CLI beside it. -->

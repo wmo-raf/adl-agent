@@ -132,28 +132,16 @@ public partial class App : Application
         {
             await _shell.RefreshAsync().ConfigureAwait(true);
 
-            _tray.Show(StateOf(_shell), _shell.Headline);
+            // The colour is the line's, not a second opinion about the same
+            // facts. Deciding it here as well is how a dot comes to sit amber
+            // in the corner of a screen above a window saying there is
+            // nothing to do.
+            _tray.Show(_shell.NextStep.Attention, _shell.Headline);
         }
         catch (Exception exception)
         {
             _tray.Show(TrayState.Unknown, $"ADL Agent: {exception.Message}");
         }
-    }
-
-    /// <summary>The colour of the dot, derived from what the shell was told.</summary>
-    private static TrayState StateOf(ShellViewModel shell)
-    {
-        if (!shell.ServiceRunning)
-        {
-            return TrayState.Stopped;
-        }
-
-        if (shell.NeedsRePairing || !shell.IsPaired || shell.HasAlert)
-        {
-            return TrayState.NeedsAttention;
-        }
-
-        return TrayState.Working;
     }
 
     private void ShowWindow()

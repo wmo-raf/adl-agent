@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Control;
@@ -6,6 +8,7 @@ using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.State;
 using AdlAgent.Core.Update;
+using AdlAgent.Tray;
 using AdlAgent.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,13 +16,13 @@ using Microsoft.Extensions.Hosting;
 namespace AdlAgent.Core.Tests;
 
 /// <summary>
-/// The two rules the app structure rests on, made into tests.
+/// The rules the app structure rests on, made into tests.
 /// </summary>
 /// <remarks>
-/// The spec states them as discipline: no platform conditionals in the core,
-/// ever, and the platform providers injected at the composition root. A rule
-/// that only lives in a document is a rule the fifth contributor breaks by
-/// accident, so both are checked here.
+/// The spec states the first two as discipline: no platform conditionals in
+/// the core, ever, and the platform providers injected at the composition
+/// root. A rule that only lives in a document is a rule the fifth contributor
+/// breaks by accident, so they are checked here.
 /// </remarks>
 public class ArchitectureTests
 {
@@ -90,6 +93,33 @@ public class ArchitectureTests
         // what a paired machine needs to remember it is paired.
         Assert.NotNull(host.Services.GetRequiredService<AgentSession>());
         Assert.IsType<FileAgentStateStore>(host.Services.GetRequiredService<IAgentStateStore>());
+    }
+
+    /// <summary>
+    /// The window's view models stay somewhere a test can reach them.
+    /// </summary>
+    /// <remarks>
+    /// They began inside the WPF assembly, which is <c>net10.0-windows</c>,
+    /// and a <c>net10.0</c> test project cannot reference one of those --
+    /// so the decisions a technician actually reads off the screen were
+    /// covered by nothing but somebody reading them. Moving them was the
+    /// point of wmo-raf/adl#297, and the way that quietly comes undone is
+    /// somebody adding the next view model to the project the window is in,
+    /// where it compiles perfectly and can never be tested.
+    /// </remarks>
+    [Fact]
+    public void The_windows_view_models_are_in_an_assembly_the_tests_can_reference()
+    {
+        var framework = typeof(ShellViewModel).Assembly
+            .GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
+
+        Assert.NotNull(framework);
+        Assert.DoesNotContain("windows", framework, StringComparison.OrdinalIgnoreCase);
+
+        // And the same assembly, so a second one does not appear beside it
+        // with the next decision in it.
+        Assert.Equal(typeof(ShellViewModel).Assembly, typeof(NextStep).Assembly);
+        Assert.Equal(typeof(ShellViewModel).Assembly, typeof(StationViewModel).Assembly);
     }
 
     private static IHost BuildWindowsHost()

@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\AdlAgent.Tray.ViewModels\AdlAgent.Tray.ViewModels.csproj" />
     <ProjectReference Include="..\..\src\AdlAgent.Windows\AdlAgent.Windows.csproj" />
     <ProjectReference Include="..\AdlAgent.TestSupport\AdlAgent.TestSupport.csproj" />
   </ItemGroup>
