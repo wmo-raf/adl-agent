@@ -1,5 +1,6 @@
 using AdlAgent.Core.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AdlAgent.Core.Update;
 
@@ -32,8 +33,9 @@ public sealed class UpdateLoop : AgentLoop
         AgentCadence cadence,
         AgentWakeSignal wake,
         TimeProvider time,
+        IOptions<AgentOptions> options,
         ILogger<UpdateLoop> logger)
-        : base(wake, time)
+        : base(wake, time, options, logger)
     {
         _updates = updates;
         _cadence = cadence;

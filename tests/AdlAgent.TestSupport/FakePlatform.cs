@@ -24,6 +24,8 @@ public sealed class FakeHostLifecycle : IHostLifecycle
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Parse("2026-08-21T08:00:00Z");
 
     public string StateDirectory { get; set; } = Path.Combine(Path.GetTempPath(), "adl-agent-tests");
+
+    public string? SettingsFilePath { get; set; } = @"C:\ProgramData\ADL Agent\agent.ini";
 }
 
 /// <summary>

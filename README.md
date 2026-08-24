@@ -229,6 +229,28 @@ It must be `https` — the device token travels on every call, and the agent
 refuses to start against plain HTTP to anywhere but this machine. TLS 1.2 is
 the floor.
 
+A machine with **no** address is a state the agent knows it is in, rather than
+one it fails in. It starts, holds its control surface open so the tray and
+`adl-agent status` can say what is wrong, and runs none of its network loops —
+there is nowhere to send, so there is no call to make and nothing to retry.
+
+```
+ADL:      not configured
+Problem:  No ADL URL is configured. Set Agent:AdlBaseUrl to the address of the ADL instance this machine sends to.
+Fix:      An administrator must set AdlBaseUrl under [Agent] in C:\ProgramData\ADL Agent\agent.ini, then restart the ADL Agent service.
+Version:  0.1.0
+```
+
+The *Fix* line is the tier's own: the per-user tier is told `setx
+Agent__AdlBaseUrl …` instead, because it has no administrator to call on. An
+address that is refused — plain HTTP to somewhere other than this machine, or
+something unparseable — reads the same way and says which it was; the agent
+will not quietly send a device token over a link it does not trust.
+
+Nothing re-reads the setting in place: `agent.ini` is read once at start-up
+and the environment is taken at logon, so whatever sets the address restarts
+the agent, and it comes up working.
+
 Run `adl-agent.exe` with no arguments to run it as a console process. On a
 real machine it is installed rather than run, and the installer sets the URL
 for you:
@@ -357,6 +379,25 @@ there.
 
 ## Known gaps
 
+- **The per-user tier has no way to be configured that does not need a
+  command line.** The service tier is told where its ADL is by the MSI
+  (`ADLURL=…`), which writes `agent.ini`. The per-user tier has no installer
+  property to be given and no elevation available to the technician it exists
+  for, so the only route is an environment variable set before the next
+  logon:
+
+  ```powershell
+  setx Agent__AdlBaseUrl https://adl.example.org
+  ```
+
+  That is a command line on the one tier whose whole reason for existing is
+  somebody who should not need one. It is a knowing trade rather than an
+  oversight — it needs no administrator, which is the property that tier
+  cannot give up — and the agent says so on the machine itself: a machine
+  with no address reports that it has none, and the tray shows this command
+  rather than the service tier's answer. Closing it properly means a first-run
+  prompt in the tray, which is
+  [#297](https://github.com/wmo-raf/adl/issues/297)'s territory.
 - **The device token is stored unencrypted** in `state.json` under
   `%ProgramData%\ADL Agent`. The MSI replaces that folder's permissions with
   SYSTEM and Administrators, so on an installed machine the token is only

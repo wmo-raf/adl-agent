@@ -231,7 +231,21 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
-                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                    <!--
+                        The address, and underneath it, only when there is not
+                        one, what the person reading this can do about it.
+                        Beneath the address rather than in a row of its own
+                        because that is where somebody looks when they want to
+                        know where this machine reports, and an empty row
+                        there is what used to look like a service that had
+                        stopped answering.
+                    -->
+                    <StackPanel Grid.Row="0" Grid.Column="1">
+                        <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                        <TextBlock Style="{StaticResource Value}" Text="{Binding ConfigurationHint}"
+                                   TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
+                                   Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />
+                    </StackPanel>
                     <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
                     <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Pairing" />

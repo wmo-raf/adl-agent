@@ -30,4 +30,19 @@ public interface IHostLifecycle
     /// and readable only by the account the service runs as.
     /// </summary>
     string StateDirectory { get; }
+
+    /// <summary>
+    /// The file an administrator edits to point this machine at an ADL, or
+    /// <c>null</c> on a head configured some other way.
+    /// </summary>
+    /// <remarks>
+    /// Here because of what the agent has to say when it has no address: the
+    /// useful sentence names the file, and the core must not invent that name
+    /// -- <c>agent.ini</c> under <c>%ProgramData%</c> is a Windows Installer
+    /// decision (see the Windows head's <c>MachineSettings</c>), and a
+    /// systemd head would answer with an environment file or nothing at all.
+    /// A path a technician can read out over a telephone is worth more than a
+    /// generic instruction, and it is the head that knows it.
+    /// </remarks>
+    string? SettingsFilePath { get; }
 }

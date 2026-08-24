@@ -67,7 +67,32 @@ public sealed class ShellViewModel : Observable
     /// <summary>False when the service could not be reached at the last poll.</summary>
     public bool ServiceRunning => _serviceReached;
 
-    public string AdlUrl => _status?.AdlUrl ?? "-";
+    /// <summary>
+    /// Where this machine sends -- or, when it has not been told, that it has
+    /// not been told.
+    /// </summary>
+    /// <remarks>
+    /// An unconfigured machine used to serve this as an empty string and the
+    /// window drew an empty row, which looks exactly like a value the service
+    /// did not send. They are opposite problems: one wants somebody to
+    /// configure this machine, the other wants somebody to find out why the
+    /// service is not answering.
+    /// </remarks>
+    public string AdlUrl => _status is { Configured: false }
+        ? "No ADL address is configured"
+        : _status?.AdlUrl ?? "-";
+
+    /// <summary>True when this machine has an address to send to.</summary>
+    public bool IsConfigured => _status is null || _status.Configured;
+
+    /// <summary>The tier-appropriate next step, when there is one to take.</summary>
+    public string ConfigurationHint => _status?.ConfigurationHint ?? "";
+
+    /// <summary>
+    /// True when the window should be showing somebody how to give this
+    /// machine an address.
+    /// </summary>
+    public bool NeedsConfiguring => !IsConfigured;
 
     public string AgentVersion => _status?.AgentVersion ?? "-";
 
@@ -140,6 +165,11 @@ public sealed class ShellViewModel : Observable
             if (!_serviceReached)
             {
                 return "The ADL Agent service is not running on this machine.";
+            }
+
+            if (!IsConfigured)
+            {
+                return "No ADL address is configured on this machine.";
             }
 
             if (NeedsRePairing)
@@ -461,6 +491,15 @@ public sealed class ShellViewModel : Observable
             return "";
         }
 
+        // Before everything else: a machine with no address cannot be paired,
+        // cannot sync and cannot be revoked, so every other banner below
+        // would be describing a state it is not in.
+        if (!status.Configured)
+        {
+            return "No ADL address is configured, so this machine is not sending anything. "
+                + status.ConfigurationHint;
+        }
+
         if (status.RePairNeeded)
         {
             return "ADL has revoked this machine's token. Ask your ADL administrator for a new "
@@ -504,7 +543,9 @@ public sealed class ShellViewModel : Observable
     /// </remarks>
     private static readonly IReadOnlyList<string> HeaderProperties =
     [
-        nameof(ServiceRunning), nameof(AdlUrl), nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
+        nameof(ServiceRunning), nameof(AdlUrl), nameof(IsConfigured), nameof(NeedsConfiguring),
+        nameof(ConfigurationHint),
+        nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
         nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
