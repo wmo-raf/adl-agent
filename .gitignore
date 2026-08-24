@@ -13,3 +13,7 @@ TestResults/
 .vscode/
 .idea/
 .DS_Store
+
+# The Windows test machine, and where a build is staged before it goes there.
+dev/dev.local.cmd
+.dev-publish/
