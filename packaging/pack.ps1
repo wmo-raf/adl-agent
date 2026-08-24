@@ -43,6 +43,14 @@ $repository = Split-Path -Parent $PSScriptRoot
 $publish = Join-Path $repository "publish"
 $output = Join-Path $repository $OutputDirectory
 
+# The icons. Committed rather than generated here: `dotnet build` has no
+# dependencies on either CI leg or on the Windows machine somebody reproduces
+# a release from, and a rasteriser in this script would be a dependency on all
+# of them. They are rebuilt by hand with assets/render-icons.sh when the brand
+# changes -- see assets/README.md.
+$assets = Join-Path $repository "assets"
+$productIcon = Join-Path $assets "adl-agent-tray.ico"
+
 # The tool versions are pinned. A packaging tool that moved under a release
 # would change what a fleet installs without anything in this repository
 # having changed.
@@ -118,6 +126,7 @@ Invoke-Step "Building $msi" {
         -d Version=$Version `
         -d ServiceDir=$serviceDir `
         -d TrayDir=$trayDir `
+        -d AssetsDir=$assets `
         -o $msi
 }
 
@@ -130,6 +139,11 @@ Invoke-Step "Building $msi" {
 # collecting and sending: the shortcut Velopack puts in Startup is the whole
 # of what "runs at logon" means here, and the tray is started from the Start
 # menu when somebody wants to look at it.
+#
+# --icon is the tray's teal mark even though --mainExe is the service, because
+# what it brands is Setup.exe and the shortcuts a technician clicks. Slate is
+# reserved for the service's own executable, where its only job is to be
+# distinguishable from the tray at sixteen pixels in Task Manager.
 # ---------------------------------------------------------------------------
 
 Install-DotnetTool -Package "vpk" -ToolVersion $velopackVersion -Command "vpk"
@@ -148,6 +162,7 @@ Invoke-Step "Packing the per-user tier" {
         --packVersion $Version `
         --packDir $userTierDir `
         --mainExe adl-agent.exe `
+        --icon $productIcon `
         --shortcuts StartMenu,Startup `
         --outputDir $output
 }

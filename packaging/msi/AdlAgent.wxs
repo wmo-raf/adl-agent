@@ -34,6 +34,10 @@
   <?define TrayDir = "publish\tray" ?>
   <?endif?>
 
+  <?ifndef AssetsDir?>
+  <?define AssetsDir = "assets" ?>
+  <?endif?>
+
   <Package
       Name="ADL Agent"
       Manufacturer="WMO RAF"
@@ -63,6 +67,22 @@
         DowngradeErrorMessage="A newer version of the ADL Agent is already installed on this machine." />
 
     <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      The entry in Add/Remove Programs. Nothing else here needs an icon
+      declared: Windows draws a shortcut with the icon of whatever it points
+      at, and both executables carry their own (see the ApplicationIcon in
+      each csproj), so the Start menu and the Startup folder are already
+      right. This one is not inherited from anything, and without it the one
+      place an administrator goes to find out what is installed on a server
+      shows the product as a blank page.
+
+      The teal mark rather than the service's slate one, because this row
+      stands for the product a technician installed rather than for the
+      background process — see assets/README.md.
+    -->
+    <Icon Id="AgentIcon" SourceFile="$(AssetsDir)\adl-agent-tray.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AgentIcon" />
 
     <!--
       Where this machine's ADL is. Set at install time:

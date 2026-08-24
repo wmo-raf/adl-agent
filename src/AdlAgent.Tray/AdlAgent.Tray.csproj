@@ -25,6 +25,14 @@
     <RootNamespace>AdlAgent.Tray</RootNamespace>
     <AssemblyName>adl-agent-tray</AssemblyName>
     <Description>The ADL Agent's tray and configuration window: pairing, folder binding, live pattern validation and status, over the agent's control surface.</Description>
+    <!-- The teal tile: this is the face of the product. The tray icon, the
+         window's titlebar, the Start-menu and Startup shortcuts Windows
+         builds from this executable, Add/Remove Programs and the per-user
+         Setup.exe all wear it, so that everything a technician touches is one
+         colour and slate means the one thing it is there to mean — the
+         service, in Task Manager. Written by assets/render-icons.sh; see
+         assets/README.md. -->
+    <ApplicationIcon>..\..\assets\adl-agent-tray.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- WFO0003 tells a WinForms application to declare its DPI awareness
          through ApplicationHighDpiMode instead of in its manifest. This is a
@@ -69,6 +77,25 @@
          link. The tray is part of that head: it is the Windows view of the
          control surface, and the Linux head's view is a CLI beside it. -->
     <ProjectReference Include="..\AdlAgent.Windows\AdlAgent.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The mark, for the notification area. Embedded rather than copied
+         beside the executable: this publishes as a single self-contained
+         file, and a picture the program cannot start without should be inside
+         it rather than another thing an installer has to place. -->
+    <EmbeddedResource Include="..\..\assets\adl-mark.png" LogicalName="AdlAgent.Tray.adl-mark.png" />
+
+    <!-- And the tile, for the two places the window draws the mark on screen
+         itself: the header and the block heading the Status tab. A WPF
+         Resource rather than an EmbeddedResource, because these are reached
+         by pack: URI from XAML. -->
+    <Resource Include="..\..\assets\adl-tile.png" Link="adl-tile.png" />
+
+    <!-- The titlebar. ApplicationIcon above puts this in the executable for
+         Explorer and the shell to find, but WPF reads a window's own Icon
+         from the assembly, so it has to be here as well. -->
+    <Resource Include="..\..\assets\adl-agent-tray.ico" Link="adl-agent-tray.ico" />
   </ItemGroup>
 
 </Project>
