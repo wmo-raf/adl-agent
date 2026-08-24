@@ -17,6 +17,13 @@
     <PublishSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
     <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <EnableCompressionInSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</EnableCompressionInSingleFile>
+    <!-- The slate tile. The teal one next door is the product a technician
+         meets; this one is worn by the service, and it exists so that the two
+         entries sitting beside each other in Task Manager and Services.msc
+         can be told apart at sixteen pixels, where the mark itself is a smudge
+         and the colour is the only thing that still reads. Written by
+         assets/render-icons.sh; see assets/README.md. -->
+    <ApplicationIcon>..\..\assets\adl-agent.ico</ApplicationIcon>
     <UserSecretsId>adl-agent-windows</UserSecretsId>
   </PropertyGroup>
 

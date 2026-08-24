@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -16,15 +19,45 @@ namespace AdlAgent.Tray;
 /// colour is the answer and the tooltip is the sentence, and neither is
 /// computed here -- both come from the status the service reported.
 /// <para>
-/// The icon is drawn rather than shipped as a file. Three states need three
-/// icons, an <c>.ico</c> is a binary asset in a source tree, and the drawing
-/// is eight lines -- and this way the colour cannot drift from the meaning.
+/// The shape is the ADL mark and the colour is still the state. It used to be
+/// a plain filled circle, drawn here rather than shipped, on the reasoning
+/// that three states needed three icons and a colour baked into a binary
+/// asset could drift from the meaning it stood for. That reasoning survives;
+/// what changed is that one shape can serve all of them. <c>adl-mark.png</c>
+/// is shipped for its outline alone -- every colour in it is thrown away and
+/// replaced by the one this state calls for -- so the colour is still decided
+/// here, in the same switch, and still cannot drift.
+/// </para>
+/// <para>
+/// The mark loses its "ADL" lettering in the process, because the letters are
+/// opaque black in the source and get recoloured along with everything else.
+/// That is the outcome we want: at sixteen pixels they are five pixels by
+/// two. See <c>assets/README.md</c>.
 /// </para>
 /// </remarks>
 public sealed class TrayPresence : IDisposable
 {
+    /// <summary>
+    /// The mark, embedded by <c>AdlAgent.Tray.csproj</c>.
+    /// </summary>
+    private const string Mark = "AdlAgent.Tray.adl-mark.png";
+
     private readonly NotifyIcon _icon;
-    private Icon? _drawn;
+
+    /// <summary>
+    /// One icon per state, built the first time that state is seen and held
+    /// until this is disposed.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Show"/> runs on a five-second timer for as long as the
+    /// technician is logged on, and what it draws changes perhaps twice a
+    /// day. Decoding the mark, recolouring it and creating a fresh GDI handle
+    /// seven hundred times an hour to produce the same four pictures is work
+    /// nobody asked for, and every one of those handles is this process's to
+    /// release. There are exactly four states, so the cache is bounded by the
+    /// enumeration rather than by anything this has to police.
+    /// </remarks>
+    private readonly Dictionary<TrayState, Icon> _icons = new();
 
     public TrayPresence()
     {
@@ -64,16 +97,13 @@ public sealed class TrayPresence : IDisposable
     /// <summary>Say what the machine is doing, in a colour and a sentence.</summary>
     public void Show(TrayState state, string tooltip)
     {
-        var next = Draw(state);
-        var previous = _drawn;
+        if (!_icons.TryGetValue(state, out var icon))
+        {
+            icon = Draw(state);
+            _icons[state] = icon;
+        }
 
-        _icon.Icon = next;
-        _drawn = next;
-
-        // The handle behind the old icon is this process's to release, and
-        // this runs every few seconds for as long as the technician is logged
-        // on -- which is long enough for a leak here to matter.
-        previous?.Dispose();
+        _icon.Icon = icon;
 
         // Windows truncates the tooltip at 63 characters and throws above
         // 127, so the sentence is cut here rather than by the shell.
@@ -82,12 +112,20 @@ public sealed class TrayPresence : IDisposable
 
     public void Dispose()
     {
+        // The notification icon first: it is holding whichever of these is
+        // currently on screen.
         _icon.Visible = false;
         _icon.Dispose();
-        _drawn?.Dispose();
+
+        foreach (var icon in _icons.Values)
+        {
+            icon.Dispose();
+        }
+
+        _icons.Clear();
     }
 
-    /// <summary>A filled circle in the colour of the state, at tray size.</summary>
+    /// <summary>The ADL mark in the colour of the state, at tray size.</summary>
     private static Icon Draw(TrayState state)
     {
         var colour = state switch
@@ -98,17 +136,45 @@ public sealed class TrayPresence : IDisposable
             _ => Color.FromArgb(0x77, 0x7F, 0x88),
         };
 
-        // Drawn at 32 and let Windows scale down: a 16-pixel circle drawn
-        // directly is a square with corners on a high-DPI screen, which is
-        // most of the machines this now runs on.
+        using var stream = typeof(TrayPresence).Assembly.GetManifestResourceStream(Mark)
+            // Only reachable if the build stopped embedding it, in which case
+            // the tray has no icon at all and saying so beats a blank corner.
+            ?? throw new InvalidOperationException($"The tray icon '{Mark}' is missing from this build.");
+
+        using var mask = new Bitmap(stream);
+
+        // Drawn at 32 and let Windows scale down: a 16-pixel mark drawn
+        // directly loses the separation between the discs on a high-DPI
+        // screen, which is most of the machines this now runs on.
         using var bitmap = new Bitmap(32, 32);
         using var canvas = Graphics.FromImage(bitmap);
 
-        canvas.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        canvas.SmoothingMode = SmoothingMode.AntiAlias;
+        canvas.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        canvas.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        using var fill = new SolidBrush(colour);
+        using var recolour = new ImageAttributes();
 
-        canvas.FillEllipse(fill, 3, 3, 26, 26);
+        // Every pixel keeps its alpha and is given this state's colour. The
+        // last row is the translation, so the red, green and blue that come
+        // out do not depend on the ones that went in -- which is what makes
+        // the shipped file a shape rather than a picture, and the lettering
+        // inside it disappear rather than turn up as three grey smudges.
+        recolour.SetColorMatrix(new ColorMatrix(
+        [
+            [0f, 0f, 0f, 0f, 0f],
+            [0f, 0f, 0f, 0f, 0f],
+            [0f, 0f, 0f, 0f, 0f],
+            [0f, 0f, 0f, 1f, 0f],
+            [colour.R / 255f, colour.G / 255f, colour.B / 255f, 0f, 1f],
+        ]));
+
+        canvas.DrawImage(
+            mask,
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            0, 0, mask.Width, mask.Height,
+            GraphicsUnit.Pixel,
+            recolour);
 
         var handle = bitmap.GetHicon();
 

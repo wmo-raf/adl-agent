@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ADL Agent"
+        Icon="adl-agent-tray.ico"
         Height="620" Width="900"
         MinHeight="480" MinWidth="720"
         WindowStartupLocation="CenterScreen"
@@ -12,15 +13,28 @@
         <!-- The header: what this machine is, in one line, always visible. -->
         <Border DockPanel.Dock="Top" Background="White" BorderBrush="#DCE0E6" BorderThickness="1"
                 Padding="14,10" CornerRadius="4">
-            <StackPanel>
-                <TextBlock Text="{Binding Headline}" FontSize="14" TextWrapping="Wrap" />
-                <TextBlock Margin="0,4,0,0" Foreground="#5A6472" TextWrapping="Wrap">
-                    <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" />
-                    <Run Text="  ·  last heartbeat " /><Run Text="{Binding LastHeartbeat, Mode=OneWay}" />
-                    <Run Text="  ·  last synced " /><Run Text="{Binding LastSynced, Mode=OneWay}" />
-                    <Run Text="  ·  scans " /><Run Text="{Binding CheckInterval, Mode=OneWay}" />
-                </TextBlock>
-            </StackPanel>
+            <DockPanel LastChildFill="True">
+                <!--
+                    The mark, so that a screenshot pasted into a support
+                    thread says which program it is of. Top-aligned rather
+                    than centred: the headline wraps on a narrow window and a
+                    mark that drifted down the block with it would look like
+                    it belonged to whichever line it ended up beside.
+                -->
+                <Image DockPanel.Dock="Left" Source="adl-tile.png"
+                       Width="28" Height="28" VerticalAlignment="Top"
+                       Margin="0,1,10,0"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <StackPanel>
+                    <TextBlock Text="{Binding Headline}" FontSize="14" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,4,0,0" Foreground="#5A6472" TextWrapping="Wrap">
+                        <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" />
+                        <Run Text="  ·  last heartbeat " /><Run Text="{Binding LastHeartbeat, Mode=OneWay}" />
+                        <Run Text="  ·  last synced " /><Run Text="{Binding LastSynced, Mode=OneWay}" />
+                        <Run Text="  ·  scans " /><Run Text="{Binding CheckInterval, Mode=OneWay}" />
+                    </TextBlock>
+                </StackPanel>
+            </DockPanel>
         </Border>
 
         <!--
@@ -253,76 +267,100 @@
 
             <!-- ============ Status (stories 23, 27) ============ -->
             <TabItem Header="Status">
-                <Grid Margin="16" HorizontalAlignment="Left">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" MinWidth="320" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <StackPanel Margin="16" HorizontalAlignment="Left">
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
                     <!--
-                        The address, and underneath it, only when there is not
-                        one, what the person reading this can do about it.
-                        Beneath the address rather than in a row of its own
-                        because that is where somebody looks when they want to
-                        know where this machine reports, and an empty row
-                        there is what used to look like a service that had
-                        stopped answering.
+                        What this program is, above what this machine is
+                        doing. There is no About box and this is why: the tab
+                        somebody opens to answer "what is this server
+                        running" is this one, and a version living in two
+                        places is a version that can disagree with itself.
+                        The "This version" row that used to sit in the grid
+                        below is this line now.
                     -->
-                    <StackPanel Grid.Row="0" Grid.Column="1">
-                        <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
-                        <TextBlock Style="{StaticResource Value}" Text="{Binding ConfigurationHint}"
-                                   TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
-                                   Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="adl-tile.png" Width="44" Height="44"
+                               VerticalAlignment="Center" Margin="0,0,12,0"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontSize="16" FontWeight="SemiBold">
+                                <Run Text="ADL Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock Text="WMO RAF" Foreground="#5A6472" Margin="0,2,0,0" />
+                        </StackPanel>
                     </StackPanel>
-                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
-                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
-                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Pairing" />
-                    <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
-                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
-                    <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding FleetStatus}" />
-                    <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Last heartbeat" />
-                    <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastHeartbeat}" />
-                    <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Last synced" />
-                    <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
-                    <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
-                    <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
-                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
-                    <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
-                    <!--
-                        What version this machine is on and what it is doing
-                        about it. Here because the alternative, when HQ says a
-                        country is running something old, is a technician
-                        reading service logs to find out whether their machine
-                        is pinned, unable to reach the feed, or simply already
-                        current.
-                    -->
-                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="This version" />
-                    <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AgentVersion}" />
-                    <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
-                    <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
-                               TextWrapping="Wrap" />
-                    <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
-                    <TextBlock Grid.Row="10" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
 
-                    <Button Grid.Row="11" Grid.Column="1" Content="Refresh now" Padding="14,6"
-                            HorizontalAlignment="Left" Margin="0,14,0,0"
-                            Command="{Binding RefreshCommand}" />
-                </Grid>
+                    <Separator Margin="0,14,0,4" Background="#DCE0E6" />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" MinWidth="320" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
+                        <!--
+                            The address, and underneath it, only when there is not
+                            one, what the person reading this can do about it.
+                            Beneath the address rather than in a row of its own
+                            because that is where somebody looks when they want to
+                            know where this machine reports, and an empty row
+                            there is what used to look like a service that had
+                            stopped answering.
+                        -->
+                        <StackPanel Grid.Row="0" Grid.Column="1">
+                            <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                            <TextBlock Style="{StaticResource Value}" Text="{Binding ConfigurationHint}"
+                                       TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
+                                       Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Pairing" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding FleetStatus}" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Last heartbeat" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastHeartbeat}" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Last synced" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
+                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
+                        <!--
+                            What this machine is doing about its version. The
+                            number itself is in the block above; this is the half
+                            that changes, and the alternative, when HQ says a
+                            country is running something old, is a technician
+                            reading service logs to find out whether their machine
+                            is pinned, unable to reach the feed, or simply already
+                            current.
+                        -->
+                        <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                        <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
+
+                        <Button Grid.Row="10" Grid.Column="1" Content="Refresh now" Padding="14,6"
+                                HorizontalAlignment="Left" Margin="0,14,0,0"
+                                Command="{Binding RefreshCommand}" />
+                    </Grid>
+                </StackPanel>
             </TabItem>
 
         </TabControl>
