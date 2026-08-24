@@ -85,6 +85,27 @@ public static class AgentCli
             return "Done.";
         }
 
+        // A machine with no address gets said first and said plainly. The
+        // rest of the block below is about reaching ADL, and none of it means
+        // anything on a machine that has not been told where ADL is -- an
+        // empty "ADL:" row beside "State: Unpaired" reads as a machine
+        // waiting for a pairing code, which is a different problem with a
+        // different person to call.
+        if (status["configured"]?.GetValue<bool>() == false)
+        {
+            var unconfigured = new List<string>
+            {
+                "ADL:      not configured",
+                $"Problem:  {Text(status, "configuration_problem")}",
+                $"Fix:      {Text(status, "configuration_hint")}",
+                $"Version:  {Text(status, "agent_version")}",
+                "",
+                "The agent is running and will do nothing until it has an address.",
+            };
+
+            return string.Join(Environment.NewLine, unconfigured);
+        }
+
         var lines = new List<string>
         {
             $"ADL:      {Text(status, "adl_url")}",

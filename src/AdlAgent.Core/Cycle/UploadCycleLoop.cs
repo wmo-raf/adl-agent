@@ -1,5 +1,6 @@
 using AdlAgent.Core.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AdlAgent.Core.Cycle;
 
@@ -29,8 +30,9 @@ public sealed class UploadCycleLoop : AgentLoop
         AgentCadence cadence,
         AgentWakeSignal wake,
         TimeProvider time,
+        IOptions<AgentOptions> options,
         ILogger<UploadCycleLoop> logger)
-        : base(wake, time)
+        : base(wake, time, options, logger)
     {
         _cycle = cycle;
         _cadence = cadence;

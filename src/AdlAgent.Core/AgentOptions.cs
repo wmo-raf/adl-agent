@@ -1,5 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace AdlAgent.Core;
 
 /// <summary>
@@ -19,7 +17,15 @@ public sealed class AgentOptions
     /// Root URL of the ADL instance this machine pairs with, e.g.
     /// <c>https://adl.example.org</c>. One agent, one instance.
     /// </summary>
-    [Required]
+    /// <remarks>
+    /// Deliberately not <c>[Required]</c>. It was, and with
+    /// <c>ValidateOnStart</c> above it that meant a machine installed without
+    /// an address threw <c>OptionsValidationException</c> before the host
+    /// ran -- on a service the MSI configures to restart on failure, which
+    /// is a crash loop on a machine nobody can reach. A missing address is
+    /// now a state the agent knows it is in and reports; see
+    /// <see cref="DescribeConfigurationProblem"/>.
+    /// </remarks>
     public string AdlBaseUrl { get; set; } = "";
 
     /// <summary>
@@ -61,6 +67,41 @@ public sealed class AgentOptions
     /// different one is misconfigured rather than differently configured.
     /// </summary>
     public const string ApiPath = "plugins/api/agent/v1/";
+
+    /// <summary>
+    /// What is wrong with <see cref="AdlBaseUrl"/>, or <c>null</c> when
+    /// nothing is.
+    /// </summary>
+    /// <remarks>
+    /// The same rules <see cref="ResolveApiBaseAddress"/> enforces, asked
+    /// rather than thrown. Two callers need the answer without a machine
+    /// falling over to give it: the loops, which have nowhere to send
+    /// anything and skip their pass, and the status the tray draws, which
+    /// has to tell "no address configured" apart from "an address that is
+    /// not answering". They look the same on screen and they are fixed by
+    /// different people.
+    /// <para>
+    /// One string rather than a flag, because every one of these states has
+    /// a different sentence and the technician reading it is the person who
+    /// has to act on it.
+    /// </para>
+    /// </remarks>
+    public string? DescribeConfigurationProblem()
+    {
+        try
+        {
+            ResolveApiBaseAddress();
+
+            return null;
+        }
+        catch (InvalidOperationException refusal)
+        {
+            return refusal.Message;
+        }
+    }
+
+    /// <summary>True when this machine has somewhere to send to.</summary>
+    public bool IsConfigured => DescribeConfigurationProblem() is null;
 
     /// <summary>The base address every call is made against.</summary>
     /// <exception cref="InvalidOperationException">

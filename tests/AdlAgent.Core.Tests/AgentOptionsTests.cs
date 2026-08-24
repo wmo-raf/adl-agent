@@ -53,4 +53,43 @@ public class AgentOptionsTests
 
         Assert.Contains("Agent:AdlBaseUrl", refusal.Message);
     }
+
+    // ---------- the same rules, asked rather than thrown ----------
+    //
+    // The loops and the tray both need the answer without a machine falling
+    // over to give it (wmo-raf/adl#294). Same rules, one implementation:
+    // asking and throwing must never be able to disagree about whether an
+    // address is usable.
+
+    [Fact]
+    public void A_usable_address_has_nothing_to_report()
+    {
+        var options = new AgentOptions { AdlBaseUrl = "https://adl.example.org" };
+
+        Assert.Null(options.DescribeConfigurationProblem());
+        Assert.True(options.IsConfigured);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not a url")]
+    [InlineData("http://adl.example.org")]
+    public void Everything_the_agent_would_refuse_is_reported_rather_than_thrown(string address)
+    {
+        var options = new AgentOptions { AdlBaseUrl = address };
+
+        Assert.False(options.IsConfigured);
+        Assert.False(string.IsNullOrWhiteSpace(options.DescribeConfigurationProblem()));
+    }
+
+    [Fact]
+    public void What_it_reports_is_what_it_would_have_thrown()
+    {
+        var options = new AgentOptions { AdlBaseUrl = "http://adl.example.org" };
+
+        var thrown = Assert.Throws<InvalidOperationException>(options.ResolveApiBaseAddress);
+
+        Assert.Equal(thrown.Message, options.DescribeConfigurationProblem());
+    }
 }

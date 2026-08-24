@@ -5,6 +5,7 @@ using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AdlAgent.Core.Heartbeat;
 
@@ -55,8 +56,9 @@ public sealed class HeartbeatLoop : AgentLoop
         AgentWakeSignal wake,
         IHostLifecycle host,
         TimeProvider time,
+        IOptions<AgentOptions> options,
         ILogger<HeartbeatLoop> logger)
-        : base(wake, time)
+        : base(wake, time, options, logger)
     {
         _client = client;
         _session = session;

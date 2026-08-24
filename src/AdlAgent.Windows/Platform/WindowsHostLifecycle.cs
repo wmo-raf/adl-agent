@@ -32,4 +32,12 @@ public sealed class WindowsHostLifecycle : IHostLifecycle
     public DateTimeOffset StartedAt { get; }
 
     public string StateDirectory { get; }
+
+    /// <summary>
+    /// The INI file the MSI writes and an administrator edits. Always beside
+    /// the state, which is where somebody diagnosing this machine is already
+    /// looking, and named here rather than in the core because which file
+    /// this is was Windows Installer's decision.
+    /// </summary>
+    public string? SettingsFilePath => MachineSettings.PathIn(StateDirectory);
 }

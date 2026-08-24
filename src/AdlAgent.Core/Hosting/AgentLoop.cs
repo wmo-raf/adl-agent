@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AdlAgent.Core.Hosting;
 
@@ -12,16 +14,33 @@ namespace AdlAgent.Core.Hosting;
 /// keeps its own interval, its own errors and its own last-completed state,
 /// so a wedged scan cycle still leaves the heartbeat beating -- which is the
 /// distinction the whole monitoring story rests on.
+/// <para>
+/// What they do share is having nowhere to send: a machine with no ADL
+/// address is not a machine whose calls fail, it is a machine with no call to
+/// make. The check is here rather than in each loop so that a fourth one
+/// cannot be written without it -- and it is deliberately not in
+/// <c>AgentControlService</c>, which is a plain <c>BackgroundService</c> and
+/// must go on answering, because the pipe is how the tray says any of this to
+/// the person standing there.
+/// </para>
 /// </remarks>
 public abstract class AgentLoop : BackgroundService
 {
     private readonly AgentWakeSignal _wake;
     private readonly TimeProvider _time;
+    private readonly AgentOptions _options;
+    private readonly ILogger _logger;
 
-    protected AgentLoop(AgentWakeSignal wake, TimeProvider time)
+    protected AgentLoop(
+        AgentWakeSignal wake,
+        TimeProvider time,
+        IOptions<AgentOptions> options,
+        ILogger logger)
     {
         _wake = wake;
         _time = time;
+        _options = options.Value;
+        _logger = logger;
     }
 
     /// <summary>How long to wait between passes. Read fresh each time, because ADL may have moved it.</summary>
@@ -35,6 +54,29 @@ public abstract class AgentLoop : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Nowhere to send. Returning rather than looping on purpose: the
+        // address cannot change under a running process -- the settings file
+        // is read once at start-up (reloadOnChange is off, deliberately, see
+        // MachineSettings), and the environment is taken at logon -- so a
+        // loop that woke every few minutes to find the same empty setting
+        // would only be writing the same line into a log nobody is reading.
+        // Whatever sets the address restarts the agent, and this runs again.
+        //
+        // Said once, at Warning, and then silence. The state is reported
+        // continuously over the control surface instead, which is where
+        // somebody is actually looking.
+        var problem = _options.DescribeConfigurationProblem();
+
+        if (problem is not null)
+        {
+            _logger.LogWarning(
+                "{Loop} is not running: {Problem} The agent stays up and reports itself as not configured.",
+                GetType().Name,
+                problem);
+
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             await RunOnceAsync(stoppingToken).ConfigureAwait(false);

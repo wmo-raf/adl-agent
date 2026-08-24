@@ -16,6 +16,36 @@ public sealed record AgentStatusSnapshot
     /// <summary>The instance this machine sends to. One agent, one ADL.</summary>
     public required string AdlUrl { get; init; }
 
+    // ---------- whether this machine has anywhere to send at all ----------
+    //
+    // Told apart from "configured but unreachable" on purpose. Both leave a
+    // machine sending nothing, they look identical on the tray's Status tab,
+    // and they are fixed by different people: one wants an administrator at
+    // this machine, the other wants somebody who can see the network. Before
+    // this, an unconfigured machine served AdlUrl as an empty string and the
+    // window drew an empty row -- indistinguishable from a value the service
+    // had not sent.
+
+    /// <summary>True when this machine has an address it could send to.</summary>
+    public bool Configured { get; init; } = true;
+
+    /// <summary>
+    /// Why not, when it is not: missing, unparseable, or plain HTTP to
+    /// somewhere other than this machine. <c>null</c> when configured.
+    /// </summary>
+    public string? ConfigurationProblem { get; init; }
+
+    /// <summary>
+    /// What to do about it, in the terms of the tier this install is.
+    /// <c>null</c> when configured.
+    /// </summary>
+    /// <remarks>
+    /// Tier-shaped because the two tiers have genuinely different answers
+    /// and only one of them is available to the person likely to be standing
+    /// there -- see the README's known gaps.
+    /// </remarks>
+    public string? ConfigurationHint { get; init; }
+
     /// <summary>Unpaired, Paired, or RePairNeeded.</summary>
     public required string PairingState { get; init; }
 
