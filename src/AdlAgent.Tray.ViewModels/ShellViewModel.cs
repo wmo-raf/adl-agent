@@ -183,8 +183,15 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// The one line the tray icon's tooltip and the window header both show.
+    /// The one line the tray icon's tooltip and the window header both show:
+    /// what this machine <em>is</em>.
     /// </summary>
+    /// <remarks>
+    /// Only what it is. What to do about it is <see cref="NextStep"/>, which
+    /// is on the screen directly beneath this, and a header that also gave
+    /// the instruction would be the same sentence twice -- and, worse, two
+    /// copies of it to drift apart. This one describes; the one below acts.
+    /// </remarks>
     public string Headline
     {
         get
@@ -201,12 +208,12 @@ public sealed class ShellViewModel : Observable
 
             if (NeedsRePairing)
             {
-                return "ADL has revoked this machine. Ask for a new pairing code and pair again.";
+                return "ADL has revoked this machine's token, so nothing is being sent.";
             }
 
             if (!IsPaired)
             {
-                return "Not paired yet. Paste the pairing code from your ADL administrator.";
+                return "This machine is not paired with ADL yet.";
             }
 
             return string.Create(
@@ -248,7 +255,18 @@ public sealed class ShellViewModel : Observable
         set => Set(ref _selectedTab, value);
     }
 
-    /// <summary>True when there are no station rows to draw.</summary>
+    /// <summary>
+    /// True when there are no station rows to draw.
+    /// </summary>
+    /// <remarks>
+    /// About the rows on the screen and not about
+    /// <see cref="NextStep"/>'s view of what ADL holds, because it decides
+    /// whether to draw a sentence in place of a grid. The two can disagree
+    /// for a moment -- ADL dropping every station while somebody is typing
+    /// into a row leaves the rows there, on purpose -- and when they do, the
+    /// right thing is to leave the rows a technician is working in alone and
+    /// let the line say what has happened.
+    /// </remarks>
     public bool HasNoStations => Stations.Count == 0;
 
     /// <summary>
@@ -258,8 +276,16 @@ public sealed class ShellViewModel : Observable
     /// "ADL has linked nothing to this device yet", "ADL is not answering" and
     /// "the service is not running" are three different problems wanting three
     /// different people, and until this they were the same empty grid.
+    /// <para>
+    /// The states that leave no list to explain -- a folder to bind, a station
+    /// that collected nothing -- carry no sentence of their own, and fall back
+    /// to the line. They cannot be reached with an empty grid, and a fallback
+    /// costs nothing where an invariant nobody restates would eventually cost
+    /// a blank rectangle.
+    /// </para>
     /// </remarks>
-    public string NoStationsReason => NextStep.NoStations;
+    public string NoStationsReason =>
+        NextStep.NoStations.Length > 0 ? NextStep.NoStations : NextStep.Text;
 
     /// <summary>The answer to the last thing a button did.</summary>
     public string Message
@@ -549,6 +575,7 @@ public sealed class ShellViewModel : Observable
     {
         NextStep = NextSteps.For(_serviceReached, _status, _linked);
 
+        // After the line, because the tab is read off it.
         ChooseTab();
 
         foreach (var property in HeaderProperties)
@@ -578,7 +605,7 @@ public sealed class ShellViewModel : Observable
 
         _tabChosen = true;
 
-        SelectedTab = TrayTabs.For(_status);
+        SelectedTab = TrayTabs.For(NextStep);
     }
 
     /// <summary>

@@ -91,6 +91,33 @@ public class GuidedWindowTests
         Assert.Equal(TrayTabs.Status, window.SelectedTab);
     }
 
+    [Fact]
+    public async Task A_window_that_cannot_reach_the_service_picks_no_tab_yet()
+    {
+        await using var agent = new AgentHarness();
+
+        var window = new ShellViewModel(ServedAgent.NothingServing());
+
+        await window.RefreshAsync();
+
+        // Nothing is known about this machine, so there is no tab that
+        // matches it. It stays where it opened, and the line says what is
+        // wrong -- rather than the window guessing, and then being unable to
+        // correct itself once the service comes up.
+        Assert.Equal(TrayTabs.Pairing, window.SelectedTab);
+
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var reachable = new ShellViewModel(serving.Link);
+
+        await reachable.RefreshAsync();
+
+        Assert.Equal(TrayTabs.Stations, reachable.SelectedTab);
+    }
+
     // ---------- the line, in each state it has to be right for ----------
 
     [Fact]

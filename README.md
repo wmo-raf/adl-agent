@@ -316,9 +316,15 @@ from the ADL instance they are paired with.
 
 `adl-agent-tray.exe` is what a station technician uses. It puts an icon in the
 notification area — green when the machine is paired, synced and ADL is
-answering; amber when something wants a person; red when the service is not
-running — and opens a window with three tabs: **Pairing**, **Stations**, and
-**Status**.
+answering; amber when it is not yet doing its job, whether or not the person
+who can change that is standing at it; red when the service is not running —
+and opens a window with three tabs: **Pairing**, **Stations**, and **Status**.
+
+Amber covers waiting as well as acting, deliberately. A machine paired ten
+seconds ago whose administrator has not linked a station to it yet is not
+collecting anything, and green there would say it was. The line in the window
+is what says whether the next move is the technician's or somebody else's;
+the colour only says whether this machine is working.
 
 It opens on the tab that matches the machine — Pairing while there is a code
 to paste, Stations once there is not — and every tab carries one line at the
