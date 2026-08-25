@@ -266,6 +266,18 @@ public sealed class OnDemandCollect
 
         public string StationName => stationName;
 
+        /// <summary>
+        /// How the window stops this run.
+        /// </summary>
+        /// <remarks>
+        /// Never disposed, and that is deliberate rather than an oversight.
+        /// Cancel and the run's own ending arrive from two threads, and a
+        /// dispose on the ending path is a token source somebody's Cancel can
+        /// reach a moment after it has gone. There is one of these per
+        /// requested collect, it holds no unmanaged resource and no timer, and
+        /// only the most recent run is referenced at all -- so the alternative
+        /// costs a crash on a button and saves nothing worth having.
+        /// </remarks>
         public CancellationTokenSource Cancelling { get; } = new();
 
         /// <summary>Held so the task is observed rather than dropped.</summary>
@@ -301,8 +313,6 @@ public sealed class OnDemandCollect
                     ? "Stopped."
                     : result.Error is null ? "Finished." : "Stopped early.";
             }
-
-            Cancelling.Dispose();
         }
 
         public CollectProgress Progress()
