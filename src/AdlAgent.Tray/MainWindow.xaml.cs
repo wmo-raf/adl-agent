@@ -1,7 +1,9 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
-using System.Windows.Threading;
+using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace AdlAgent.Tray;
 
@@ -9,28 +11,25 @@ namespace AdlAgent.Tray;
 /// The window behind the tray icon.
 /// </summary>
 /// <remarks>
-/// Almost all of it is <c>MainWindow.xaml</c>. What is left here is the two
-/// behaviours that are not layout: closing the window hides it rather than
-/// ending the program, and typing in a settings box re-counts the files it
-/// would match after a short pause.
+/// Almost all of it is <c>MainWindow.xaml</c>. What is left here is closing
+/// the window hiding it rather than ending the program, and the three ways a
+/// station's settings are opened.
 /// </remarks>
 public partial class MainWindow : Window
 {
     /// <summary>
-    /// How long to wait after the last keystroke before counting.
+    /// What the Browse button in the settings window decides, wired to the
+    /// operating system this one is running on.
     /// </summary>
     /// <remarks>
-    /// Each count walks a folder, and the folders this product exists for
-    /// hold hundreds of thousands of files. Counting on every keystroke would
-    /// have the agent walk one such folder eleven times while somebody typed
-    /// "GARISSA_*.dat" -- and the answers would arrive out of order. Long
-    /// enough to mean "they have stopped typing", short enough to still feel
-    /// like it is answering them.
+    /// Built once and lent to each settings window rather than rebuilt per
+    /// station: it holds no state about a station, only the two ways it asks
+    /// Windows a question.
     /// </remarks>
-    private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(400);
+    private readonly FolderChoice _folders =
+        new(WindowsDriveMap.Lookup, Directory.Exists);
 
     private readonly ShellViewModel _shell;
-    private readonly DispatcherTimer _settling;
 
     public MainWindow(ShellViewModel shell)
     {
@@ -39,11 +38,6 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         DataContext = shell;
-
-        _settling = new DispatcherTimer { Interval = Settle };
-        _settling.Tick += Recount;
-
-        shell.StationSettingsChanged += Restart;
     }
 
     /// <summary>
@@ -60,28 +54,68 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
-    private void Restart(object? sender, EventArgs args)
+    private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
+
+    private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();
+
+    /// <summary>
+    /// Enter opens the highlighted station.
+    /// </summary>
+    /// <remarks>
+    /// Handled in preview and marked handled, because the grid's own answer
+    /// to Enter is to move the highlight down a row -- which, on the key
+    /// somebody presses to open the thing they have just selected, would open
+    /// nothing and select something else.
+    /// </remarks>
+    private void StationKeyed(object sender, KeyEventArgs args)
     {
-        // Restarted rather than left running, so the clock measures the pause
-        // since the last keystroke rather than since the first.
-        _settling.Stop();
-        _settling.Start();
+        if (args.Key != Key.Enter || sender is not DataGrid)
+        {
+            return;
+        }
+
+        args.Handled = true;
+
+        OpenSettings();
     }
 
-    private async void Recount(object? sender, EventArgs args)
+    /// <summary>
+    /// Open the selected station's settings, and re-read everything once the
+    /// window closes.
+    /// </summary>
+    /// <remarks>
+    /// The refresh is after the dialog rather than inside the save, and it
+    /// runs whatever the save came to -- or whether there was one. While the
+    /// window is open the shell is not rebuilding rows at all (see
+    /// <see cref="ShellViewModel.BeginEditing"/>), so this is the moment the
+    /// list catches up, and it catches up with what ADL holds rather than with
+    /// what somebody typed.
+    /// </remarks>
+    private async void OpenSettings()
     {
-        _settling.Stop();
+        if (_shell.BeginEditing(_folders) is not { } settings)
+        {
+            return;
+        }
 
         try
         {
-            await _shell.CountMatchesAsync().ConfigureAwait(true);
+            new StationSettingsWindow(settings, _folders) { Owner = this }.ShowDialog();
+
+            await _shell.RefreshAsync().ConfigureAwait(true);
         }
         catch (Exception exception)
         {
-            // A timer tick cannot be awaited by anyone, so an exception
-            // escaping here would close the window a technician is in the
-            // middle of using. The count is the least important thing on it.
-            _shell.SelectedStation?.CouldNotCount(exception.Message);
+            // An async void handler: nothing above this can catch anything,
+            // and an exception escaping would take down the one program on
+            // the machine whose job is to explain what is wrong.
+            _shell.Failed(exception);
+
+            // Idempotent, and the window's own OnClosed has usually done it
+            // already. What this covers is a window that threw before it ever
+            // opened -- where leaving the flag set would freeze the station
+            // list for as long as the tray runs.
+            _shell.EndEditing();
         }
     }
 }

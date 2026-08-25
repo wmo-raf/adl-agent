@@ -337,6 +337,50 @@ It is a per-user program and asks for no administrator rights. The installer
 puts it in the Start menu and starts it at logon. It can be closed at any time; the service goes on collecting and
 sending with nobody logged on, which is what it is a service for.
 
+#### Binding a station to a folder
+
+The **Stations** tab is the list and nothing else: one row per station ADL has
+linked to this machine, with the folder and pattern it currently holds, what
+the last cycle did, and what went wrong if anything did. Selecting a row and
+pressing **Edit settings…** — or double-clicking it, or pressing Enter on it —
+opens that station's settings in a window of its own.
+
+What is set there is where this station's files are and how they are named;
+the decoder, the variable mappings and the collection start date stay in the
+ADL admin. **Browse…** beside the folder box opens Windows' own folder picker,
+starting at the folder the box already names (or, if that one is not there, at
+the nearest folder above it that is). Underneath the settings, a live count
+says how many files these settings would pick out of that folder, updated a
+moment after typing stops and once as the window opens.
+
+Nothing leaves the machine until **Save to ADL**, which is grey until a box
+differs from what ADL sent — the line beside it says which of those two it is,
+and afterwards says what ADL answered. The window closes once ADL has taken
+the settings; a refusal keeps it open, because what it is showing is the thing
+that has to change. Closing without saving throws the edits away and asks
+first. The list behind the window stops refreshing while it is open, so the
+row cannot move out from under it, but the header, the next-step line and the
+colour of the icon in the corner all go on following the machine.
+
+#### Folders the service cannot see
+
+The window browses as the technician standing at the machine. The service
+collects as **LocalSystem**, and the two do not see the same filesystem:
+
+- **A mapped drive letter cannot work.** Drive mappings belong to a logon
+  session and LocalSystem has none, so `Z:\VendorData` is a real folder in the
+  picker and a path that does not exist to the service, permanently. Browse
+  rewrites a mapped letter to the `\\server\share` form it points at, where
+  Windows will say what that is.
+- **A share is reached as the machine, not as you.** `\\nas\met\garissa` that
+  a technician can read is reached by the service as `DOMAIN\MACHINE$`, so the
+  share has to grant that account read access.
+
+Both are called out under the folder box when a path is one of them. Without
+that, both come back from the file count as *"Nothing was found in this
+folder. Check that the path is right and that this machine can read it."* —
+which is true, and which is also what a mistyped folder name says.
+
 #### Finding a broken binding
 
 A WPF binding whose path is wrong neither throws nor draws: the label is
@@ -460,6 +504,17 @@ there.
   properly means the tray writing the setting itself, which is more than
   [#297](https://github.com/wmo-raf/adl/issues/297) did — it made the state
   legible, not fixable from the window.
+- **A folder the technician can see is not necessarily a folder the service
+  can read.** The tray is per-user and the service is LocalSystem, so a drive
+  letter mapped in somebody's session does not exist for the thing that will
+  do the collecting, and a share they can read is reached by it as this
+  machine's own account. The window says so where it can — see *Folders the
+  service cannot see* above — and Browse rewrites a mapped letter to its
+  `\\server\share` form. What none of that fixes is a share that simply does
+  not grant `DOMAIN\MACHINE$` read access: the station is configured, ADL
+  accepts the path, and every cycle collects nothing. Deployments that read
+  from a share have to grant the machine account, and there is nothing on the
+  machine that can grant it for them.
 - **The device token is stored unencrypted** in `state.json` under
   `%ProgramData%\ADL Agent`. The MSI replaces that folder's permissions with
   SYSTEM and Administrators, so on an installed machine the token is only

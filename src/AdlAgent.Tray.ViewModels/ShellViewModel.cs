@@ -68,14 +68,15 @@ public sealed class ShellViewModel : Observable
     /// <summary>The station list the rows were last built from, as it arrived.</summary>
     private string _shownStations = "";
 
+    /// <summary>True while the settings window is open over this one.</summary>
+    private bool _editing;
+
     public ShellViewModel(AgentControlLink agent)
     {
         _agent = agent;
 
         PairCommand = new AsyncCommand(PairAsync, Failed, () => PairingCode.Trim().Length > 0);
         RefreshCommand = new AsyncCommand(() => RefreshAsync(), Failed);
-        SaveStationCommand = new AsyncCommand(
-            SaveStationAsync, Failed, () => SelectedStation?.HasChanges == true);
     }
 
     public ObservableCollection<StationViewModel> Stations { get; } = [];
@@ -83,11 +84,6 @@ public sealed class ShellViewModel : Observable
     public AsyncCommand PairCommand { get; }
 
     public AsyncCommand RefreshCommand { get; }
-
-    public AsyncCommand SaveStationCommand { get; }
-
-    /// <summary>Raised when a station's boxes change, so the window can re-count.</summary>
-    public event EventHandler? StationSettingsChanged;
 
     // ---------- what the header and the status tab draw ----------
 
@@ -287,11 +283,19 @@ public sealed class ShellViewModel : Observable
     public string NoStationsReason =>
         NextStep.NoStations.Length > 0 ? NextStep.NoStations : NextStep.Text;
 
-    /// <summary>The answer to the last thing a button did.</summary>
+    /// <summary>
+    /// The answer to the last thing a button did.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private to set, because the settings window's view
+    /// model writes it too -- deliberately the same string rather than one of
+    /// its own, so that a refusal read in front of the window and a success
+    /// read behind it are the same sentence.
+    /// </remarks>
     public string Message
     {
         get => _message;
-        private set => Set(ref _message, value);
+        internal set => Set(ref _message, value);
     }
 
     public string PairingCode
@@ -306,34 +310,24 @@ public sealed class ShellViewModel : Observable
         }
     }
 
+    /// <summary>
+    /// Which row is highlighted, and so which station the settings window
+    /// would open on.
+    /// </summary>
+    /// <remarks>
+    /// A selection and nothing more. Rows are never typed into -- editing
+    /// happens on a copy in a window of its own -- so there is no edit here
+    /// to preserve, notify about, or lose.
+    /// </remarks>
     public StationViewModel? SelectedStation
     {
         get => _selectedStation;
         set
         {
-            if (ReferenceEquals(_selectedStation, value))
+            if (Set(ref _selectedStation, value))
             {
-                return;
+                Raise(nameof(HasSelectedStation));
             }
-
-            if (_selectedStation is not null)
-            {
-                _selectedStation.SettingsChanged -= StationEdited;
-            }
-
-            Set(ref _selectedStation, value);
-
-            if (_selectedStation is not null)
-            {
-                _selectedStation.SettingsChanged += StationEdited;
-            }
-
-            Raise(nameof(HasSelectedStation));
-            SaveStationCommand.Refresh();
-
-            // The new station's boxes have not been counted against the
-            // filesystem yet, and the technician is looking at them now.
-            StationSettingsChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -348,14 +342,7 @@ public sealed class ShellViewModel : Observable
     /// so the window cannot draw a station list beside a status that
     /// disagrees with it.
     /// </remarks>
-    /// <param name="replaceEvenIfEdited">
-    /// Set by the refresh that follows a save, where boxes differing from
-    /// what ADL sent is exactly what has just been fixed. A parameter and not
-    /// a field: the poll can tick during this method's awaits, and a field
-    /// would let that tick inherit the permission and overwrite whatever
-    /// somebody had started typing in the meantime.
-    /// </param>
-    public async Task RefreshAsync(bool replaceEvenIfEdited = false)
+    public async Task RefreshAsync()
     {
         var status = await _agent.StatusAsync().ConfigureAwait(true);
 
@@ -370,7 +357,7 @@ public sealed class ShellViewModel : Observable
             {
                 _linked = stations.Value.Stations;
 
-                Show(stations.Value, replaceEvenIfEdited);
+                Show(stations.Value);
             }
         }
 
@@ -406,31 +393,57 @@ public sealed class ShellViewModel : Observable
         await RefreshAsync().ConfigureAwait(true);
     }
 
+    // ---------- editing one station, in a window of its own ----------
+
     /// <summary>
-    /// Count what the selected station's boxes would match (story 7).
+    /// Begin editing the selected station, or return null when no row is
+    /// selected.
     /// </summary>
     /// <remarks>
-    /// Called from a debounce in the window rather than on every keystroke:
-    /// each call walks a folder that may hold a hundred thousand files.
+    /// Two things happen here, and they are the same decision seen from two
+    /// sides. The station is <em>copied</em> (see
+    /// <see cref="StationViewModel.Editing"/>), so what is typed into is not
+    /// the row; and the poll stops rebuilding rows until
+    /// <see cref="EndEditing"/>, so the row cannot be replaced underneath the
+    /// copy's station identity while somebody is working.
+    /// <para>
+    /// The message is cleared because whatever it last said was the answer to
+    /// something else, and the window about to open renders it.
+    /// </para>
     /// </remarks>
-    public async Task CountMatchesAsync()
+    public StationSettingsViewModel? BeginEditing(FolderChoice folders)
     {
-        var station = SelectedStation;
-
-        if (station is null)
+        if (SelectedStation is not { } selected)
         {
-            return;
+            return null;
         }
 
+        _editing = true;
+        Message = "";
+
+        return new StationSettingsViewModel(this, selected.Editing(folders));
+    }
+
+    /// <summary>The settings window has closed; the rows may move again.</summary>
+    public void EndEditing() => _editing = false;
+
+    /// <summary>
+    /// Count what a station's boxes would match (story 7).
+    /// </summary>
+    /// <remarks>
+    /// Called from a debounce in the settings window rather than on every
+    /// keystroke: each call walks a folder that may hold a hundred thousand
+    /// files.
+    /// <para>
+    /// The station is the caller's rather than the selection, and that is
+    /// what removed the race this used to guard against. One station is being
+    /// edited at a time, in a modal window, and it cannot change into another
+    /// one while an answer is in flight.
+    /// </para>
+    /// </remarks>
+    public async Task CountMatchesAsync(StationViewModel station)
+    {
         var counted = await _agent.PreviewAsync(station.PreviewRequest()).ConfigureAwait(true);
-
-        // The selection may have moved while that was travelling. Answering
-        // the station that is no longer shown would put one station's count
-        // under another's name.
-        if (!ReferenceEquals(station, SelectedStation))
-        {
-            return;
-        }
 
         if (counted.Value is null)
         {
@@ -442,23 +455,29 @@ public sealed class ShellViewModel : Observable
         station.Counted(counted.Value);
     }
 
-    /// <summary>Write the selected station's changed settings through to ADL (story 9).</summary>
-    public async Task SaveStationAsync()
+    /// <summary>
+    /// Write a station's changed settings through to ADL (story 9), and say
+    /// which of the three things happened.
+    /// </summary>
+    /// <remarks>
+    /// No refresh here, unlike the version this replaced. The settings window
+    /// closes on everything except a refusal, and the refresh happens after
+    /// it has -- so a rebuild of the rows can never land under a window that
+    /// is still open, and the rebuild that follows a save needs no permission
+    /// to replace an edit because there is no longer an edit to replace.
+    /// </remarks>
+    public async Task<SaveOutcome> SaveStationAsync(StationViewModel station)
     {
-        var station = SelectedStation;
-
-        if (station is null)
-        {
-            return;
-        }
-
         var changes = station.Changes();
 
         if (changes.Count == 0)
         {
+            // Not reachable from the button, which is disabled until
+            // something differs. Reachable from a save that raced an edit
+            // being undone, and a refusal is the honest answer to it.
             Message = "Nothing has changed.";
 
-            return;
+            return SaveOutcome.Refused;
         }
 
         var written = await _agent.ConfigureAsync(station.StationLinkId, changes).ConfigureAwait(true);
@@ -467,49 +486,55 @@ public sealed class ShellViewModel : Observable
         {
             Message = written.Detail ?? "ADL would not accept those settings.";
 
+            // A revoked token is not a refusal to fix in this window: nothing
+            // typed in it can be saved by anybody until the machine is paired
+            // again. The window closes on this, and the next-step line behind
+            // it -- drawn from what the service holds, which is why this reads
+            // it back now rather than waiting for the poll -- says what to do.
             if (written.NeedsRePairing)
             {
-                // Read back rather than asserted here. A revoked token is a
-                // fact about the machine that the service already holds, and
-                // the line at the top of the window is drawn from that -- so
-                // this asks now instead of leaving it wrong until the poll
-                // comes round. Editing is safe: the refresh keeps rows that
-                // somebody is typing into.
                 await RefreshAsync().ConfigureAwait(true);
+
+                return SaveOutcome.MustRePair;
             }
 
-            return;
+            return SaveOutcome.Refused;
         }
 
         Message = string.Create(
             CultureInfo.CurrentCulture,
             $"Saved to ADL. Configuration is now at version {written.Value!.ConfigVersion}.");
 
-        // Re-read rather than patch the row in place: what this window shows
-        // should be what ADL holds, including anything it normalised on the
-        // way in. This is the refresh that is allowed to replace edited
-        // boxes, because the edit in them is the one that just landed.
-        await RefreshAsync(replaceEvenIfEdited: true).ConfigureAwait(true);
+        return SaveOutcome.Saved;
     }
 
     /// <summary>
     /// Replace the rows with what the service just said, keeping the
     /// selection -- but only when the stations themselves have changed and
-    /// nobody is in the middle of typing.
+    /// no settings window is open over this one.
     /// </summary>
     /// <remarks>
     /// Both guards are about the poll rather than about pressing Refresh.
-    /// This runs every few seconds for as long as the window is open, and
-    /// rebuilding the rows each time would take the keyboard focus away from
-    /// whoever was typing a folder path -- and, worse, would replace what they
-    /// had typed with what ADL still holds. A technician cannot type a path
-    /// into a box that empties itself every five seconds.
+    /// This runs every few seconds for as long as the tray is running.
+    /// <para>
+    /// Nothing is rebuilt while somebody is editing, because the settings
+    /// window's station is one of these objects' twin and replacing the row
+    /// halfway through would leave the window editing a station the list no
+    /// longer contains. Suppressing the rebuild is a stronger rule than
+    /// checking whether anything has been typed yet -- which was the previous
+    /// one, and which was blind to the moment between opening a window and
+    /// touching a box. The rest of the poll is untouched: the header, the
+    /// next-step line and therefore the colour of the icon in the corner all
+    /// go on moving while a window is open, because a technician who leaves
+    /// one open should not be watching a tray icon that has quietly stopped
+    /// telling the truth.
+    /// </para>
     /// <para>
     /// The comparison is against the stations alone and not the whole answer,
     /// which also carries the moment of the last sync and the last cycle.
     /// Those move on every cycle without any station having changed, and
-    /// rebuilding on them would throw away the live match count a technician
-    /// was reading -- occasionally, and for no reason they could see.
+    /// rebuilding on them would move the highlighted row out from under
+    /// somebody about to press Edit settings.
     /// </para>
     /// <para>
     /// What it does compare is the stations as they arrived, rather than a
@@ -517,28 +542,23 @@ public sealed class ShellViewModel : Observable
     /// noticed here without anybody remembering to add it.
     /// </para>
     /// </remarks>
-    private void Show(AgentStationsSnapshot stations, bool replaceEvenIfEdited)
+    private void Show(AgentStationsSnapshot stations)
     {
-        if (!replaceEvenIfEdited && SelectedStation?.HasChanges == true)
+        if (_editing)
         {
             return;
         }
 
         var arrived = JsonSerializer.Serialize(stations.Stations, AgentJson.Options);
 
-        if (!replaceEvenIfEdited && arrived == _shownStations)
+        if (arrived == _shownStations)
         {
             return;
         }
 
         _shownStations = arrived;
 
-        // Carried across the rebuild. The count belongs to the folder and the
-        // pattern, neither of which this is changing, and blanking it would
-        // have the sentence a technician is reading disappear the moment a
-        // cycle finished somewhere behind them.
         var selected = SelectedStation?.StationLinkId;
-        var counted = SelectedStation?.MatchSummary;
 
         SelectedStation = null;
         Stations.Clear();
@@ -548,23 +568,22 @@ public sealed class ShellViewModel : Observable
             Stations.Add(new StationViewModel(station));
         }
 
-        var showing = Stations.FirstOrDefault(station => station.StationLinkId == selected);
-
-        if (showing is not null && counted is { Length: > 0 })
-        {
-            showing.KeepCount(counted);
-        }
-
-        SelectedStation = showing ?? Stations.FirstOrDefault();
+        SelectedStation =
+            Stations.FirstOrDefault(station => station.StationLinkId == selected)
+            ?? Stations.FirstOrDefault();
     }
 
-    private void StationEdited(object? sender, EventArgs args)
-    {
-        SaveStationCommand.Refresh();
-        StationSettingsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Failed(Exception exception) =>
+    /// <summary>
+    /// Say that something in the window itself went wrong.
+    /// </summary>
+    /// <remarks>
+    /// Public because the window has handlers of its own that are
+    /// <c>async void</c> -- opening the settings window is one -- and nothing
+    /// above such a handler can catch anything. An exception escaping one
+    /// would end the process with no window and no message, on the machine
+    /// where this program is the thing that explains what is wrong.
+    /// </remarks>
+    public void Failed(Exception exception) =>
         Message = $"Something went wrong in this window: {exception.Message}";
 
     /// <summary>

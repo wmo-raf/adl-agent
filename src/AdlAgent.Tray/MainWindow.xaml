@@ -121,11 +121,19 @@
 
             <!-- ============ Stations (stories 6, 7, 9) ============ -->
             <TabItem Header="Stations">
+                <!--
+                    The list, and the one button that opens a station. The
+                    settings themselves are in a window of their own: they were
+                    in a row beneath this grid, under a fixed-height scroll
+                    area, and between them the two asked for more height than
+                    this tab has on a 620-pixel window — so the Save button
+                    below them was drawn off the bottom edge and could only be
+                    reached by making the window bigger.
+                -->
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" MinHeight="140" />
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" MinHeight="90" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
@@ -147,7 +155,20 @@
                               HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
                               ItemsSource="{Binding Stations}"
-                              SelectedItem="{Binding SelectedStation, Mode=TwoWay}">
+                              SelectedItem="{Binding SelectedStation, Mode=TwoWay}"
+                              PreviewKeyDown="StationKeyed">
+                        <!--
+                            Double-click opens the station, on the row rather
+                            than on the grid: the grid's own double-clicks
+                            include the column headers, where opening whatever
+                            happened to be selected would be a window nobody
+                            asked for.
+                        -->
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <EventSetter Event="MouseDoubleClick" Handler="StationActivated" />
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Station" Width="150" Binding="{Binding StationName}" />
                             <DataGridTextColumn Header="Connection" Width="130" Binding="{Binding ConnectionName}" />
@@ -158,110 +179,19 @@
                         </DataGrid.Columns>
                     </DataGrid>
 
-                    <!-- The editor for whichever station is selected. -->
-                    <ScrollViewer Grid.Row="2" MaxHeight="260" VerticalScrollBarVisibility="Auto"
-                                  Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
-                        <StackPanel Margin="0,12,0,0" DataContext="{Binding SelectedStation}">
-
-                            <TextBlock Style="{StaticResource Caption}">
-                                <Run Text="{Binding StationName, Mode=OneWay}" />
-                                <Run Text=" — where this station's files are on this machine" />
-                            </TextBlock>
-
-                            <TextBlock Foreground="#5A6472" TextWrapping="Wrap" Margin="0,2,0,6">
-                                The decoder, the variable mappings and the collection start date stay in the
-                                ADL admin. What is set here is where the files are and how they are named.
-                            </TextBlock>
-
-                            <TextBlock Style="{StaticResource Field}" Text="Local folder path" />
-                            <TextBox Style="{StaticResource Entry}"
-                                     Text="{Binding LocalFolderPath, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Style="{StaticResource Field}" Text="File pattern" />
-                            <TextBox Style="{StaticResource Entry}"
-                                     Text="{Binding FilePattern, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <CheckBox Margin="0,6,0,4" Content="Files sit under dated sub-folders"
-                                      IsChecked="{Binding DirStructuredByDate, Mode=TwoWay}" />
-
-                            <StackPanel Visibility="{Binding DirStructuredByDate, Converter={StaticResource Visible}}">
-                                <TextBlock Foreground="#8A5A00" TextWrapping="Wrap" Margin="0,0,0,6">
-                                    This version of the agent does not walk dated sub-folders. Until it does,
-                                    point the folder above at where the files actually are and clear this box.
-                                </TextBlock>
-
-                                <TextBlock Style="{StaticResource Field}" Text="How far down the tree" />
-                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="200"
-                                          SelectedValuePath="Tag"
-                                          SelectedValue="{Binding DateGranularity, Mode=TwoWay}">
-                                    <ComboBoxItem Tag="year" Content="Year" />
-                                    <ComboBoxItem Tag="month" Content="Month" />
-                                    <ComboBoxItem Tag="day" Content="Day" />
-                                    <ComboBoxItem Tag="hour" Content="Hour" />
-                                </ComboBox>
-
-                                <TextBlock Style="{StaticResource Field}" Text="Month folder format" />
-                                <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
-                                          SelectedValuePath="Tag"
-                                          SelectedValue="{Binding MonthDirFormat, Mode=TwoWay}">
-                                    <ComboBoxItem Tag="m" Content="01 to 12" />
-                                    <ComboBoxItem Tag="n" Content="1 to 12" />
-                                    <ComboBoxItem Tag="M" Content="Jan" />
-                                    <ComboBoxItem Tag="b" Content="jan" />
-                                    <ComboBoxItem Tag="F" Content="January" />
-                                    <ComboBoxItem Tag="f" Content="january" />
-                                </ComboBox>
-                            </StackPanel>
-
-                            <TextBlock Style="{StaticResource Field}" Text="How files are found" />
-                            <ComboBox Margin="0,2,0,8" HorizontalAlignment="Left" Width="260"
-                                      SelectedValuePath="Tag"
-                                      SelectedValue="{Binding ListingStrategy, Mode=TwoWay}">
-                                <ComboBoxItem Tag="enumerate" Content="Scan the folder (default)" />
-                                <ComboBoxItem Tag="direct_fetch" Content="Build the filenames (Direct Fetch)" />
-                            </ComboBox>
-
-                            <!-- Only for the stations that build their filenames. -->
-                            <StackPanel Visibility="{Binding IsDirectFetch, Converter={StaticResource Visible}}">
-                                <TextBlock Style="{StaticResource Field}" Text="Filename prefix" />
-                                <TextBox Style="{StaticResource Entry}"
-                                         Text="{Binding DirectFetchPrefix, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Style="{StaticResource Field}" Text="File interval (minutes)" />
-                                <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
-                                         Text="{Binding DirectFetchIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Style="{StaticResource Field}" Text="Filename datetime format" />
-                                <TextBox Style="{StaticResource Entry}" Width="240" HorizontalAlignment="Left"
-                                         Text="{Binding DirectFetchDatetimeFormat, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Style="{StaticResource Field}" Text="Filename timezone" />
-                                <TextBox Style="{StaticResource Entry}" Width="240" HorizontalAlignment="Left"
-                                         Text="{Binding DirectFetchDatetimeTimezone, UpdateSourceTrigger=PropertyChanged}" />
-
-                                <TextBlock Style="{StaticResource Field}" Text="File extension" />
-                                <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
-                                         Text="{Binding DirectFetchFileExtension, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-
-                            <TextBlock Style="{StaticResource Field}" Text="Leave a file alone for (seconds) after it was last written" />
-                            <TextBox Style="{StaticResource Entry}" Width="120" HorizontalAlignment="Left"
-                                     Text="{Binding StabilityWindowSeconds, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <!-- Story 7: the count, live, before anything is saved. -->
-                            <Border Background="#EEF3F8" BorderBrush="#CFD9E4" BorderThickness="1"
-                                    Padding="10,7" CornerRadius="3" Margin="0,4,0,8">
-                                <TextBlock Text="{Binding MatchSummary}" TextWrapping="Wrap" />
-                            </Border>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
-                                Margin="0,8,0,0"
-                                Visibility="{Binding HasSelectedStation, Converter={StaticResource Visible}}">
-                        <Button Content="Save to ADL" Padding="14,6"
-                                Command="{Binding SaveStationCommand}" />
+                    <!--
+                        The one action a selected row has, named. A row that
+                        opens on a double-click and says so nowhere is a row
+                        whose settings a technician on a country server does
+                        not find at all.
+                    -->
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                                Margin="0,10,0,0">
+                        <Button Content="Edit settings…" Padding="14,6"
+                                IsEnabled="{Binding HasSelectedStation}"
+                                Click="EditStation" />
                     </StackPanel>
+
                 </Grid>
             </TabItem>
 

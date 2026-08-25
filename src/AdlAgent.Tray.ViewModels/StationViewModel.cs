@@ -10,13 +10,17 @@ using AdlAgent.Core.Status;
 namespace AdlAgent.Tray;
 
 /// <summary>
-/// One station in the list, and the settings box beneath it.
+/// One station: either a row in the list, or the boxes in the settings window
+/// opened from it.
 /// </summary>
 /// <remarks>
-/// Both halves are here because they are one thing to the technician: the row
-/// they clicked and the folder they are typing into. Splitting them would
-/// mean keeping a selection and an editor in step, which is the bug this
-/// window is most likely to have.
+/// One class for both, but never one <em>instance</em> for both. A row is
+/// built from what ADL sent and is never typed into; opening the settings
+/// window calls <see cref="Editing"/>, which builds a second instance from
+/// the same snapshot for somebody to type into. That is what makes Cancel
+/// correct without a revert method to write -- the copy is simply dropped --
+/// and it is why the poll behind the window can never replace the object
+/// being edited.
 /// <para>
 /// <see cref="Changes"/> is the whole of what "editing" means here: the
 /// fields whose boxes now differ from what ADL sent. Nothing is stored, and
@@ -28,7 +32,18 @@ public sealed class StationViewModel : Observable
 {
     private readonly AgentStationSnapshot _station;
 
+    /// <summary>
+    /// What to say about a folder path, on the instance that has boxes.
+    /// </summary>
+    /// <remarks>
+    /// Null on a row, because a row has nowhere to say it. Rather than making
+    /// every caller supply one, an absent chooser simply means every path is
+    /// unremarkable.
+    /// </remarks>
+    private readonly FolderChoice? _folders;
+
     private string _localFolderPath;
+    private string _localFolderNote;
     private string _filePattern;
     private bool _dirStructuredByDate;
     private string _dateGranularity;
@@ -42,13 +57,15 @@ public sealed class StationViewModel : Observable
     private string _stabilityWindowSeconds;
     private string _matchSummary = "";
 
-    public StationViewModel(AgentStationSnapshot station)
+    public StationViewModel(AgentStationSnapshot station, FolderChoice? folders = null)
     {
         _station = station;
+        _folders = folders;
 
         var config = station.Config;
 
         _localFolderPath = config.LocalFolderPath;
+        _localFolderNote = folders?.NoteFor(config.LocalFolderPath) ?? "";
         _filePattern = config.FilePattern ?? "";
         _dirStructuredByDate = config.DirStructuredByDate;
         _dateGranularity = config.DateGranularity ?? "";
@@ -64,6 +81,17 @@ public sealed class StationViewModel : Observable
 
     /// <summary>Raised whenever a box changes, so the window can re-count.</summary>
     public event EventHandler? SettingsChanged;
+
+    /// <summary>
+    /// A second instance of this station for somebody to type into.
+    /// </summary>
+    /// <remarks>
+    /// Built from the snapshot rather than from this object's boxes, so what
+    /// the settings window opens showing is what ADL holds -- which is also
+    /// what the row behind it goes on showing while the window is open.
+    /// Nothing binds the two together, and nothing has to.
+    /// </remarks>
+    public StationViewModel Editing(FolderChoice folders) => new(_station, folders);
 
     public long StationLinkId => _station.StationLinkId;
 
@@ -104,10 +132,24 @@ public sealed class StationViewModel : Observable
         {
             if (Set(ref _localFolderPath, value))
             {
+                Note();
                 Edited();
             }
         }
     }
+
+    /// <summary>
+    /// What is worth saying about this folder path beyond whether files match
+    /// it, or nothing when there is nothing.
+    /// </summary>
+    /// <remarks>
+    /// In practice this is about the gap between who is looking and who will
+    /// be reading: the technician browses as themselves, and the service
+    /// collects as LocalSystem. See <see cref="FolderChoice.NoteFor"/>.
+    /// </remarks>
+    public string LocalFolderNote => _localFolderNote;
+
+    public bool HasLocalFolderNote => _localFolderNote.Length > 0;
 
     public string FilePattern
     {
@@ -351,18 +393,6 @@ public sealed class StationViewModel : Observable
     public void CouldNotCount(string detail) => MatchSummary = detail;
 
     /// <summary>
-    /// Carry a count across a rebuild of the list.
-    /// </summary>
-    /// <remarks>
-    /// The rows are replaced whenever the stations change -- a cycle
-    /// finishing is enough -- and the count belongs to the folder and the
-    /// pattern rather than to the row that happened to be showing it. Without
-    /// this the sentence a technician is reading vanishes at a moment that
-    /// has nothing to do with them.
-    /// </remarks>
-    public void KeepCount(string summary) => MatchSummary = summary;
-
-    /// <summary>
     /// What ADL sent, with the boxes this window renders laid over it.
     /// </summary>
     /// <remarks>
@@ -415,6 +445,14 @@ public sealed class StationViewModel : Observable
     {
         Raise(nameof(HasChanges));
         SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Note()
+    {
+        if (Set(ref _localFolderNote, _folders?.NoteFor(_localFolderPath) ?? "", nameof(LocalFolderNote)))
+        {
+            Raise(nameof(HasLocalFolderNote));
+        }
     }
 
     /// <summary>

@@ -421,11 +421,13 @@ public class GuidedWindowTests
 
         await window.RefreshAsync();
 
-        // Typed into the box and not saved. The line is about what ADL holds:
-        // nothing has been bound until ADL has taken it, and telling somebody
-        // there is nothing to do while their edit is still in a text box is
-        // the line being wrong at the one moment it matters.
-        window.SelectedStation!.LocalFolderPath = Folder;
+        // Typed into the settings window and not saved. The line is about
+        // what ADL holds: nothing has been bound until ADL has taken it, and
+        // telling somebody there is nothing to do while their edit is still
+        // in a text box is the line being wrong at the one moment it matters.
+        var settings = window.BeginEditing(new FolderChoice(_ => null, _ => true))!;
+
+        settings.Station.LocalFolderPath = Folder;
 
         await window.RefreshAsync();
 
