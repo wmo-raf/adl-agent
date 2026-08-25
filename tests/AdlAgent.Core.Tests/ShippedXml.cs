@@ -20,36 +20,64 @@ internal static class ShippedXml
     /// </summary>
     /// <remarks>
     /// Build output, packaging output, and whatever an editor or a local
-    /// deployment leaves behind. All of it is in <c>.gitignore</c>, and all
-    /// of it can hold copies of files that are checked here at their source —
-    /// <c>publish/</c> and <c>.dev-publish/</c> both carry the tray's
-    /// manifest — so a walk that did not skip them would report the same
-    /// problem several times, and would fail on one developer's machine over
-    /// something no other machine has.
+    /// deployment leaves behind. Every one of these is in <c>.gitignore</c>,
+    /// and several can hold copies of files that are checked here at their
+    /// source -- <c>publish/</c> and <c>.dev-publish/</c> both carry the
+    /// tray's manifest -- so a walk that did not skip them would report the
+    /// same problem several times, and would fail on one developer's machine
+    /// over something no other machine has.
+    /// <para>
+    /// Public so that the test which proves they are skipped is driven by
+    /// this list rather than by a second copy of it. A directory added here
+    /// and forgotten there would be a test that no longer covers what it
+    /// says it covers.
+    /// </para>
     /// </remarks>
-    private static readonly string[] NotOurs =
+    public static readonly string[] NotOurs =
     [
         ".git", ".idea", ".vs", ".vscode", ".dev-publish",
-        "bin", "obj", "publish", "artifacts", "TestResults", "node_modules",
+        "bin", "obj", "publish", "artifacts", "TestResults",
     ];
 
     /// <summary>
     /// What is XML by its name.
     /// </summary>
     /// <remarks>
-    /// Two ways in, because neither alone finds everything. This list is for
-    /// the documents that carry no declaration: an SDK-style <c>.csproj</c>
-    /// opens on <c>&lt;Project&gt;</c>, a <c>.slnx</c> on
-    /// <c>&lt;Solution&gt;</c>, and every <c>.xaml</c> in the tray on its
-    /// root element. The other way in is <see cref="DeclaresItselfXml"/>,
-    /// which is what covers a file with an extension nobody thought of.
+    /// Two ways in, because neither alone finds everything, and this is the
+    /// belt rather than the braces. An XML declaration is optional, so a
+    /// document that omits one is found only by its extension: today that is
+    /// every <c>.csproj</c>, which opens on <c>&lt;Project&gt;</c>, the
+    /// <c>.slnx</c>, <c>Directory.Build.props</c>, every <c>.xaml</c> in the
+    /// tray, and <c>assets/adl-logo.svg</c>, which opens straight on
+    /// <c>&lt;svg&gt;</c>. The rest of the list is formats that usually do
+    /// declare themselves but need not, which is the whole reason not to
+    /// depend on the declaration alone.
+    /// <para>
+    /// <c>.axaml</c> and <c>.wixproj</c> are here for files this repository
+    /// does not have yet and would not notice the absence of: a tray for the
+    /// Linux head would be authored in the first, and the second opens on
+    /// <c>&lt;Project&gt;</c> exactly as a <c>.csproj</c> does. Both are the
+    /// case this test exists for -- XML nothing in the build reads, added by
+    /// somebody who never heard of this file.
+    /// </para>
+    /// <para>
+    /// An <c>.mst</c> transform is not here, although it is the kind of thing
+    /// that gets authored for a tool CI never runs. A built one is a binary
+    /// compound file rather than XML, so there is nothing here to assert
+    /// about it; if one is ever generated from an XML source, that source
+    /// will be found by whatever it is named.
+    /// </para>
+    /// <para>
+    /// The other way in is <see cref="DeclaresItselfXml"/>, which covers a
+    /// file with an extension nobody thought of -- including the one that
+    /// makes this list wrong next year.
+    /// </para>
     /// </remarks>
     private static readonly string[] XmlExtensions =
     [
-        ".xml", ".xaml", ".manifest", ".config", ".svg",
-        ".csproj", ".props", ".targets", ".slnx", ".nuspec",
+        ".xml", ".xaml", ".axaml", ".manifest", ".config", ".svg",
+        ".csproj", ".wixproj", ".props", ".targets", ".slnx", ".nuspec",
         ".wxs", ".wxi", ".wxl", ".resx", ".xsd", ".xsl", ".xslt",
-        ".vsixmanifest", ".ruleset",
     ];
 
     /// <summary>
@@ -68,7 +96,8 @@ internal static class ShippedXml
             .OrderBy(path => path, StringComparer.Ordinal);
 
     /// <summary>
-    /// Why a parser will not take this document, or <c>null</c> when it will.
+    /// Why a parser will not take the document at <paramref name="relative"/>
+    /// under <paramref name="root"/>, or <c>null</c> when it will.
     /// </summary>
     /// <remarks>
     /// <see cref="XmlReader"/> rather than a search for the mistake that has
@@ -76,15 +105,18 @@ internal static class ShippedXml
     /// enumerating the ways a document can fail to be is how you miss the
     /// next one.
     /// <para>
-    /// The message is in the shape a compiler uses — <c>path(line,column):
-    /// reason</c> — because it is read in the same places, and because a
+    /// The message is in the shape a compiler uses -- <c>path(line,column):
+    /// reason</c> -- because it is read in the same places, and because a
     /// failure that names the line is the difference between an edit and a
-    /// search.
+    /// search. The path it names is the relative one, so that a failure reads
+    /// the same in every checkout and says nothing about whose machine found
+    /// it. Taking the two halves separately rather than a joined path and a
+    /// label is what keeps those two facts from disagreeing.
     /// </para>
     /// </remarks>
-    public static string? WhyNotWellFormed(string path, string? displayPath = null)
+    public static string? WhyNotWellFormed(string root, string relative)
     {
-        using var reader = XmlReader.Create(path);
+        using var reader = XmlReader.Create(System.IO.Path.Combine(root, relative));
 
         try
         {
@@ -96,7 +128,7 @@ internal static class ShippedXml
         }
         catch (XmlException failure)
         {
-            return $"{displayPath ?? path}({failure.LineNumber},{failure.LinePosition}): {failure.Message}";
+            return $"{relative}({failure.LineNumber},{failure.LinePosition}): {failure.Message}";
         }
     }
 
@@ -138,7 +170,7 @@ internal static class ShippedXml
     /// prose.
     /// <para>
     /// A byte-order mark is skipped by the reader, and anything unreadable is
-    /// not XML for this purpose — a locked or vanished file is somebody
+    /// not XML for this purpose -- a locked or vanished file is somebody
     /// else's problem and not a well-formedness one.
     /// </para>
     /// </remarks>

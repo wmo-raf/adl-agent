@@ -6,7 +6,7 @@ namespace AdlAgent.Core.Tests;
 /// <remarks>
 /// The cheapest test in the suite, and it earns its place by what it costs to
 /// find out any other way. Version 0.1.0 shipped an application manifest with
-/// two hyphens inside an XML comment — written in the house style for a dash,
+/// two hyphens inside an XML comment -- written in the house style for a dash,
 /// which the XML specification forbids. A manifest Windows cannot parse is a
 /// program Windows will not start: not a degraded window, not a logged
 /// warning, but a refusal at process creation, before any of the application
@@ -15,9 +15,9 @@ namespace AdlAgent.Core.Tests;
 /// milliseconds by any parser on any operating system.
 /// <para>
 /// What makes that worth generalising is the shape of it rather than the
-/// file. MSBuild and WiX parse their own inputs and fail loudly — the same
+/// file. MSBuild and WiX parse their own inputs and fail loudly -- the same
 /// two hyphens in a <c>.csproj</c> produce <c>MSB4025</c> before anything
-/// else happens — so those files were never the risk. The risk is XML that
+/// else happens -- so those files were never the risk. The risk is XML that
 /// nothing in the build reads: a manifest, an <c>app.config</c>, a WiX
 /// fragment included only under a condition, an SVG. Each is authored in a
 /// style that uses <c>--</c> freely and read by nothing until a machine in a
@@ -27,7 +27,7 @@ namespace AdlAgent.Core.Tests;
 /// So this asserts all of it, including what the build already validates.
 /// That is a judgement rather than an oversight: the alternative is an
 /// exclusion list saying which files some other tool is responsible for, and
-/// a list like that is wrong the moment somebody adds a file — which is
+/// a list like that is wrong the moment somebody adds a file -- which is
 /// exactly the failure being guarded against. The cost of the choice is a
 /// second failure beside a clearer one from MSBuild, on a day the build was
 /// already broken.
@@ -61,8 +61,7 @@ public class ShippedXmlTests
     [MemberData(nameof(ShippedXmlFiles))]
     public void Every_xml_document_this_repository_ships_is_well_formed(string file)
     {
-        var why = ShippedXml.WhyNotWellFormed(
-            Path.Combine(RepositoryRoot.Path, file), displayPath: file);
+        var why = ShippedXml.WhyNotWellFormed(RepositoryRoot.Path, file);
 
         Assert.True(why is null, why);
     }
@@ -103,25 +102,18 @@ public class ShippedXmlTests
     [Fact]
     public void The_manifest_that_shipped_in_0_1_0_is_refused()
     {
-        var manifest = Path.Combine(Path.GetTempPath(), $"adl-{Guid.NewGuid():N}.manifest");
+        using var tree = new TemporaryTree();
 
-        File.WriteAllText(manifest, ManifestFrom010);
+        tree.Write("app.manifest", ManifestFrom010);
 
-        try
-        {
-            var why = ShippedXml.WhyNotWellFormed(manifest, displayPath: "app.manifest");
+        var why = ShippedXml.WhyNotWellFormed(tree.Path, "app.manifest");
 
-            Assert.NotNull(why);
+        Assert.NotNull(why);
 
-            // The line the dash is on, so that the failure is an edit rather
-            // than a search, and the reason rather than only a verdict.
-            Assert.StartsWith("app.manifest(7,", why);
-            Assert.Contains("--", why);
-        }
-        finally
-        {
-            File.Delete(manifest);
-        }
+        // The line the dash is on, so that the failure is an edit rather than
+        // a search, and the reason rather than only a verdict.
+        Assert.StartsWith("app.manifest(7,", why);
+        Assert.Contains("--", why);
     }
 
     /// <summary>
@@ -138,12 +130,12 @@ public class ShippedXmlTests
     {
         using var tree = new TemporaryTree();
 
-        tree.Write("deploy/transform.mst.xmlish", "<?xml version=\"1.0\"?><t />");
+        tree.Write("deploy/tray.linux.manifest-template", "<?xml version=\"1.0\"?><t />");
         tree.Write("src/thing.csproj", "<Project />");
         tree.Write("notes.md", "<not xml, and not claiming to be>");
 
         Assert.Equal(
-            ["deploy/transform.mst.xmlish", "src/thing.csproj"],
+            ["deploy/tray.linux.manifest-template", "src/thing.csproj"],
             ShippedXml.Under(tree.Path));
     }
 
@@ -155,14 +147,30 @@ public class ShippedXmlTests
     /// <c>.dev-publish/</c> both hold a copy of the tray's manifest. Walking
     /// into them would report one mistake several times and would fail on one
     /// developer's machine over something no other machine has.
+    /// <para>
+    /// Driven by the list the walk itself uses, rather than by a second copy
+    /// of it here. A directory added to one and not the other would be a test
+    /// that still passes and no longer covers what it says it covers -- which
+    /// is the shape of the mistake this whole file exists to catch.
+    /// </para>
     /// </remarks>
+    public static TheoryData<string> DirectoriesThatAreNotOurs
+    {
+        get
+        {
+            var directories = new TheoryData<string>();
+
+            foreach (var directory in ShippedXml.NotOurs)
+            {
+                directories.Add(directory);
+            }
+
+            return directories;
+        }
+    }
+
     [Theory]
-    [InlineData("obj")]
-    [InlineData("bin")]
-    [InlineData("publish")]
-    [InlineData(".idea")]
-    [InlineData(".dev-publish")]
-    [InlineData("artifacts")]
+    [MemberData(nameof(DirectoriesThatAreNotOurs))]
     public void What_the_repository_does_not_ship_is_not_searched(string directory)
     {
         using var tree = new TemporaryTree();
@@ -178,8 +186,7 @@ public class ShippedXmlTests
     private sealed class TemporaryTree : IDisposable
     {
         public TemporaryTree() =>
-            Directory.CreateDirectory(Path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), $"adl-xml-{Guid.NewGuid():N}"));
+            Path = Directory.CreateTempSubdirectory("adl-agent-xml-").FullName;
 
         public string Path { get; }
 
