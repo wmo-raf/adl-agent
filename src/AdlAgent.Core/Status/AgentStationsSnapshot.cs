@@ -110,6 +110,20 @@ public sealed record AgentStationSnapshot
 
     /// <summary>What went wrong for this station last cycle, if anything did.</summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// What a collect somebody asked for at the machine came to, when that is
+    /// more recent than the last cycle.
+    /// </summary>
+    /// <remarks>
+    /// Beside the cycle's counts rather than replacing them, and null the
+    /// moment a scheduled cycle overtakes it. The two are answers to different
+    /// questions -- "what is this machine doing" and "what did the thing I
+    /// just pressed do" -- and a row that showed a requested collect for ever
+    /// would go on reporting a number from last Tuesday while a cycle five
+    /// minutes ago said something else.
+    /// </remarks>
+    public Cycle.RequestedCollect? Requested { get; init; }
 }
 
 /// <summary>

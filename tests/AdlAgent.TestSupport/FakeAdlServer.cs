@@ -210,6 +210,18 @@ public sealed class FakeAdlServer : IDisposable
     /// </remarks>
     public HashSet<string> UnreadableNames { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Awaited before each manifest is answered, when a test wants to catch a
+    /// cycle in flight.
+    /// </summary>
+    /// <remarks>
+    /// Nothing in the product hangs on it. It is here because a cycle is
+    /// otherwise over before a test can do anything to it, and half of what
+    /// the collect-now button means -- one cycle at a time, and a Cancel that
+    /// reaches a run -- is only observable while one is running.
+    /// </remarks>
+    public Func<Task>? BeforeManifest { get; set; }
+
     /// <summary>Entries this instance takes in one manifest, whatever it advertises.</summary>
     /// <remarks>
     /// Set below <see cref="AgentLimits.ManifestEntries"/> to be an instance
@@ -418,6 +430,15 @@ public sealed class FakeAdlServer : IDisposable
         lock (_gate)
         {
             _requests.Add(request);
+        }
+
+        // Held here rather than inside Answer, which is synchronous. A test
+        // that needs a cycle caught in flight -- to press a button against it,
+        // or to cancel it -- has to stop it somewhere it really spends time,
+        // and the manifest call is where a real cycle does.
+        if (request.Path == "manifest/" && BeforeManifest is { } waiting)
+        {
+            await waiting().ConfigureAwait(false);
         }
 
         var (status, body) = Answer(request);

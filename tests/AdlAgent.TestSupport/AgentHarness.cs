@@ -130,8 +130,17 @@ public sealed class AgentHarness : IAsyncDisposable
 
     public AgentStatusReader Status => Services.GetRequiredService<AgentStatusReader>();
 
+    /// <summary>The station list as the tray reads it.</summary>
+    public AgentStationsReader Stations => Services.GetRequiredService<AgentStationsReader>();
+
     /// <summary>One pass of sync, scan, offer and send.</summary>
     public UploadCycle Cycle => Services.GetRequiredService<UploadCycle>();
+
+    /// <summary>The collect a technician asks for at the machine.</summary>
+    public OnDemandCollect Collects => Services.GetRequiredService<OnDemandCollect>();
+
+    /// <summary>The configuration re-read a technician asks for at the machine.</summary>
+    public OnDemandSync Syncs => Services.GetRequiredService<OnDemandSync>();
 
     public HeartbeatLoop HeartbeatLoop => Hosted<HeartbeatLoop>();
 

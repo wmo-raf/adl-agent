@@ -69,6 +69,8 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<FolderPreview>();
         services.TryAddSingleton<ReconciliationSweep>();
         services.TryAddSingleton<UploadCycle>();
+        services.TryAddSingleton<OnDemandSync>();
+        services.TryAddSingleton<OnDemandCollect>();
         services.TryAddSingleton<AgentCadence>();
         services.TryAddSingleton<AgentWakeSignal>();
         services.TryAddSingleton<HeartbeatMonitor>();

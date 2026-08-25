@@ -31,6 +31,8 @@ public sealed class AgentControlService : BackgroundService
     private readonly ConfigurationService _configuration;
     private readonly StationLinkConfigWriter _writer;
     private readonly FolderPreview _preview;
+    private readonly OnDemandSync _syncs;
+    private readonly OnDemandCollect _collects;
     private readonly AgentWakeSignal _wake;
     private readonly TimeProvider _time;
     private readonly ILogger<AgentControlService> _logger;
@@ -43,6 +45,8 @@ public sealed class AgentControlService : BackgroundService
         ConfigurationService configuration,
         StationLinkConfigWriter writer,
         FolderPreview preview,
+        OnDemandSync syncs,
+        OnDemandCollect collects,
         AgentWakeSignal wake,
         TimeProvider time,
         ILogger<AgentControlService> logger)
@@ -54,6 +58,8 @@ public sealed class AgentControlService : BackgroundService
         _configuration = configuration;
         _writer = writer;
         _preview = preview;
+        _syncs = syncs;
+        _collects = collects;
         _wake = wake;
         _time = time;
         _logger = logger;
@@ -92,6 +98,10 @@ public sealed class AgentControlService : BackgroundService
                 ControlProtocol.PreviewCommand => Preview(request),
                 ControlProtocol.ConfigureCommand => await ConfigureAsync(request, cancellationToken)
                     .ConfigureAwait(false),
+                ControlProtocol.SyncCommand => Sync(),
+                ControlProtocol.CollectCommand => Collect(request),
+                ControlProtocol.CollectStatusCommand => CollectStatus(),
+                ControlProtocol.CollectCancelCommand => CollectCancel(request),
                 _ => ControlResponse.Failure(
                     "unknown_command",
                     $"This agent does not know the command '{request.Command}'."),
@@ -134,6 +144,77 @@ public sealed class AgentControlService : BackgroundService
     }
 
     private ControlResponse Stations() => ControlResponse.Success(ToJson(_stations.Read()));
+
+    /// <summary>
+    /// Ask ADL for this device's configuration now, and answer with the
+    /// attempt rather than its outcome.
+    /// </summary>
+    /// <remarks>
+    /// The outcome arrives on the status the UI already polls. What this
+    /// answer carries is the moment the attempt started, which is what lets a
+    /// window tell its own press from the one before it and from a sync the
+    /// cycle happened to run at the same time.
+    /// </remarks>
+    private ControlResponse Sync() => ControlResponse.Success(ToJson(_syncs.Start()));
+
+    /// <summary>Run a cycle for one station now, or say why not.</summary>
+    /// <remarks>
+    /// A refusal is a <c>collect_refused</c> rather than an <c>Ok</c> with an
+    /// empty body, so a UI can tell "it is running, watch it" from "it is not,
+    /// and here is the sentence to show". None of the reasons is a code
+    /// anything switches on -- switched off in ADL, no folder bound, a cycle
+    /// already running -- so the sentence is the whole of the answer.
+    /// </remarks>
+    private ControlResponse Collect(ControlRequest request)
+    {
+        if (StationLinkId(request.Payload) is not { } stationLinkId)
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say which station link to collect: {\"station_link_id\": 11}.");
+        }
+
+        var started = _collects.Start(stationLinkId);
+
+        return started.Ok
+            ? ControlResponse.Success(ToJson(started.Progress!))
+            : ControlResponse.Failure("collect_refused", started.Refusal!);
+    }
+
+    /// <summary>
+    /// What the collect in flight -- or the last one -- is doing.
+    /// </summary>
+    /// <remarks>
+    /// The last one and not nothing, because the window asking is the one that
+    /// has to show how it ended: a poll landing a moment after the final file
+    /// would otherwise be told there was no run, on the screen somebody is
+    /// watching for the answer.
+    /// </remarks>
+    private ControlResponse CollectStatus() => _collects.Progress is { } progress
+        ? ControlResponse.Success(ToJson(progress))
+        : ControlResponse.Failure(
+            "no_collect", "No collect has been asked for on this machine since it started.");
+
+    private ControlResponse CollectCancel(ControlRequest request)
+    {
+        if (StationLinkId(request.Payload) is not { } stationLinkId)
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say which station link's collect to stop: {\"station_link_id\": 11}.");
+        }
+
+        // Named rather than "the one running", so a window somebody left open
+        // cannot stop a run started for a different station after they walked
+        // away.
+        if (!_collects.Cancel(stationLinkId))
+        {
+            return ControlResponse.Failure(
+                "no_collect", "There is no collect running for that station to stop.");
+        }
+
+        return ControlResponse.Success(ToJson(_collects.Progress!));
+    }
 
     /// <summary>
     /// Count what these settings would match, without writing any of them.

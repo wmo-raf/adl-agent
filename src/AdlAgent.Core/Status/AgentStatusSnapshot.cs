@@ -105,4 +105,16 @@ public sealed record AgentStatusSnapshot
 
     /// <summary>When the last update check ran, or <c>null</c> before the first.</summary>
     public DateTimeOffset? UpdateCheckedAt { get; init; }
+
+    /// <summary>
+    /// The last configuration sync somebody asked for at the machine, and what
+    /// it came to.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="LastSyncedAt"/> rather than folded into it. That one
+    /// moves on every cycle whether anybody asked or not, so a window watching
+    /// it to find out what a button did would report the next scheduled sync
+    /// as the answer to a press that failed.
+    /// </remarks>
+    public Configuration.SyncAttempt? RequestedSync { get; init; }
 }

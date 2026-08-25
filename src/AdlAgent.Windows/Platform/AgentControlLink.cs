@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Serialization;
@@ -13,7 +14,7 @@ namespace AdlAgent.Windows.Platform;
 /// </summary>
 /// <remarks>
 /// <see cref="NamedPipeControlClient"/> carries bytes; this turns them into
-/// the five questions a technician's window or a terminal actually asks, and
+/// the questions a technician's window or a terminal actually asks, and
 /// turns the answers back into the core's own snapshot records. It sits in
 /// the head because both of the head's local UIs use it -- the
 /// <c>adl-agent</c> verbs and the WPF tray -- and because it is where the
@@ -102,6 +103,47 @@ public sealed class AgentControlLink
         JsonObject settings, CancellationToken cancellationToken = default) =>
         AskAsync<FolderPreviewResult>(
             new ControlRequest(ControlProtocol.PreviewCommand, settings), cancellationToken);
+
+    /// <summary>
+    /// Ask ADL for this device's configuration now.
+    /// </summary>
+    /// <remarks>
+    /// The answer is the attempt rather than its outcome: the agent starts the
+    /// call and returns, and what came of it arrives on the next
+    /// <see cref="StatusAsync"/> as <c>RequestedSync</c>. A UI presses this and
+    /// then watches the status it is already polling.
+    /// </remarks>
+    public Task<AgentAnswer<SyncAttempt>> SyncAsync(CancellationToken cancellationToken = default) =>
+        AskAsync<SyncAttempt>(new ControlRequest(ControlProtocol.SyncCommand), cancellationToken);
+
+    /// <summary>Run a cycle for one station now.</summary>
+    /// <remarks>
+    /// Answers as soon as the run is under way. A refusal -- a cycle already
+    /// running, a station switched off in ADL, a station with no folder bound
+    /// -- comes back as a refused answer whose detail is the sentence to show.
+    /// </remarks>
+    public Task<AgentAnswer<CollectProgress>> CollectAsync(
+        long stationLinkId, CancellationToken cancellationToken = default) =>
+        AskAsync<CollectProgress>(
+            new ControlRequest(
+                ControlProtocol.CollectCommand,
+                new JsonObject { ["station_link_id"] = stationLinkId }),
+            cancellationToken);
+
+    /// <summary>What the collect in flight -- or the last one -- is doing.</summary>
+    public Task<AgentAnswer<CollectProgress>> CollectStatusAsync(
+        CancellationToken cancellationToken = default) =>
+        AskAsync<CollectProgress>(
+            new ControlRequest(ControlProtocol.CollectStatusCommand), cancellationToken);
+
+    /// <summary>Stop the collect running for this station.</summary>
+    public Task<AgentAnswer<CollectProgress>> CancelCollectAsync(
+        long stationLinkId, CancellationToken cancellationToken = default) =>
+        AskAsync<CollectProgress>(
+            new ControlRequest(
+                ControlProtocol.CollectCancelCommand,
+                new JsonObject { ["station_link_id"] = stationLinkId }),
+            cancellationToken);
 
     /// <summary>Write a station's app tier through the service to ADL.</summary>
     public Task<AgentAnswer<ConfigWriteResponse>> ConfigureAsync(

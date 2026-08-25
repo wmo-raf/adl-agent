@@ -78,6 +78,68 @@ public static class ControlProtocol
     public const string ConfigureCommand = "configure";
 
     /// <summary>
+    /// Ask ADL for this device's configuration now. No payload.
+    /// </summary>
+    /// <remarks>
+    /// Started rather than performed: the answer is the attempt, not its
+    /// outcome, and the outcome arrives on <see cref="StatusCommand"/>'s
+    /// <c>requested_sync</c> a moment later. This surface serves one client at
+    /// a time and times out in three seconds, so a command that waited for an
+    /// HTTP call over these links would report a working service as absent.
+    /// <para>
+    /// Configuration only. It does not scan and does not upload -- that is
+    /// <see cref="CollectCommand"/> -- because asking ADL what this machine is
+    /// meant to be doing and asking this machine to do it are two different
+    /// questions and two different waits.
+    /// </para>
+    /// </remarks>
+    public const string SyncCommand = "sync";
+
+    /// <summary>
+    /// Run a cycle for one station now. Payload:
+    /// <c>{"station_link_id": 11}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Started, for the same reason as <see cref="SyncCommand"/> and more so:
+    /// a station with months of backlog uploads for minutes, and holding the
+    /// only client slot for that long would freeze the tray's own status poll
+    /// -- and with it the header, the next-step line and the colour of the
+    /// icon in the corner -- for the duration.
+    /// <para>
+    /// Refused, in a sentence, when a cycle is already running: the station
+    /// will be collected as part of it, so a queue would only start a second
+    /// run minutes later against a window nobody still has open.
+    /// </para>
+    /// </remarks>
+    public const string CollectCommand = "collect";
+
+    /// <summary>
+    /// What the collect in flight -- or the last one -- is doing. No payload.
+    /// </summary>
+    /// <remarks>
+    /// The other half of <see cref="CollectCommand"/> returning at once. The
+    /// window that asked for a collect asks this every second, in short
+    /// round trips that leave the surface free between them.
+    /// </remarks>
+    public const string CollectStatusCommand = "collect_status";
+
+    /// <summary>
+    /// Stop the collect in flight. Payload: <c>{"station_link_id": 11}</c>.
+    /// </summary>
+    /// <remarks>
+    /// The station is named so that a stale window cannot stop a run it is
+    /// not the window for -- a technician who left one open, walked away, and
+    /// came back to press Cancel after the scheduled cycle had started
+    /// something else.
+    /// <para>
+    /// Nothing is repaired by cancelling. The agent keeps no record of what it
+    /// delivered, so files a stopped run did not reach are offered again by
+    /// the next cycle exactly as if it had never run.
+    /// </para>
+    /// </remarks>
+    public const string CollectCancelCommand = "collect_cancel";
+
+    /// <summary>
     /// The agent accepted the connection and then closed it without saying
     /// anything.
     /// </summary>
