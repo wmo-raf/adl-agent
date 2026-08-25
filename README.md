@@ -285,7 +285,7 @@ there is nowhere to send, so there is no call to make and nothing to retry.
 ADL:      not configured
 Problem:  No ADL URL is configured. Set Agent:AdlBaseUrl to the address of the ADL instance this machine sends to.
 Fix:      An administrator must set AdlBaseUrl under [Agent] in C:\ProgramData\ADL Agent\agent.ini, then restart the ADL Agent service.
-Version:  0.1.0
+Version:  0.2.0
 ```
 
 The *Fix* line is the tier's own: the per-user tier is told `setx
