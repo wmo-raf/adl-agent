@@ -57,10 +57,24 @@ public sealed class StationViewModel : Observable
     private string _stabilityWindowSeconds;
     private string _matchSummary = "";
 
-    public StationViewModel(AgentStationSnapshot station, FolderChoice? folders = null)
+    /// <summary>
+    /// The instant this row's ages are measured from.
+    /// </summary>
+    /// <remarks>
+    /// The machine's clock as the snapshot was read on it, pushed down by the
+    /// window on every poll, rather than read here. It is the same instant the
+    /// dot was decided against, which is the whole point: a row saying
+    /// "2 hours ago" beside a dot that went amber at six is a row arguing with
+    /// itself.
+    /// </remarks>
+    private DateTimeOffset _asOf;
+
+    public StationViewModel(
+        AgentStationSnapshot station, FolderChoice? folders = null, DateTimeOffset? asOf = null)
     {
         _station = station;
         _folders = folders;
+        _asOf = asOf ?? DateTimeOffset.UtcNow;
 
         var config = station.Config;
 
@@ -91,7 +105,7 @@ public sealed class StationViewModel : Observable
     /// what the row behind it goes on showing while the window is open.
     /// Nothing binds the two together, and nothing has to.
     /// </remarks>
-    public StationViewModel Editing(FolderChoice folders) => new(_station, folders);
+    public StationViewModel Editing(FolderChoice folders) => new(_station, folders, _asOf);
 
     /// <summary>
     /// A second instance of this station for the status window to probe
@@ -104,7 +118,7 @@ public sealed class StationViewModel : Observable
     /// existing at all -- <see cref="Counted"/> writes a sentence onto the
     /// instance it is called on, and the row is not a thing to write on.
     /// </remarks>
-    public StationViewModel Probing() => new(_station);
+    public StationViewModel Probing() => new(_station, asOf: _asOf);
 
     public long StationLinkId => _station.StationLinkId;
 
@@ -206,6 +220,103 @@ public sealed class StationViewModel : Observable
             return LocalFolderPath.Trim().Length == 0
                 ? "No folder is bound to this station yet. Set one under Edit settings…"
                 : "";
+        }
+    }
+
+    /// <summary>Whether data is actually reaching ADL for this station.</summary>
+    /// <remarks>
+    /// Read off the snapshot rather than worked out here. The verdict depends
+    /// on the clock as well as on the data, and a row computes its properties
+    /// once — when it is built, which is only when the snapshot changed. A
+    /// station crossing its window changes the snapshot, so the row is
+    /// rebuilt and the dot moves; a row that did its own arithmetic would go
+    /// on showing the answer it reached when it was drawn.
+    /// </remarks>
+    public StationFlow Flow => _station.Flow;
+
+    /// <summary>When ADL last received anything for this station.</summary>
+    /// <remarks>
+    /// Absolute rather than "3 hours ago", and in this machine's own
+    /// timezone, like every other moment on this window. A relative string is
+    /// only ever as fresh as the poll that wrote it, and one that is silently
+    /// an hour out is a worse lie than a timestamp, which cannot go stale.
+    /// The relative form is on the tooltip, where it is rebuilt each time it
+    /// is opened.
+    /// </remarks>
+    public string LastReceived => Display.Moment(_station.LastReceivedAt);
+
+    /// <summary>The same moment as an age, for the tooltip over it.</summary>
+    /// <remarks>
+    /// Computed on each read rather than cached, and the window says so again
+    /// as the tooltip opens: this is the one string on a row that is wrong a
+    /// moment after it is written.
+    /// </remarks>
+    public string LastReceivedAgo => _station.LastReceivedAt is { } received
+        ? Display.Ago(received, _asOf)
+        : "Nothing has ever arrived for this station.";
+
+    /// <summary>
+    /// Why this station's dot is the colour it is, in one sentence.
+    /// </summary>
+    /// <remarks>
+    /// A coloured mark with no stated reason is a mark somebody stares at,
+    /// which is the rule that already put a reason on the greyed-out menu
+    /// item. The two blocked wordings are that item's own, because they are
+    /// the same two states -- said twice, they would drift.
+    /// </remarks>
+    public string FlowReason => Flow switch
+    {
+        StationFlow.NotJudged => Standing,
+
+        StationFlow.Blocked => CollectBlockedReason.Length > 0
+            ? CollectBlockedReason
+            : "Collected nothing last cycle — the problem is on this row.",
+
+        StationFlow.Quiet => _station.LastReceivedAt is { } quietSince
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"Nothing has reached ADL for {Display.Span(quietSince, _asOf)}.")
+            : "ADL has never received a file for this station.",
+
+        _ => _station.LastReceivedAt is { } collecting
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"Collecting — ADL received a file {Display.Ago(collecting, _asOf)}.")
+            : "Collecting.",
+    };
+
+    /// <summary>Move this row's ages on to a later instant.</summary>
+    /// <remarks>
+    /// Called on every poll, including the ones that change nothing else: the
+    /// window rebuilds its rows only when the station list itself moved, which
+    /// on a settled machine is rarely, and an age that only advanced with a
+    /// rebuild would sit at "2 hours ago" all afternoon.
+    /// <para>
+    /// Only what actually reads differently is announced. Forty rows told the
+    /// time every five seconds would otherwise be forty bindings re-rendering
+    /// the same two strings, for ever.
+    /// </para>
+    /// </remarks>
+    public void Aged(DateTimeOffset asOf)
+    {
+        if (asOf == _asOf)
+        {
+            return;
+        }
+
+        var ago = LastReceivedAgo;
+        var reason = FlowReason;
+
+        _asOf = asOf;
+
+        if (ago != LastReceivedAgo)
+        {
+            Raise(nameof(LastReceivedAgo));
+        }
+
+        if (reason != FlowReason)
+        {
+            Raise(nameof(FlowReason));
         }
     }
 

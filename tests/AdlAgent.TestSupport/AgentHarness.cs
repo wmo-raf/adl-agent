@@ -63,7 +63,7 @@ public sealed class AgentHarness : IAsyncDisposable
         // running in parallel, one would delete another's download.
         HostLifecycle.StateDirectory = Directory
             .CreateTempSubdirectory("adl-agent-harness").FullName;
-        Time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-21T09:00:00Z"));
+        Time = new FakeTimeProvider(TestClock.Start);
         Time.AutoAdvanceAmount = TimeSpan.Zero;
 
         var configured = new Dictionary<string, string?>

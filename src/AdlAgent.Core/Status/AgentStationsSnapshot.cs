@@ -51,6 +51,21 @@ public sealed record AgentStationsSnapshot
     /// since the service started.
     /// </summary>
     public DateTimeOffset? LastCycleAt { get; init; }
+
+    /// <summary>
+    /// The instant every station here was judged against.
+    /// </summary>
+    /// <remarks>
+    /// On this record rather than on each station, and that is load-bearing
+    /// twice over. The tray decides whether to rebuild its rows by comparing
+    /// the station list it was handed with the last one; an instant that moved
+    /// every few seconds would sit inside that comparison and rebuild forty
+    /// rows on every poll, taking the selection out from under whoever was
+    /// about to press Edit settings. Out here it moves freely, and the ages a
+    /// row writes are measured from the same clock its dot was decided by --
+    /// rather than from whatever the window happened to read separately.
+    /// </remarks>
+    public DateTimeOffset AsOf { get; init; }
 }
 
 /// <summary>
@@ -90,6 +105,32 @@ public sealed record AgentStationSnapshot
 
     /// <summary>The oldest file ADL still wants for this station.</summary>
     public DateTimeOffset? Watermark { get; init; }
+
+    /// <summary>
+    /// When ADL last received anything for this station. Null means never.
+    /// </summary>
+    /// <remarks>
+    /// ADL's record rather than this machine's memory of what it sent, which
+    /// is what makes it worth carrying: the cycle report beside it is held in
+    /// memory and is empty after a restart, while this is as true on a
+    /// machine that came up a minute ago as on one that has been running for
+    /// a month.
+    /// </remarks>
+    public DateTimeOffset? LastReceivedAt { get; init; }
+
+    /// <summary>
+    /// Whether data is actually reaching ADL for this station.
+    /// </summary>
+    /// <remarks>
+    /// Decided here rather than by whoever draws the row, for two reasons
+    /// that both matter. It is the one fact on this record that depends on
+    /// the clock as well as on the data, so a UI that computed it would go
+    /// on showing the answer it computed when the row was built -- and the
+    /// tray only rebuilds rows when this snapshot changes, which on a settled
+    /// machine is never. Carried here, the snapshot itself changes when a
+    /// station crosses its window, and every reader notices.
+    /// </remarks>
+    public StationFlow Flow { get; init; }
 
     /// <summary>HQ's collection start date. Shown, never edited from here.</summary>
     public DateTimeOffset? StartDate { get; init; }
@@ -153,4 +194,17 @@ public sealed record AgentConnectionSnapshot
     /// nothing here to fix.
     /// </remarks>
     public bool Enabled { get; init; }
+
+    /// <summary>
+    /// How long one of this vendor's stations may say nothing before it is
+    /// called quiet.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the connection because that is where ADL states it, and
+    /// resolved onto each of its stations by
+    /// <see cref="AgentStationsReader"/> -- so that the questions asked of
+    /// the whole machine, which span connections that may disagree, stay
+    /// questions about a flat list.
+    /// </remarks>
+    public int? StaleAfterMinutes { get; init; }
 }

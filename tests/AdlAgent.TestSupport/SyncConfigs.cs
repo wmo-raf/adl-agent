@@ -59,12 +59,18 @@ public static class SyncConfigs
         string name,
         bool enabled = true,
         string network = "Kenya AWS",
+        int? staleAfterMinutes = null,
         params StationLinkConfig[] stationLinks) =>
         new()
         {
             Id = id,
             Name = name,
-            Admin = new ConnectionAdminConfig { Enabled = enabled, Network = network },
+            Admin = new ConnectionAdminConfig
+            {
+                Enabled = enabled,
+                Network = network,
+                StaleAfterMinutes = staleAfterMinutes,
+            },
             StationLinks = stationLinks,
         };
 
@@ -78,11 +84,19 @@ public static class SyncConfigs
         bool enabled = true,
         string listingStrategy = ListingStrategies.Enumerate,
         bool dirStructuredByDate = false,
-        DateTimeOffset? startDate = null) =>
+        DateTimeOffset? startDate = null,
+        DateTimeOffset? lastReceivedAt = null,
+        bool everReceived = true) =>
         new()
         {
             Id = id,
             Watermark = watermark,
+            // A station ADL has heard from, unless a test says otherwise.
+            // The alternative default -- null, meaning nothing has ever
+            // arrived -- would make every fixture describe a station that has
+            // never worked, and every test about anything else would be
+            // written against a machine with a quiet station on it.
+            LastReceivedAt = everReceived ? lastReceivedAt ?? TestClock.Start : null,
             Config = new StationLinkAppConfig
             {
                 LocalFolderPath = folder,

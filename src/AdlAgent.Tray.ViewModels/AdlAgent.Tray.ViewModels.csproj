@@ -27,6 +27,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The same arrangement AdlAgent.Core already has with the same project.
+         What it buys here is Display: how a moment and an age are written is
+         a decision a person reads off a row ("1 hour" against "1 hours",
+         "moments" for a file dated ahead of this machine's clock), and
+         testing it only through a station row would mean spinning a paired
+         agent to check a string. -->
+    <InternalsVisibleTo Include="AdlAgent.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The Windows head, for the typed control link. That is the tray's only
          route to any fact, and it compiles on any operating system: the
          named pipe underneath it is the head's business, not this

@@ -120,6 +120,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="Station link ID" />
@@ -148,6 +149,16 @@
                     <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Wants files from" />
                     <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}"
                                Text="{Binding Watermark}" />
+                    <!--
+                        The number the dot on the row is the reading of, said
+                        in full on the window that dot's tooltip sends people
+                        to. It is also the only line in this block that is not
+                        configuration: everything above is what ADL was told,
+                        and this is what ADL got.
+                    -->
+                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="ADL last received" />
+                    <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}"
+                               Text="{Binding LastReceived}" ToolTip="{Binding LastReceivedAgo}" />
                 </Grid>
 
                 <TextBlock Style="{StaticResource Caption}" Text="Last cycle" />

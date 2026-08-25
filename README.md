@@ -358,13 +358,72 @@ the machine's first answer and so there is no such moment; it is keyed on the
 technician having chosen rather than the window having.
 
 On the right, headed **Station links for** whichever connection is selected,
-are that connection's stations: one row each, carrying the station link's ID —
-the number a support conversation is conducted in, and named *Link ID* because
-the row also has the station's own identifier, the one a vendor's filenames
-usually carry — the folder and pattern it currently holds, what the last cycle
-did, and what went wrong if anything did. The heading is there because the
-Connection column went when the pane arrived, which left the grid's scope
-stated nowhere but by a highlight in another control.
+are that connection's stations: one row each, carrying a status dot, the
+station link's ID — the number a support conversation is conducted in, and
+named *Link ID* because the row also has the station's own identifier, the one
+a vendor's filenames usually carry — the folder and pattern it currently holds,
+when ADL last received anything for it, what the last cycle did, and what went
+wrong if anything did. The heading is there because the Connection column went
+when the pane arrived, which left the grid's scope stated nowhere but by a
+highlight in another control.
+
+#### Whether anything is actually arriving
+
+Every other column on that row is about what this machine *did*. All of them
+read healthy for a station that is configured perfectly and sending nothing —
+the logger died, the share was unmounted, the vendor changed what it writes and
+the pattern stopped matching. Nothing fails; nothing arrives.
+
+The machine cannot answer that on its own. It deliberately keeps no record of
+what it delivered — the vendor's folder is its only state — so after a restart
+its memory of every station is empty. ADL's ledger is the only party that
+remembers, so ADL sends it: each station link carries when ADL last received
+anything for it, and each connection carries how long one of its stations may
+say nothing before that counts as quiet.
+
+The **Status** column is the reading of that, in the same four marks the
+connection pane uses:
+
+| | |
+|---|---|
+| 🟢 green | ADL received a file inside this vendor's window |
+| 🟠 amber | configured, blaming nothing, and silent — including never having sent |
+| 🔴 red | nothing can arrive and it is visible from here: no folder bound, or the last cycle reported a problem |
+| ⚪ grey | switched off in ADL, so there is nothing to judge |
+
+Grey is the absence of a verdict rather than a fourth one. Green would claim
+data is flowing for a station nothing is scanned or sent for, and amber would
+send a technician hunting a fault that is an administrator's deliberate choice.
+It is also the only place in the grid that says a station is switched off at
+all.
+
+A station that has never sent anything is amber rather than a state of its own,
+which makes the dot a confirmation signal for the commonest reason this window
+is open: bind a folder, watch the row turn green on the next cycle.
+
+Beside it, **ADL last received** is the moment itself — absolute, in this
+machine's own timezone like every other moment in the window, because a
+relative string is only ever as fresh as the poll that wrote it. The age is on
+the tooltip, and it advances on the window's own poll rather than only when
+something else about the station moves.
+
+The window is six hours by default and is set per connection in the ADL admin,
+because a cadence belongs to the vendor's software and not to the station it
+happens to be writing for. Raise it for a vendor that legitimately writes one
+file a day: a row that is amber every night by design is a row people stop
+reading.
+
+A quiet station reaches the line at the top of the window and the icon in the
+notification area, like every other thing that wants a person — naming one
+station, and saying what to do about it:
+
+> **Kakamega, under Vaisala AWS, has sent nothing to ADL since 24/08 06:10.**
+> Open the Stations tab, select it, and check status — the folder may be empty,
+> or its pattern may no longer match what the vendor is writing.
+
+That is a check rather than a fix, deliberately. Nobody standing at the machine
+can know from here which of the three it is, but all three are answered by
+looking.
 
 No column is starred, so the grid overflows and scrolls sideways rather than
 squeezing: a problem message has no useful maximum length, and a starred
@@ -434,11 +493,13 @@ colour of the icon in the corner all go on following the machine.
 #### Reading a station without changing it
 
 **Check status…** on a row opens the same station read-only. The grid holds
-six columns and a station has three times that many facts, so the ones wanted
-least often — the WIGOS id, the timezone the filenames are written in, the
-watermark ADL is asking from, whether HQ has this station switched off — were
-reachable only by opening the settings window, which is a window for changing
-things, over a station nobody wanted to change.
+eight columns and a station has more than twice that many facts, so the ones
+wanted least often — the WIGOS id, the timezone the filenames are written in,
+the watermark ADL is asking from, whether HQ has this station switched off —
+were reachable only by opening the settings window, which is a window for
+changing things, over a station nobody wanted to change. *ADL last received* is
+on it too: the dot's tooltip sends people here, and the number that dot is the
+reading of should be on the window it sends them to.
 
 At the top of it, above everything ADL sent, is a count of what the station's
 folder holds *now*. Every other line on that window is a memory of the last
