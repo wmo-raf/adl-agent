@@ -104,8 +104,13 @@ public class NotConfiguredTests
 
         var hint = agent.Status.Read().ConfigurationHint;
 
-        // The path, not a generic instruction: it is what a technician reads
-        // out over a telephone to the administrator who has to go and edit it.
+        // The verb, because there is one: an administrator told to edit the
+        // file and restart the service has three steps to get right on a
+        // machine nobody can reach, and adl-agent set-url is all three.
+        Assert.Contains("adl-agent set-url", hint);
+
+        // And still the path, because it is what a technician reads out over
+        // a telephone to the administrator who has to act on it.
         Assert.Contains(@"C:\ProgramData\ADL Agent\agent.ini", hint);
         Assert.Contains("administrator", hint, StringComparison.OrdinalIgnoreCase);
     }

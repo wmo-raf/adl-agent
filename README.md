@@ -243,6 +243,31 @@ under the state it is the remedy for.
   called ADL. The first is gone; the second is **Sync with ADL**, which is the
   word the rest of the window uses for it.
 
+Repointing a machine ([wmo-raf/adl#292](https://github.com/wmo-raf/adl/issues/292))
+— there was no supported way to change a machine's ADL address after it was
+installed. The URL is written to `agent.ini` by the MSI and read once at
+start-up, so changing it meant an administrator editing a file inside a folder
+whose permissions the MSI has replaced with SYSTEM and Administrators, and then
+restarting the service by hand. `adl-agent set-url` is all three, run elevated.
+
+- **it refuses what the agent would refuse** — the same rule
+  `AgentOptions.ResolveApiBaseAddress` enforces, asked before anything is
+  written. A verb that accepted plain HTTP to somewhere other than this machine
+  would produce a machine that installs cleanly and never reports.
+- **the pairing goes with the address** — a device token is issued by one
+  instance, so by default the repoint drops it, along with the configuration
+  cache and the sweep log that came from the same place. `--keep-pairing` is
+  the door for a country moving its instance to a new domain with the same
+  database, where clearing would mean re-pairing a whole fleet one
+  admin-issued code at a time.
+- **it restarts the service itself** — it is already elevated, so there is no
+  reason to leave a half-applied change and a sentence asking somebody to
+  restart something.
+- **it is not a control-surface command** — the pipe can pair the device and
+  rebind a station's folder, and any interactive logon session can reach it.
+  Redirecting a machine's entire outbound path belongs behind the operating
+  system's own consent.
+
 ## Structure
 
 ```
@@ -340,7 +365,7 @@ there is nowhere to send, so there is no call to make and nothing to retry.
 ```
 ADL:      not configured
 Problem:  No ADL URL is configured. Set Agent:AdlBaseUrl to the address of the ADL instance this machine sends to.
-Fix:      An administrator must set AdlBaseUrl under [Agent] in C:\ProgramData\ADL Agent\agent.ini, then restart the ADL Agent service.
+Fix:      An administrator must run, from an elevated command prompt: adl-agent set-url https://your-adl.example.org -- which writes AdlBaseUrl under [Agent] in C:\ProgramData\ADL Agent\agent.ini and restarts the ADL Agent service.
 Version:  0.2.0
 ```
 
@@ -352,7 +377,8 @@ will not quietly send a device token over a link it does not trust.
 
 Nothing re-reads the setting in place: `agent.ini` is read once at start-up
 and the environment is taken at logon, so whatever sets the address restarts
-the agent, and it comes up working.
+the agent, and it comes up working. On an installed service tier that whatever
+is [`adl-agent set-url`](#changing-where-a-machine-reports).
 
 Run `adl-agent.exe` with no arguments to run it as a console process. On a
 real machine it is installed rather than run, and the installer sets the URL
@@ -664,6 +690,64 @@ Both talk to the already-running service over the `adl-agent` named pipe,
 using the same control protocol the tray uses. The device appears in the ADL
 admin's fleet listing within a heartbeat.
 
+### Changing where a machine reports
+
+An installed machine's address is in `agent.ini`, in a folder only SYSTEM and
+Administrators may write, and it is read once when the service starts. One
+verb, run from an elevated command prompt, does the whole job:
+
+```powershell
+adl-agent set-url https://adl.example.org
+```
+
+```
+ADL:      https://adl.example.org
+Written:  C:\ProgramData\ADL Agent\agent.ini
+Pairing:  cleared. Pair this machine again: adl-agent pair <code>
+Service:  restarted, and reading the new address.
+```
+
+It refuses anything the agent itself would refuse — plain HTTP to anywhere but
+loopback, something unparseable, nothing at all — with the reason, and writes
+nothing when it does. The rule is the one `AgentOptions` enforces at start-up,
+asked here instead of discovered on a machine that installed cleanly and then
+never reported.
+
+**The pairing goes with the address.** A device token was issued by one ADL
+instance, and the next sync after a repoint would otherwise send it to a host
+named by whoever typed the URL. So the default is: change the URL, lose the
+pairing, pair again. The configuration cache and the sweep log go with it —
+they are the old instance's stations, and its station link ids, which the new
+instance issues to entirely different stations.
+
+The service is stopped before any of that and started after it, in that order
+rather than restarted at the end: it rewrites the configuration cache on every
+sync and the token on a `401`, so clearing them underneath a running service is
+a race the machine would sometimes lose — and come back paired to an instance
+it is no longer pointed at.
+
+```powershell
+adl-agent set-url https://adl.example.org --keep-pairing
+```
+
+`--keep-pairing` is the one case where clearing is wrong: a country moving its
+instance to a new domain, same database, same tokens, where the default would
+mean re-pairing every machine in the fleet one admin-issued code at a time,
+each code with a 72-hour life.
+
+Run without administrator rights it says so and changes nothing, rather than
+failing on a file permission. A machine with no state folder is told it is not
+an installed agent rather than having one created for it: the MSI locks that
+folder to SYSTEM and Administrators because the device token is stored in it in
+the clear, and a folder made here would inherit whatever `%ProgramData%` grants. Nothing else in the product can do this: it is
+deliberately not a control-surface command, so a machine with no desktop — or
+one whose tray will not open — still has a supported way to be repointed.
+
+Only the settings file changes; everything else in it, including
+`AutoUpdate=false` and any comments, is left where it was. The per-user tier
+has no service and no elevation, and is still pointed by `setx
+Agent__AdlBaseUrl` before the next logon (see *Known gaps*).
+
 ### The control surface
 
 One protocol, one JSON object per line — served over a named pipe on Windows
@@ -817,6 +901,14 @@ there.
   Server 2016 box, which is what
   [#282](https://github.com/wmo-raf/adl/issues/282)'s first two acceptance
   criteria ask for.
+- **`set-url`'s stop and start are the one part of it a test cannot reach.**
+  What it writes, what it clears, the order it does them in and what a refused
+  address left behind are all driven at their seams; the stop and start
+  themselves are `net stop` and `net start` against the Service Control
+  Manager, which no runner in this suite has. A machine
+  without administrator rights, or without the service installed, is told so
+  in a sentence — but the happy path's final line is unproven until somebody
+  runs the verb on a machine with a real service on it.
 - **The per-user tier shows a console window at logon.** It is the same
   console program as the service tier, started by a shortcut rather than by
   the SCM, so it appears as a window in the technician's session. That is
