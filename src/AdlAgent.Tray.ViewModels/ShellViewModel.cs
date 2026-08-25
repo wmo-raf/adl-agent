@@ -90,8 +90,32 @@ public sealed class ShellViewModel : Observable
     /// </remarks>
     private string _shown = "";
 
-    /// <summary>True while the settings window is open over this one.</summary>
+    /// <summary>True while a modal station window is open over this one.</summary>
+    /// <remarks>
+    /// Either of them: the settings window a technician types into, or the
+    /// read-only status window. Both hold a copy of a row, so both would be
+    /// left editing or describing a station the list no longer contains if a
+    /// poll rebuilt the rows underneath them.
+    /// </remarks>
     private bool _editing;
+
+    /// <summary>
+    /// True while this class is assigning the selection itself, rather than a
+    /// technician clicking.
+    /// </summary>
+    /// <remarks>
+    /// The two are indistinguishable at the setter -- the list binds to it
+    /// two-way and <see cref="Show"/> writes to it on every rebuild -- and
+    /// telling them apart is the whole of what
+    /// <see cref="ShowsConnectionHint"/> needs. A hint that said "click one to
+    /// see its linked stations" and disappeared before the window was first
+    /// drawn, because <see cref="Choose"/> had already picked a connection,
+    /// would be a hint nobody ever read.
+    /// </remarks>
+    private bool _restoring;
+
+    /// <summary>True once somebody has picked a connection for themselves.</summary>
+    private bool _connectionClicked;
 
     public ShellViewModel(AgentControlLink agent)
     {
@@ -392,6 +416,17 @@ public sealed class ShellViewModel : Observable
         get => _selectedConnection;
         set
         {
+            // Before the change test, and deliberately: what dismisses the
+            // hint is somebody having chosen, and a click that lands on the
+            // connection already selected is still a person having understood
+            // what the pane is for.
+            if (!_restoring && !_connectionClicked)
+            {
+                _connectionClicked = true;
+
+                Raise(nameof(ShowsConnectionHint));
+            }
+
             if (!Set(ref _selectedConnection, value))
             {
                 return;
@@ -401,8 +436,42 @@ public sealed class ShellViewModel : Observable
 
             Raise(nameof(HasSelectedConnection));
             Raise(nameof(ShowsConnectionReason));
+            Raise(nameof(StationsHeading));
         }
     }
+
+    /// <summary>
+    /// True while the pane should still be telling somebody what it is for.
+    /// </summary>
+    /// <remarks>
+    /// Shown until a technician picks a connection themselves, and then never
+    /// again for the life of the tray. The pane is a master list beside a
+    /// detail grid, which is an idiom -- but it is one this window did not
+    /// have until recently, and the person it was split for opens it once, on
+    /// a country server, having been told to on the telephone.
+    /// <para>
+    /// It cannot simply be "nothing is selected yet": <see cref="Choose"/>
+    /// picks a connection from the machine's first answer, so there is no
+    /// moment after the window is drawn when nothing is. Hence
+    /// <see cref="_restoring"/>, which is what lets this class tell its own
+    /// selection from a person's.
+    /// </para>
+    /// </remarks>
+    public bool ShowsConnectionHint => !_connectionClicked && Connections.Count > 0;
+
+    /// <summary>
+    /// What the station grid is a list of, above it.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than left implicit because the grid no longer carries a
+    /// Connection column -- every row in it is from the connection selected on
+    /// the left, which was 130 pixels repeating the selection back -- and a
+    /// grid whose scope is only stated by a highlight in another control is a
+    /// grid somebody can read the wrong connection's stations out of.
+    /// </remarks>
+    public string StationsHeading => SelectedConnection is { } connection
+        ? string.Create(CultureInfo.CurrentCulture, $"Station links for {connection.ConnectionName}")
+        : "";
 
     public bool HasSelectedConnection => SelectedConnection is not null;
 
@@ -522,6 +591,32 @@ public sealed class ShellViewModel : Observable
 
     /// <summary>The settings window has closed; the rows may move again.</summary>
     public void EndEditing() => _editing = false;
+
+    /// <summary>
+    /// Open the selected station's status, or return null when no row is
+    /// selected.
+    /// </summary>
+    /// <remarks>
+    /// The same two moves as <see cref="BeginEditing"/>, for the same two
+    /// reasons, even though nothing here is typed into. The station is copied
+    /// so the row is not the object the window probes against -- a probe
+    /// writes a sentence onto the station it probed, and the row behind should
+    /// go on saying what ADL sent -- and the poll stops rebuilding rows, so
+    /// the window cannot end up describing a station the list no longer
+    /// contains.
+    /// </remarks>
+    public StationStatusViewModel? BeginWatching()
+    {
+        if (SelectedStation is not { } selected)
+        {
+            return null;
+        }
+
+        _editing = true;
+        Message = "";
+
+        return new StationStatusViewModel(this, selected.Probing());
+    }
 
     /// <summary>
     /// Count what a station's boxes would match (story 7).
@@ -658,6 +753,31 @@ public sealed class ShellViewModel : Observable
         var connection = SelectedConnection?.ConnectionId;
         var station = SelectedStation?.StationLinkId;
 
+        // Every write to the selection below is this class restoring what was
+        // already there, not a person choosing -- including the null, and
+        // including the fall-backs at the end. See _restoring.
+        _restoring = true;
+
+        try
+        {
+            Rebuild(stations, connection, station);
+        }
+        finally
+        {
+            _restoring = false;
+        }
+
+        // After the rebuild rather than inside it: the hint is about whether
+        // there is anything to click, and until the loop above has run there
+        // is not.
+        Raise(nameof(ShowsConnectionHint));
+    }
+
+    /// <summary>
+    /// Replace the rows and put the selection back on what it was on.
+    /// </summary>
+    private void Rebuild(AgentStationsSnapshot stations, long? connection, long? station)
+    {
         SelectedConnection = null;
         Connections.Clear();
 
@@ -808,7 +928,7 @@ public sealed class ShellViewModel : Observable
         nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
-        nameof(Headline), nameof(HasNoConnections),
+        nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
     ];
 }

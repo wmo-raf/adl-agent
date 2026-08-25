@@ -347,13 +347,34 @@ sending with nobody logged on, which is what it is a service for.
 
 #### Binding a station to a folder
 
-The **Stations** tab is two panes. On the left are the connections ADL has
-given this machine — a country server often hosts two vendors' folders — each
-row naming the connection, how many stations are under it, and what it needs
-in one line. On the right are that connection's stations: one row each, with
-the folder and pattern it currently holds, what the last cycle did, and what
-went wrong if anything did. Arrow keys move between connections and Enter or
-Right moves into the stations beside them.
+The **Stations** tab is two panes. On the left, under the heading
+**Connections**, are the connections ADL has given this machine — a country
+server often hosts two vendors' folders — each row naming the connection, how
+many stations are under it, and what it needs in one line. Beneath the heading
+until somebody clicks a row, and then never again for that session, is the one
+sentence the pane needs: *"Click one to see its linked stations."* It cannot be
+keyed on nothing being selected, because the window picks a connection from
+the machine's first answer and so there is no such moment; it is keyed on the
+technician having chosen rather than the window having.
+
+On the right, headed **Station links for** whichever connection is selected,
+are that connection's stations: one row each, carrying the station link's ID —
+the number a support conversation is conducted in, and named *Link ID* because
+the row also has the station's own identifier, the one a vendor's filenames
+usually carry — the folder and pattern it currently holds, what the last cycle
+did, and what went wrong if anything did. The heading is there because the
+Connection column went when the pane arrived, which left the grid's scope
+stated nowhere but by a highlight in another control.
+
+No column is starred, so the grid overflows and scrolls sideways rather than
+squeezing: a problem message has no useful maximum length, and a starred
+column always shrinks to fit the window, which is what stopped one from ever
+being readable in full. Each column has a ceiling as well as a floor, so one
+pathological path cannot push the rest off the right-hand edge.
+
+Arrow keys move between connections and Enter or Right moves into the stations
+beside them. Right-clicking a row selects it and offers **Edit settings…** and
+**Check status…**.
 
 The split is not a filter. A connection was a value repeated down a column
 before this, which left two facts with nowhere to be said: a connection ADL
@@ -393,6 +414,28 @@ that has to change. Closing without saving throws the edits away and asks
 first. The list behind the window stops refreshing while it is open, so the
 row cannot move out from under it, but the header, the next-step line and the
 colour of the icon in the corner all go on following the machine.
+
+#### Reading a station without changing it
+
+**Check status…** on a row opens the same station read-only. The grid holds
+six columns and a station has three times that many facts, so the ones wanted
+least often — the WIGOS id, the timezone the filenames are written in, the
+watermark ADL is asking from, whether HQ has this station switched off — were
+reachable only by opening the settings window, which is a window for changing
+things, over a station nobody wanted to change.
+
+At the top of it, above everything ADL sent, is a count of what the station's
+folder holds *now*. Every other line on that window is a memory of the last
+sync; this is the only one that is true of the machine at the moment somebody
+is reading it, and *"scanned 0, no error"* is answered by it and by nothing
+else. It runs as the window opens, with no settings laid over the stored ones,
+so what is counted is exactly the configuration the cycle will use — and
+**Check again** re-runs it, for the common case of having this window open on
+one screen while a share is being granted on another.
+
+Nothing on it writes, which is what makes it safe to open on a station a cycle
+is in the middle of. Like the settings window it is modal and stops the list
+behind it rebuilding, for the same reason: it holds a copy of a row.
 
 #### Folders the service cannot see
 

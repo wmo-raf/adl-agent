@@ -93,17 +93,47 @@ public sealed class StationViewModel : Observable
     /// </remarks>
     public StationViewModel Editing(FolderChoice folders) => new(_station, folders);
 
+    /// <summary>
+    /// A second instance of this station for the status window to probe
+    /// against.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Editing"/> because it takes no folder chooser:
+    /// nothing in the status window browses, so there is no note to write
+    /// about a path nobody is picking. What it shares is the reason for
+    /// existing at all -- <see cref="Counted"/> writes a sentence onto the
+    /// instance it is called on, and the row is not a thing to write on.
+    /// </remarks>
+    public StationViewModel Probing() => new(_station);
+
     public long StationLinkId => _station.StationLinkId;
 
     public string StationName => _station.StationName;
 
     public string StationId => _station.StationId;
 
+    /// <summary>The station's WIGOS identifier, or nothing when ADL holds none.</summary>
+    public string WigosId => _station.WigosId ?? "";
+
     public string ConnectionName => _station.ConnectionName;
 
     public string Timezone => _station.Timezone;
 
     public bool Enabled => _station.Enabled;
+
+    /// <summary>
+    /// Whether ADL is collecting this station, as a sentence rather than a
+    /// checkbox.
+    /// </summary>
+    /// <remarks>
+    /// The reason is carried with the fact. A station that is off is off
+    /// because HQ switched it -- or its whole connection -- off, and a
+    /// technician reading "No" beside a folder they have just bound needs
+    /// telling that the folder is not the problem and not theirs to fix.
+    /// </remarks>
+    public string Standing => Enabled
+        ? "Collecting"
+        : "Switched off in ADL — nothing here is scanned or sent";
 
     /// <summary>HQ's collection start date, shown and never editable here.</summary>
     public string StartDate => Display.Moment(_station.StartDate);
@@ -390,7 +420,18 @@ public sealed class StationViewModel : Observable
     }
 
     /// <summary>Say why nothing could be counted.</summary>
-    public void CouldNotCount(string detail) => MatchSummary = detail;
+    public void CouldNotCount(string detail) => Say(detail);
+
+    /// <summary>
+    /// Put a sentence where the count goes.
+    /// </summary>
+    /// <remarks>
+    /// For the states that are not a count and not a failure -- "counting
+    /// now", most of all. A walk of a folder on a share can take seconds, and
+    /// a line that went on showing the previous answer throughout is a line a
+    /// technician reads the stale number off.
+    /// </remarks>
+    public void Say(string sentence) => MatchSummary = sentence;
 
     /// <summary>
     /// What ADL sent, with the boxes this window renders laid over it.
