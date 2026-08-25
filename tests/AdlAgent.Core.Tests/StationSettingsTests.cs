@@ -355,7 +355,8 @@ public class StationSettingsTests
 
         await window.RefreshAsync();
 
-        Assert.True(window.HasNoStations);
+        Assert.True(window.SelectedConnection!.HasNoStations);
+        Assert.Null(window.SelectedStation);
         Assert.Null(window.BeginEditing(Anywhere()));
     }
 

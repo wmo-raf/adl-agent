@@ -94,7 +94,47 @@ public class TrayControlTests
 
         Assert.True(response.Ok);
         Assert.Empty(response.Data!["stations"]!.AsArray());
+        Assert.Empty(response.Data["connections"]!.AsArray());
         Assert.Null(response.Data["last_synced_at"]);
+    }
+
+    [Fact]
+    public async Task The_connections_travel_beside_the_stations_rather_than_around_them()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.Serving(
+            SyncConfigs.Connection(3, "Vaisala AWS", stationLinks:
+                [SyncConfigs.Link(11, "C:\\VendorData\\Vaisala")]),
+
+            // Switched off, and with nothing under it: the two states that
+            // reach the machine only on the connection itself. A flat list of
+            // stations carries the first as a false on each station and the
+            // second not at all.
+            SyncConfigs.Connection(4, "Campbell", enabled: false));
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var response = await agent.ControlService.HandleAsync(
+            new ControlRequest(ControlProtocol.StationsCommand));
+
+        Assert.True(response.Ok);
+
+        var connections = response.Data!["connections"]!.AsArray()
+            .Select(each => each!.AsObject())
+            .ToList();
+
+        Assert.Equal(2, connections.Count);
+        Assert.Equal("Vaisala AWS", Text(connections[0], "connection_name"));
+        Assert.True(connections[0]["enabled"]!.GetValue<bool>());
+
+        Assert.Equal("Campbell", Text(connections[1], "connection_name"));
+        Assert.False(connections[1]["enabled"]!.GetValue<bool>());
+
+        // Beside, not around: the flat list is still the answer to every
+        // question that is about the whole machine.
+        Assert.Single(response.Data["stations"]!.AsArray());
     }
 
     // ---------- live pattern validation (story 7) ----------

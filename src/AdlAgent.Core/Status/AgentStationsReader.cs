@@ -17,6 +17,14 @@ namespace AdlAgent.Core.Status;
 /// a new station. Doing it here means the tray, the Linux CLI and anything
 /// after them all get the same answer to "what about the station ADL has
 /// only just told us about".
+/// <para>
+/// What it flattens is the stations. The connections above them are passed
+/// through as a list of their own, because two things about a connection
+/// survive nowhere else: whether ADL has switched the whole thing off, which
+/// otherwise reaches the machine only as a false on each of its stations; and
+/// the existence of a connection that has no station links yet, which
+/// otherwise reaches it not at all.
+/// </para>
 /// </remarks>
 public sealed class AgentStationsReader
 {
@@ -40,9 +48,22 @@ public sealed class AgentStationsReader
             ?? [];
 
         var stations = new List<AgentStationSnapshot>();
+        var connections = new List<AgentConnectionSnapshot>();
 
         foreach (var connection in snapshot.Configuration?.Sync.Connections ?? [])
         {
+            // Before its stations, and unconditionally. A connection with no
+            // station links is the ordinary state of one an administrator has
+            // just made, and it has to reach the machine as a connection with
+            // nothing in it rather than as nothing at all.
+            connections.Add(new AgentConnectionSnapshot
+            {
+                ConnectionId = connection.Id,
+                ConnectionName = connection.Name,
+                Network = connection.Admin.Network,
+                Enabled = connection.Admin.Enabled,
+            });
+
             foreach (var link in connection.StationLinks)
             {
                 counts.TryGetValue(link.Id, out var last);
@@ -73,6 +94,7 @@ public sealed class AgentStationsReader
 
         return new AgentStationsSnapshot
         {
+            Connections = connections,
             Stations = stations,
             LastSyncedAt = snapshot.LastSyncedAt,
             ConfigFromCache = snapshot.Configuration?.FromCache ?? false,

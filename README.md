@@ -99,9 +99,13 @@ The tray and configuration app ([wmo-raf/adl#281](https://github.com/wmo-raf/adl
 login.
 
 - **pair** — paste the code, see the device name ADL knows this machine by.
-- **the station list** — every station ADL has linked to this device, with its
-  local folder binding, what the last cycle did for it, and the sentence
-  explaining any station that collected nothing.
+- **the station list, split by connection** — the connections ADL has given
+  this device down the left, the stations under the selected one on the right,
+  each with its local folder binding, what the last cycle did for it, and the
+  sentence explaining any station that collected nothing. Every connection
+  row carries its own standing — *3 stations need a folder*, *switched off in
+  ADL*, *no stations linked* — so nobody has to click through vendors to find
+  out there is nothing in them.
 - **live pattern validation** — the count of files a folder and a pattern
   would match, answered while they are being typed, by the same glob and the
   same filename builder the cycle itself uses. "Two files here, none of them
@@ -178,7 +182,11 @@ one whose sync was failing.
 - **an empty station list says which emptiness it is** — "ADL has not linked
   any stations to this device yet", "ADL is not answering" and "the ADL Agent
   service is not running" are three problems wanting three different people,
-  and until this they were one blank rectangle.
+  and until this they were one blank rectangle. A connection with nothing
+  under it says so beside itself, and only while the list can be trusted: on a
+  configuration read off the disk during an outage the tab explains the outage
+  instead, rather than letting a cached connection blame an administrator for
+  a broken network.
 - **the dot in the corner is the line's colour** — taken from the same
   sentence rather than decided again beside it, so the tray cannot sit amber
   above a window saying there is nothing to do.
@@ -339,11 +347,35 @@ sending with nobody logged on, which is what it is a service for.
 
 #### Binding a station to a folder
 
-The **Stations** tab is the list and nothing else: one row per station ADL has
-linked to this machine, with the folder and pattern it currently holds, what
-the last cycle did, and what went wrong if anything did. Selecting a row and
-pressing **Edit settings…** — or double-clicking it, or pressing Enter on it —
-opens that station's settings in a window of its own.
+The **Stations** tab is two panes. On the left are the connections ADL has
+given this machine — a country server often hosts two vendors' folders — each
+row naming the connection, how many stations are under it, and what it needs
+in one line. On the right are that connection's stations: one row each, with
+the folder and pattern it currently holds, what the last cycle did, and what
+went wrong if anything did. Arrow keys move between connections and Enter or
+Right moves into the stations beside them.
+
+The split is not a filter. A connection was a value repeated down a column
+before this, which left two facts with nowhere to be said: a connection ADL
+had switched off arrived only as a false on each of its stations, so the
+window blamed the stations for an administrator's decision; and a connection
+with no station links left no trace at all, so an administrator who had made
+one and not yet linked to it looked, from the machine, exactly like one who
+had done nothing. Both are sentences on a connection row now.
+
+The window opens on the connection the next-step line is pointing at, and
+that line names it — *"Bind a folder to Kisumu, under Vaisala AWS"* — because
+"open the Stations tab and select it" stopped being a complete instruction
+the moment the list had two levels. It is picked once, from the first answer
+the service gives, and never moved again: a pane that re-chose on every poll
+would drag somebody off the connection they were reading, five seconds after
+they opened it.
+
+Selecting a station and pressing **Edit settings…** — or double-clicking it,
+or pressing Enter on it — opens that station's settings in a window of its
+own, titled with the station *and* its connection, because pointing a station
+at the wrong vendor's folder is a mistake nothing refuses and which surfaces a
+cycle later as "scanned 0".
 
 What is set there is where this station's files are and how they are named;
 the decoder, the variable mappings and the collection start date stay in the

@@ -54,6 +54,46 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
+    /// <summary>
+    /// Enter and Right move from the connection list into the station grid.
+    /// </summary>
+    /// <remarks>
+    /// Enter, because it means "go into this thing" one control to the right,
+    /// and a pane where it is inert beside a grid where it opens teaches two
+    /// rules for one key in one tab. Right, because that is the idiom every
+    /// other master-detail list on this operating system uses.
+    /// <para>
+    /// Focus movement and nothing else: which station is now selected was
+    /// decided when the connection was, by
+    /// <see cref="ShellViewModel.SelectedConnection"/>. That is why this can
+    /// live in a window without putting a decision somewhere the tests cannot
+    /// reach it.
+    /// </para>
+    /// </remarks>
+    private void ConnectionKeyed(object sender, KeyEventArgs args)
+    {
+        if (args.Key is not (Key.Enter or Key.Right))
+        {
+            return;
+        }
+
+        // Nothing to move into. Left unhandled so the key does whatever the
+        // list would have done with it.
+        if (StationGrid.Items.Count == 0)
+        {
+            return;
+        }
+
+        args.Handled = true;
+
+        StationGrid.Focus();
+
+        if (StationGrid.SelectedItem is { } selected)
+        {
+            StationGrid.CurrentCell = new DataGridCellInfo(selected, StationGrid.Columns[0]);
+        }
+    }
+
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
 
     private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();

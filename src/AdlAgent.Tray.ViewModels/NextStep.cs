@@ -51,6 +51,28 @@ public sealed record NextStep
     /// different people, and until this they were one empty grid.
     /// </remarks>
     public string NoStations { get; init; } = "";
+
+    /// <summary>
+    /// True when the list on screen cannot be trusted to be what ADL holds.
+    /// </summary>
+    /// <remarks>
+    /// The service is not running, this machine is not paired, or ADL is not
+    /// answering and the configuration came off the disk. In every one of
+    /// those the connections drawn are a memory rather than a fact, and the
+    /// window has to say so across the whole tab -- because the alternative
+    /// is a cached connection with no stations under it explaining, in the
+    /// calmest possible terms, that an administrator has not linked anything
+    /// yet. That sentence is true of the last sync and useless during an
+    /// outage: it sends a technician to find an administrator when what is
+    /// broken is the network.
+    /// <para>
+    /// Distinct from <see cref="NoStations"/> being non-empty, which is also
+    /// true of <see cref="NextStepKind.NoStationsLinkedYet"/> -- and that one
+    /// is a current, trustworthy answer. There ADL is answering and really
+    /// has linked nothing, so each connection is left to say so for itself.
+    /// </para>
+    /// </remarks>
+    public bool ListIsStale { get; init; }
 }
 
 /// <summary>
@@ -107,6 +129,7 @@ public static class NextSteps
     public static readonly NextStep Unknown = new()
     {
         Kind = NextStepKind.Unknown,
+        ListIsStale = true,
         Attention = TrayState.Unknown,
         Text = "Checking what this machine is doing…",
         NoStations = "Checking what this machine is doing…",
@@ -128,6 +151,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.ServiceNotRunning,
+                ListIsStale = true,
                 Attention = TrayState.Stopped,
                 Text = "The ADL Agent service is not running on this machine, so nothing is being "
                     + "collected or sent. An administrator starts it again from Services.",
@@ -149,6 +173,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.NotConfigured,
+                ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
                 Text = "This machine has not been told where its ADL is, so it is sending nothing. "
                     + status.ConfigurationHint,
@@ -162,6 +187,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.RePairNeeded,
+                ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
                 Text = "ADL has revoked this machine, and nothing is being sent until it is paired "
                     + "again. Ask your ADL administrator for a new pairing code, then paste it on "
@@ -176,6 +202,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.NotPaired,
+                ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
                 Text = "Paste the pairing code your ADL administrator gave you, on the Pairing tab. "
                     + "Nothing else about ADL needs setting up on this machine.",
@@ -193,6 +220,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.WaitingForFirstSync,
+                ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
                 Text = "Paired. Waiting for this device's configuration from ADL — this window "
                     + "updates on its own.",
@@ -210,6 +238,7 @@ public static class NextSteps
             return new NextStep
             {
                 Kind = NextStepKind.AdlNotAnswering,
+                ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
                 Text = Sentence(
                     "ADL is not answering, so nothing is being sent and no setting can be saved. "
@@ -237,55 +266,95 @@ public static class NextSteps
             };
         }
 
-        // Only the stations HQ has switched on. A disabled one is an
-        // administrator's decision rather than anything a technician standing
-        // at this machine can act on, and a line telling them to act on it
-        // would be a line that never goes away.
-        var live = stations.Where(station => station.Enabled).ToList();
+        // From here down the question is only about the stations, and it is
+        // the same question each connection's row in the list asks about its
+        // own -- so it is asked once, in one place, and rendered twice.
+        var standing = StationStanding.Of(stations);
 
-        var unbound = live
-            .Where(station => string.IsNullOrWhiteSpace(station.Config.LocalFolderPath))
-            .ToList();
-
-        if (unbound.Count > 0)
+        if (standing.Kind == StandingKind.BindAFolder)
         {
+            var first = standing.Unbound[0];
+
             return new NextStep
             {
                 Kind = NextStepKind.BindAFolder,
-                Attention = TrayState.NeedsAttention,
+                Attention = standing.Attention,
                 Text = string.Create(
                     CultureInfo.CurrentCulture,
-                    $"Bind a folder to {unbound[0].StationName}: open the Stations tab, select it, "
-                    + $"and say where its files are on this machine.{AlsoNeedOne(unbound.Count)}"),
+                    $"Bind a folder to {Named(first)}: open the Stations tab, select it, "
+                    + $"and say where its files are on this machine.{AlsoNeedOne(standing.Unbound.Count)}"),
             };
         }
 
-        var failing = live.Where(station => !string.IsNullOrEmpty(station.Error)).ToList();
-
-        if (failing.Count > 0)
+        if (standing.Kind == StandingKind.FixAStation)
         {
+            var first = standing.Failing[0];
+
             return new NextStep
             {
                 Kind = NextStepKind.FixAStation,
-                Attention = TrayState.NeedsAttention,
+                Attention = standing.Attention,
                 Text = string.Create(
                     CultureInfo.CurrentCulture,
-                    $"{failing[0].StationName} collected nothing last cycle: {failing[0].Error}"
-                    + $"{AlsoWentQuiet(failing.Count)}"),
+                    $"{Subject(first)} collected nothing last cycle: {first.Error}"
+                    + $"{AlsoWentQuiet(standing.Failing.Count)}"),
             };
         }
 
         return new NextStep
         {
             Kind = NextStepKind.NothingToDo,
-            Attention = TrayState.Working,
-            Text = live.Count == 0
+            Attention = standing.Attention,
+            Text = standing.Kind == StandingKind.AllSwitchedOff
                 ? "Nothing to do — every station ADL linked to this machine is switched off in ADL."
                 : string.Create(
                     CultureInfo.CurrentCulture,
-                    $"Nothing to do — this machine is collecting for {Counted(live.Count)} and "
+                    $"Nothing to do — this machine is collecting for {Counted(standing.Live.Count)} and "
                     + $"sending to ADL."),
         };
+    }
+
+    /// <summary>
+    /// A station, and the connection it is under.
+    /// </summary>
+    /// <remarks>
+    /// The connection is named because the station list is no longer one
+    /// list. "Open the Stations tab, select it" was a complete instruction
+    /// while every station was in one grid; with the stations split by
+    /// connection it stops being one, and a technician on a machine serving
+    /// two vendors has to guess which side of the split to look on. The name
+    /// costs nothing to carry -- it is already on the station -- and it turns
+    /// the line back into something that can be followed without knowing the
+    /// answer first.
+    /// <para>
+    /// Omitted when there is no name to give, rather than rendering an empty
+    /// clause: an older ADL that sends no connection name should produce the
+    /// sentence this replaced, not a sentence with a hole in it.
+    /// </para>
+    /// </remarks>
+    private static string Clause(AgentStationSnapshot station) =>
+        string.IsNullOrWhiteSpace(station.ConnectionName)
+            ? ""
+            : $", under {station.ConnectionName}";
+
+    /// <summary>"Kakamega, under Vaisala AWS" — for a phrase a colon follows.</summary>
+    private static string Named(AgentStationSnapshot station) =>
+        station.StationName + Clause(station);
+
+    /// <summary>
+    /// "Kakamega, under Vaisala AWS," — for a phrase a verb follows.
+    /// </summary>
+    /// <remarks>
+    /// A second rendering rather than a second comma bolted on at the call
+    /// site, because the comma is only right when there is a clause to close.
+    /// On an ADL that sends no connection name this has to read "Kakamega
+    /// collected nothing", not "Kakamega, collected nothing".
+    /// </remarks>
+    private static string Subject(AgentStationSnapshot station)
+    {
+        var clause = Clause(station);
+
+        return clause.Length == 0 ? station.StationName : $"{station.StationName}{clause},";
     }
 
     /// <summary>

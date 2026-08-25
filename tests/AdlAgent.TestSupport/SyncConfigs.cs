@@ -35,6 +35,39 @@ public static class SyncConfigs
         };
     }
 
+    /// <summary>
+    /// One device serving several connections -- the country server that
+    /// hosts two vendors' folders, which is the case the station list is
+    /// split for.
+    /// </summary>
+    /// <remarks>
+    /// Connections are given rather than derived so a test can say the thing
+    /// it is about: a connection ADL has switched off, or one with no station
+    /// links under it at all. Both are states that leave no trace in a flat
+    /// list of stations, and both are ordinary.
+    /// </remarks>
+    public static SyncResponse Serving(params ConnectionConfig[] connections)
+    {
+        var sample = FakeAdlServer.SampleConfig();
+
+        return sample with { Connections = connections };
+    }
+
+    /// <summary>One connection, named, and the station links under it.</summary>
+    public static ConnectionConfig Connection(
+        long id,
+        string name,
+        bool enabled = true,
+        string network = "Kenya AWS",
+        params StationLinkConfig[] stationLinks) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            Admin = new ConnectionAdminConfig { Enabled = enabled, Network = network },
+            StationLinks = stationLinks,
+        };
+
     /// <summary>One station link, bound to a folder and a pattern.</summary>
     public static StationLinkConfig Link(
         long id,

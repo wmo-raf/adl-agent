@@ -53,9 +53,22 @@ public sealed class StationSettingsViewModel : Observable
     /// <summary>Raised when a box changes, so the window can re-count.</summary>
     public event EventHandler? SettingsChanged;
 
-    public string Title => string.Create(
-        CultureInfo.CurrentCulture,
-        $"Station settings — {Station.StationName}");
+    /// <summary>
+    /// The window's title: the station, and the connection it is under.
+    /// </summary>
+    /// <remarks>
+    /// The connection is named because this window opens over a list that is
+    /// now split by one, and because pointing a station at the wrong vendor's
+    /// folder is a silent misconfiguration -- nothing refuses it, and it
+    /// surfaces a cycle later as "scanned 0". On a machine serving two
+    /// vendors, the station name alone does not say which set of folders is
+    /// the right one to be browsing for.
+    /// </remarks>
+    public string Title => string.IsNullOrWhiteSpace(Station.ConnectionName)
+        ? string.Create(CultureInfo.CurrentCulture, $"Station settings — {Station.StationName}")
+        : string.Create(
+            CultureInfo.CurrentCulture,
+            $"Station settings — {Station.StationName}, under {Station.ConnectionName}");
 
     public bool HasChanges => Station.HasChanges;
 

@@ -13,6 +13,28 @@ namespace AdlAgent.Core.Status;
 /// </remarks>
 public sealed record AgentStationsSnapshot
 {
+    /// <summary>The connections, in the order ADL sent them.</summary>
+    /// <remarks>
+    /// Beside the stations rather than around them, and that is deliberate.
+    /// Both lists are built from one walk of the configuration, so they cannot
+    /// disagree; keeping them parallel leaves the flat list intact for the
+    /// questions that are about the whole machine -- has ADL linked anything,
+    /// has anything got a folder bound -- which is every question
+    /// <c>NextSteps.For</c> asks. Nesting would make those re-flatten it at
+    /// the call site, which is this class's flattening moved somewhere worse.
+    /// <para>
+    /// Carried at all because two facts about a connection are not recoverable
+    /// from its stations. A connection ADL has switched off reaches
+    /// <see cref="AgentStationSnapshot.Enabled"/> only as a false on every one
+    /// of its stations, indistinguishable from somebody having switched each
+    /// station off individually; and a connection with no station links at all
+    /// leaves no trace in a flat list, so an administrator who has made one and
+    /// not yet linked to it would look, from the machine, exactly like an
+    /// administrator who has done nothing.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<AgentConnectionSnapshot> Connections { get; init; } = [];
+
     /// <summary>The stations, in the order ADL sent them.</summary>
     public required IReadOnlyList<AgentStationSnapshot> Stations { get; init; }
 
@@ -88,4 +110,33 @@ public sealed record AgentStationSnapshot
 
     /// <summary>What went wrong for this station last cycle, if anything did.</summary>
     public string? Error { get; init; }
+}
+
+/// <summary>
+/// One connection: what ADL calls it, and whether ADL is running it.
+/// </summary>
+/// <remarks>
+/// Everything here is HQ's tier and none of it is writable from the machine
+/// -- <c>AgentConnection</c> has no app-editable fields at all, unlike the
+/// station link beneath it -- so this is a thing to read and to group by, and
+/// never a thing to act on.
+/// </remarks>
+public sealed record AgentConnectionSnapshot
+{
+    public required long ConnectionId { get; init; }
+
+    public string ConnectionName { get; init; } = "";
+
+    /// <summary>The ADL network this connection collects for.</summary>
+    public string Network { get; init; } = "";
+
+    /// <summary>
+    /// False when HQ has switched off the whole connection.
+    /// </summary>
+    /// <remarks>
+    /// The flag itself, unmixed with its stations'. It is the one fact that
+    /// tells a technician the folders on this machine are fine and there is
+    /// nothing here to fix.
+    /// </remarks>
+    public bool Enabled { get; init; }
 }
