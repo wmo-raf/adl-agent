@@ -9,7 +9,7 @@
     what does Windows Installer actually do with the package that was just
     built.
 
-    Three things, and the last one is the one that matters:
+    Four things, and the third one is the one that matters:
 
       * an unattended install passed ADLURL= writes the address it was given,
         which is the path every existing document and every existing site
@@ -18,9 +18,12 @@
         that is what a self-update is -- `msiexec /i ... /qn`, no properties,
         nobody watching. A screen that had grown a launch condition, or a
         custom action, or a default, would fail here and only here;
-      * and a major upgrade passed nothing leaves the address alone. This is
-        the one that would break every machine in every fleet at once, quietly,
-        at whatever hour they update themselves.
+      * a major upgrade passed nothing leaves the address alone. This is the
+        one that would break every machine in every fleet at once, quietly, at
+        whatever hour they update themselves;
+      * and an install ends with something to open the window with, in all
+        three of the places a technician might look for it -- and removing the
+        product takes all three away again.
 
     The upgrade package is built here rather than downloaded: the same
     sources, at a higher version, which is exactly what a release is. Building
@@ -59,6 +62,16 @@ $serviceDir = Join-Path $publish "service"
 $trayDir = Join-Path $publish "tray"
 $assets = Join-Path $repository "assets"
 $settings = Join-Path $env:ProgramData "ADL Agent\agent.ini"
+
+# The three places a technician might look for the window, resolved rather
+# than spelled out: this package is perMachine, so Windows Installer puts all
+# three in their all-users variants and a hard-coded profile path would be
+# checking the wrong machine.
+$shortcutPaths = @(
+    (Join-Path ([Environment]::GetFolderPath("CommonPrograms")) "ADL Agent\ADL Agent.lnk"),
+    (Join-Path ([Environment]::GetFolderPath("CommonStartup")) "ADL Agent.lnk"),
+    (Join-Path ([Environment]::GetFolderPath("CommonDesktopDirectory")) "ADL Agent.lnk")
+)
 
 # pack.ps1 puts the WiX toolset on its own process's PATH and this is a
 # different process, so a step that runs straight after it still has to look.
@@ -201,6 +214,68 @@ foreach ($action in $customActions) {
 
 Write-Host "    custom actions: $(($customActions | ForEach-Object { $_[0] }) -join ', ')"
 
+# ---------------------------------------------------------------------------
+# The install ends with the window open
+#
+# The Exit dialog presses one of the util extension's own actions rather than
+# one of ours, which is why the check above still passes. What has to be true
+# of it is the other half: that it is in the package and in no sequence. A
+# scheduled one would run on every silent self-update in the fleet, on servers
+# with nobody logged on.
+# ---------------------------------------------------------------------------
+
+Write-Host "==> The last screen opens the tray" -ForegroundColor Cyan
+
+$launch = "Wix4ShellExec_X64"
+
+if (($customActions | Where-Object { $_[0] -eq $launch }).Count -ne 1) {
+    throw "The package has no $launch, so the finish button would press an action that is not there."
+}
+
+foreach ($sequence in @("InstallUISequence", "InstallExecuteSequence")) {
+    $scheduled = Get-MsiRows $Msi "SELECT Action FROM $sequence WHERE Action='$launch'" 1
+
+    if ($scheduled.Count -ne 0) {
+        throw "$launch is scheduled in $sequence. It would open a window on every silent upgrade in the fleet."
+    }
+}
+
+$pressed = Get-MsiRows $Msi `
+    "SELECT Dialog_, Control_, Event FROM ControlEvent WHERE Dialog_='ExitDialog' AND Argument='$launch'" 3
+
+if ($pressed.Count -ne 1 -or $pressed[0][1] -ne "Finish" -or $pressed[0][2] -ne "DoAction") {
+    throw "Nothing on the Exit dialog presses $launch, so a finished install would still show nobody anything."
+}
+
+$target = Get-MsiRows $Msi "SELECT Value FROM Property WHERE Property='WixShellExecTarget'" 1
+
+if ($target.Count -ne 1 -or -not $target[0][0]) {
+    throw "WixShellExecTarget is not in the package, so the finish button would open nothing."
+}
+
+Write-Host "    $($pressed[0][1]) does $launch on $($target[0][0])"
+
+# ---------------------------------------------------------------------------
+# And leaves the window somewhere to be found again
+#
+# Three shortcuts, and each answers a different person's question: the Start
+# menu for somebody who knows this is installed, the Startup folder for
+# whoever logs on to the server next, and the desktop for the technician who
+# has just watched the install finish. All three are all-users, because the
+# package is perMachine.
+# ---------------------------------------------------------------------------
+
+$shortcuts = Get-MsiRows $Msi "SELECT Shortcut, Directory_ FROM Shortcut" 2
+$folders = @($shortcuts | ForEach-Object { $_[1] })
+
+foreach ($folder in @("DesktopFolder", "StartupFolder", "AgentMenuFolder")) {
+    if ($folders -notcontains $folder) {
+        throw "The package installs no shortcut in $folder. It has: $($folders -join ', ')."
+    }
+}
+
+Write-Host "    shortcuts in $($folders -join ', ')"
+
 # No default for the address. This is what an unattended upgrade rests on: it
 # is passed no properties, so ADLURL is empty, so the component that writes
 # the setting is not installed, so what is on disk is left alone.
@@ -256,6 +331,7 @@ $upgradeVersion = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
 $upgradeMsi = Join-Path ([System.IO.Path]::GetTempPath()) "AdlAgent-$upgradeVersion-x64.msi"
 
 $installed = $false
+$verified = $false
 
 try {
     # 1. The command line every existing document and every existing site
@@ -272,6 +348,18 @@ try {
     }
 
     Write-Host "    agent.ini says $(Read-Address)" -ForegroundColor Green
+
+    # And the window is findable. Read off disk rather than out of the
+    # package, because a shortcut whose folder property resolved somewhere
+    # unexpected still installs cleanly and still leaves a technician with
+    # nothing to click.
+    foreach ($shortcut in $shortcutPaths) {
+        if (-not (Test-Path $shortcut)) {
+            throw "There is no $shortcut, so a finished install left nothing to open the window with."
+        }
+    }
+
+    Write-Host "    shortcuts installed in all three places" -ForegroundColor Green
 
     # 2. The same sources at the next version, which is what a release is and
     #    what UpdateService hands to msiexec.
@@ -302,6 +390,10 @@ try {
 
     Write-Host "    agent.ini still says $after" -ForegroundColor Green
     Write-Host "==> The package installs, configures itself, and upgrades without forgetting." -ForegroundColor Green
+
+    # Only now, so that the check in the tidy-up below cannot turn a failure
+    # above into a second, misleading one.
+    $verified = $true
 }
 finally {
     if ($installed) {
@@ -322,5 +414,20 @@ finally {
         # upgrade must not take the device token with it. That makes removing
         # it this script's job.
         Remove-Item (Join-Path $env:ProgramData "ADL Agent") -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Nothing a shortcut lives in is permanent, so the uninstall above
+        # should have taken all three away. A desktop icon left pointing at a
+        # program that is no longer there is one somebody clicks for the rest
+        # of the machine's life. Checked only when everything above passed, so
+        # that a tidy-up cannot report a second failure over the real one.
+        if ($verified) {
+            $left = @($shortcutPaths | Where-Object { Test-Path $_ })
+
+            if ($left.Count -ne 0) {
+                throw "Uninstalling left shortcuts behind: $($left -join ', ')."
+            }
+
+            Write-Host "==> And removing it leaves no shortcut behind." -ForegroundColor Green
+        }
     }
 }

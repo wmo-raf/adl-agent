@@ -18,7 +18,7 @@ trimming, padding and tiling are done by the script, not by editing the file.
 
 | Tile | Hex | Worn by |
 |---|---|---|
-| Teal | `#1F7D8C` | `adl-agent-tray.exe`, the window and its titlebar, the Start-menu and Startup shortcuts, Add/Remove Programs, `AdlAgent-<version>-Setup.exe` |
+| Teal | `#1F7D8C` | `adl-agent-tray.exe`, the window and its titlebar, the desktop, Start-menu and Startup shortcuts, Add/Remove Programs, `AdlAgent-<version>-Setup.exe` |
 | Slate | `#2E3B4E` | `adl-agent.exe`, the Windows Service |
 
 Teal is the product a technician meets. Slate exists for one reason: the two

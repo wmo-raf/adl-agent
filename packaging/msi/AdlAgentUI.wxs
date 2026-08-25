@@ -181,6 +181,46 @@
       <DialogRef Id="UserExit" />
       <DialogRef Id="WelcomeDlg" />
 
+      <!--
+        Where the tray is, for the action below. A formatted path rather than
+        a spelled-out one, so it follows the package wherever it was
+        installed and cannot become the second place an install location is
+        written down.
+      -->
+      <Property Id="WixShellExecTarget" Value="[#AgentTrayExe]" />
+
+      <!--
+        And the install ends with the window open.
+
+        Until this, a successful install had no visible outcome: the progress
+        bar closed, the service started, and the technician was left with a
+        Start menu entry they had no reason to look for and a tray that would
+        not appear until the next logon. The window opens on the tab with the
+        pairing code box on it, because pairing is the next thing to do
+        anyway — see TrayTabs.
+
+        Off the Exit dialog rather than the install sequence, and that is
+        load-bearing rather than incidental. Self-update runs
+        `msiexec /i ... /qn`, which has no user interface sequence at all, so
+        nothing published from a button can fire during an unattended
+        upgrade. An agent that tried to open a window at three in the morning
+        on a server with nobody logged on would be a new failure mode
+        invented by a convenience. InstallerFinishTests is what says so, and
+        verify-msi-install.ps1 checks it again in the built database.
+
+        Not on a repair or an uninstall. Both come through this same dialog,
+        and the second would be launching a program the same transaction has
+        just deleted.
+
+        One honest limitation, recorded rather than solved: the installer is
+        elevated, so the window this opens belongs to the administrator who
+        ran it rather than necessarily to the technician who will use the
+        machine. Harmless — the control surface admits both — but it means
+        the first window is not always the one that matters, and the Startup
+        shortcut remains what puts the tray in front of the right person.
+      -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="Wix4ShellExec_X64" Order="1" Condition="NOT Installed" />
+
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
 
       <!--
@@ -228,5 +268,13 @@
     </UI>
 
     <UIRef Id="WixUI_Common" />
+
+    <!--
+      The action the finish button presses, which is the util extension's own
+      rather than one of ours. Referenced, so it arrives in the package
+      unscheduled: it is in the CustomAction table and in no sequence, which
+      is what stops it running on an install that shows nobody anything.
+    -->
+    <CustomActionRef Id="Wix4ShellExec_X64" />
   </Fragment>
 </Wix>

@@ -510,7 +510,12 @@ poll, so nobody has to press anything to find out that an administrator has
 linked a station.
 
 It is a per-user program and asks for no administrator rights. The installer
-puts it in the Start menu and starts it at logon. It can be closed at any time; the service goes on collecting and
+puts it on the desktop and in the Start menu, starts it at logon, and opens it
+once as it finishes — on the tab with the pairing code box, which is the next
+thing to do anyway. That last one is off the installer's finish screen, so a
+self-update, which runs silently and shows nobody anything, opens no window:
+the shortcut at logon is what puts the tray in front of whoever uses the
+machine. It can be closed at any time; the service goes on collecting and
 sending with nobody logged on, which is what it is a service for.
 
 #### Binding a station to a folder

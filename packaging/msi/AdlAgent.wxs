@@ -133,6 +133,9 @@
     -->
     <StandardDirectory Id="StartupFolder" />
 
+    <!-- And the all users desktop, for the same reason. -->
+    <StandardDirectory Id="DesktopFolder" />
+
     <Feature Id="Main" Title="ADL Agent" Level="1">
       <ComponentGroupRef Id="AgentComponents" />
     </Feature>
@@ -217,6 +220,32 @@
             Id="AgentTrayStartupShortcut"
             Directory="StartupFolder"
             Name="ADL Agent"
+            Target="[INSTALLFOLDER]adl-agent-tray.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <!--
+          And on the desktop, which is what the technician who has just
+          watched the install finish is actually looking at. The Start menu
+          entry is for somebody who already knows this is installed, and the
+          Startup one does not appear until the next logon; between them they
+          left a successful install with no visible outcome at all, which is
+          the moment a phone call starts.
+
+          Unconditionally, and not behind a checkbox. Every choice on an
+          installer screen is a question somebody has to have an opinion about
+          and then explain over a phone, and this one has a single right
+          answer for this audience.
+
+          In this component rather than one of its own, so that all three
+          shortcuts share a lifetime: they point at the same program, and a
+          desktop icon that outlived it would be a broken shortcut on a server
+          for the rest of the machine's life.
+        -->
+        <Shortcut
+            Id="AgentTrayDesktopShortcut"
+            Directory="DesktopFolder"
+            Name="ADL Agent"
+            Description="Pair this machine, bind station folders, and see what the agent is doing."
             Target="[INSTALLFOLDER]adl-agent-tray.exe"
             WorkingDirectory="INSTALLFOLDER" />
 
