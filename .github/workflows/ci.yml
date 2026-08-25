@@ -119,6 +119,21 @@ jobs:
         shell: pwsh
         run: ./packaging/verify-tray-starts.ps1
 
+      # And whether Windows Installer does what the package says it does.
+      #
+      # The tests read the installer's sources and check the rule its screen
+      # enforces against the rule the agent enforces; this installs the
+      # package that was just built, on a real Windows machine, and reads the
+      # file it wrote.
+      #
+      # The step that matters is the last one it does: a silent upgrade,
+      # passed no properties, exactly as UpdateService performs it. That is
+      # how every machine in every fleet replaces itself, unattended, and it
+      # is the one thing here that could break all of them at once.
+      - name: Prove the package installs and upgrades without forgetting
+        shell: pwsh
+        run: ./packaging/verify-msi-install.ps1
+
   release:
     # Publishing a version, once, in the one place every ADL instance
     # mirrors from.

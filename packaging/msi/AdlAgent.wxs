@@ -18,6 +18,10 @@
     * the service is configured to restart itself on failure, because the
       failure this product exists to end is a data path that stopped and
       nobody noticed.
+
+  The one screen a person sees when they double-click this - the ADL address -
+  is in AdlAgentUI.wxs, and is authored so that none of it is reachable from
+  the unattended path above.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
@@ -85,15 +89,29 @@
     <Property Id="ARPPRODUCTICON" Value="AgentIcon" />
 
     <!--
-      Where this machine's ADL is. Set at install time:
+      Where this machine's ADL is. Set at install time, either by typing it
+      into the one screen this installer shows (see AdlAgentUI.wxs) or on a
+      command line:
 
           msiexec /i AdlAgent.msi ADLURL=https://adl.example.org
 
       Secure so that it survives elevation, and deliberately not remembered
       in the MSI's own property table for later runs — see the component
       below for what makes an unattended upgrade keep it.
+
+      No default value, and nothing sets this outside the user interface
+      sequence. That is what an unattended upgrade relies on: it is passed no
+      properties, so this stays empty, so the component below is not
+      installed, so the setting on disk is not touched.
     -->
     <Property Id="ADLURL" Secure="yes" />
+
+    <!--
+      The screens. One of them asks for the address above; the rest are the
+      stock WiX ones. None of it is reachable from `msiexec /qn`, which is how
+      the agent installs a new version over itself.
+    -->
+    <UIRef Id="WixUI_AdlAgent" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="ADL Agent" />

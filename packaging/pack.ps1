@@ -113,21 +113,34 @@ Invoke-Step "Publishing the tray" {
 
 Install-DotnetTool -Package "wix" -ToolVersion $wixVersion -Command "wix"
 
-Invoke-Step "Adding the WiX util extension" {
-    wix extension add --global WixToolset.Util.wixext/$wixVersion
+# Util for the service's failure actions and the state folder's permissions;
+# UI for the dialog set the one screen this installer shows is built from.
+# Both pinned to $wixVersion, and pinned to the same one: a dialog library and
+# the compiler that links it are one toolset, and mixing versions is a class of
+# breakage nobody would look for in a packaging script.
+$wixExtensions = @(
+    "WixToolset.Util.wixext",
+    "WixToolset.UI.wixext"
+)
+
+foreach ($extension in $wixExtensions) {
+    Invoke-Step "Adding $extension $wixVersion" {
+        wix extension add --global "$extension/$wixVersion"
+    }
 }
 
 $msi = Join-Path $output "AdlAgent-$Version-x64.msi"
 
+# In build-msi.ps1 rather than here, because verify-msi-install.ps1 has to
+# build the same package at the next version to upgrade an install with, and
+# two copies of this would drift.
 Invoke-Step "Building $msi" {
-    wix build (Join-Path $PSScriptRoot "msi/AdlAgent.wxs") `
-        -arch x64 `
-        -ext WixToolset.Util.wixext `
-        -d Version=$Version `
-        -d ServiceDir=$serviceDir `
-        -d TrayDir=$trayDir `
-        -d AssetsDir=$assets `
-        -o $msi
+    & (Join-Path $PSScriptRoot "build-msi.ps1") `
+        -Version $Version `
+        -Output $msi `
+        -ServiceDirectory $serviceDir `
+        -TrayDirectory $trayDir `
+        -AssetsDirectory $assets
 }
 
 # ---------------------------------------------------------------------------

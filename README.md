@@ -268,6 +268,48 @@ restarting the service by hand. `adl-agent set-url` is all three, run elevated.
   Redirecting a machine's entire outbound path belongs behind the operating
   system's own consent.
 
+The installer asks ([wmo-raf/adl#293](https://github.com/wmo-raf/adl/issues/293))
+— the MSI had no user interface at all. Double-clicking it gave an elevation
+prompt and a progress bar, installed the service, started it, and produced a
+machine that had no idea where to report and said nothing about it. The
+supported way to configure one was `msiexec /i … ADLURL=…`: a line somebody has
+to get right, unquoted, over a phone, on a machine they cannot see. The person
+running it is a station technician who was told to run the installer, and they
+double-click it.
+
+- **one screen, one field** — welcome, the address, confirm, install. Four
+  screens is already more than a technician should have to read, and every one
+  that is not the address is one they click through.
+- **it refuses what the agent would refuse, and says why** — the same rule
+  `AgentOptions.ResolveApiBaseAddress` enforces, said again in Windows
+  Installer's condition syntax, with *Next* unavailable until the field holds
+  an address the service would accept. The two copies are checked against each
+  other over a table of addresses (`InstallerDialogTests`), because nothing
+  else could: WiX stores a control condition as an opaque string and never
+  parses it.
+- **it does not contact the address** — that would be a network call inside a
+  Windows Installer transaction, and it would strand every site that installs
+  before its firewall rule, its DNS entry or its certificate exists. Whether
+  the instance answers is what the tray's *Status* tab says, live, for the
+  machine's whole life rather than once.
+- **the unattended path is untouched** — a self-update is `msiexec /i … /qn`
+  with no properties, which shows no dialog and, because `ADLURL` stays empty,
+  does not install the component that writes the setting. That is the step
+  that could have quietly broken every automatic upgrade in the fleet, so it
+  is installed and upgraded for real on the packaging job's Windows runner
+  rather than assumed.
+- **somebody who has already given an address is not asked for it** — a
+  package passed `ADLURL=` goes straight to the confirmation, so the command
+  line every existing document uses is no worse than it was before the screen
+  existed.
+- **an upgrade run by hand asks again, and is not offered a guess** — a major
+  upgrade is a fresh install as far as Windows Installer is concerned, so it
+  arrives with an empty field. The installer's own registry value is sitting
+  right there, but `adl-agent set-url` writes `agent.ini` without touching it,
+  so it goes stale: a screen that offered it would quietly send a machine back
+  to the instance somebody had deliberately moved it away from, and without
+  clearing the pairing that move cleared.
+
 ## Structure
 
 ```
@@ -381,12 +423,22 @@ the agent, and it comes up working. On an installed service tier that whatever
 is [`adl-agent set-url`](#changing-where-a-machine-reports).
 
 Run `adl-agent.exe` with no arguments to run it as a console process. On a
-real machine it is installed rather than run, and the installer sets the URL
-for you:
+real machine it is installed rather than run, and the installer asks for the
+URL: double-click `AdlAgent-0.2.0-x64.msi` and one screen in the middle of it
+wants the address of the ADL instance this machine reports to. It refuses an
+address the agent would refuse, and says why, while somebody is still standing
+there — but it does not contact it, because a site is often installed before
+its firewall rule or its certificate exists. Whether ADL answers is what the
+tray's *Status* tab is for.
+
+For a fleet, or a script, the same setting is still a property:
 
 ```powershell
 msiexec /i AdlAgent-0.2.0-x64.msi ADLURL=https://adl.example.org
 ```
+
+Given it, the installer does not ask; given `/qn`, it shows nothing at all,
+which is how the agent installs a new version over itself.
 
 That is the service tier. A technician without administrator rights runs
 `AdlAgent-0.2.0-Setup.exe` instead, which installs under `%LocalAppData%` and
@@ -838,11 +890,11 @@ there.
 ## Known gaps
 
 - **The per-user tier has no way to be configured that does not need a
-  command line.** The service tier is told where its ADL is by the MSI
-  (`ADLURL=…`), which writes `agent.ini`. The per-user tier has no installer
-  property to be given and no elevation available to the technician it exists
-  for, so the only route is an environment variable set before the next
-  logon:
+  command line.** The service tier asks: its MSI has a screen for the address
+  and writes `agent.ini` from it. The per-user tier's installer has no screen
+  of its own, no property to be given, and no elevation available to the
+  technician it exists for, so the only route is an environment variable set
+  before the next logon:
 
   ```powershell
   setx Agent__AdlBaseUrl https://adl.example.org
@@ -891,10 +943,17 @@ there.
   (the only config write is per station link), so there is nothing for the
   tray to write it through. Editing it needs a companion change in
   [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin) first.
-- **Neither installer has been run on a Windows VM yet.** The MSI authoring,
-  the Velopack packaging and the two ways an update is applied were all
-  written and reviewed on machines that cannot execute any of them: WiX
-  refuses to build outside Windows, and `vpk` packs Windows releases only
+- **Nobody has watched the installer's screen.** The MSI is now installed and
+  upgraded for real on the packaging job's Windows runner
+  (`packaging/verify-msi-install.ps1`), which reads the `agent.ini` it wrote
+  and checks a silent upgrade leaves it alone — but every install there is
+  `/qn`, so the dialog itself is never drawn. What is checked is that the
+  package carries it, that the rule it enforces is the agent's rule, and that
+  nothing it needs runs when there is no screen. Whether the text fits its
+  controls, at 96 DPI and at 150, is unproven until somebody double-clicks it.
+- **The per-user installer has still not been run on a Windows VM.** The
+  Velopack packaging and the update path it applies were written and reviewed
+  on machines that cannot execute either: `vpk` packs Windows releases only
   there. Everything above that line — the feed, the pin, the hash check, what
   is fetched and what is refused — is under test on every push; everything
   below it is CI-built and unproven until somebody installs it on a clean
@@ -994,3 +1053,21 @@ reads the sentence a technician would be looking at and the tab the window
 would have opened on. That is why they are in a `net10.0` assembly of their
 own — see *Structure*. The WPF window above that line is still not automated,
 per the spec: what is left in it is layout.
+
+The installer is tested at the same distance, and it is the one part of this
+product nothing else could check. WiX stores a control condition as an opaque
+string and never parses it, so a malformed one compiles, links, ships, and is
+first evaluated on a country server. `InstallerDialogTests` reads the
+condition off the dialog's *Next* button, expands it the way the WiX
+preprocessor would, and runs it — in a small reader of Windows Installer's own
+condition syntax — against the same addresses `AgentOptions` is run against,
+so the rule the screen enforces and the rule the service enforces are checked
+against each other rather than against a comment. Where they cannot be made to
+agree, because that syntax has no regular expressions and cannot take a string
+apart, both edges are pinned by tests of their own.
+
+What that cannot say is what Windows Installer does with the package.
+`packaging/verify-msi-install.ps1` installs it on the packaging job's Windows
+runner, reads the `agent.ini` it wrote, builds the same sources at the next
+version, and upgrades silently with no properties — exactly as `UpdateService`
+does at three in the morning — then checks the address is still there.
