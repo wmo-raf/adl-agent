@@ -605,7 +605,33 @@
                             stopped answering.
                         -->
                         <StackPanel Grid.Row="0" Grid.Column="1">
-                            <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                            <!--
+                                The address and the way to change it on one
+                                line, in the shape the Pairing row below
+                                already has: a state, and the quietest
+                                possible way to act on it. Beside rather than
+                                beneath, because beneath would sit between the
+                                address and the hint that explains it on the
+                                one machine that has a hint.
+
+                                Offered on every machine the service has
+                                answered for, including one whose technician
+                                has no administrator rights: the consent
+                                prompt behind it is exactly where an
+                                administrator standing beside them types a
+                                password, which is how these visits actually
+                                go. Hiding it from the person the window is
+                                for would be the worse of the two mistakes;
+                                the other is pretending the change worked.
+                            -->
+                            <WrapPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                                <TextBlock Text="  ·  " Opacity="0.75" Style="{StaticResource Value}"
+                                           Visibility="{Binding ShowsChangeAdl, Converter={StaticResource Visible}}" />
+                                <Button Content="Change…" Style="{StaticResource Quiet}"
+                                        VerticalAlignment="Center" Click="ChangeAdl"
+                                        Visibility="{Binding ShowsChangeAdl, Converter={StaticResource Visible}}" />
+                            </WrapPanel>
                             <TextBlock Style="{StaticResource Value}" Text="{Binding ConfigurationHint}"
                                        TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
                                        Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />

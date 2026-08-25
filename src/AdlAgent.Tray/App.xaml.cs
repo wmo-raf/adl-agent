@@ -75,7 +75,10 @@ public partial class App : Application
         // it opens -- which is most of them -- are the ones this can report.
         _bindings = BindingTrace.StartIfAsked();
 
-        _shell = new ShellViewModel(new AgentControlLink());
+        // Both of the window's ways out of this process, built here rather
+        // than found: the pipe to the service, and the request to Windows to
+        // run the repoint verb elevated.
+        _shell = new ShellViewModel(new AgentControlLink(), new ElevatedAddressChange());
         _tray = new TrayPresence();
         _window = new MainWindow(_shell);
 

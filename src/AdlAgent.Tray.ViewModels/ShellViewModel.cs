@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using AdlAgent.Core;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 using AdlAgent.Windows.Platform;
@@ -40,6 +41,7 @@ namespace AdlAgent.Tray;
 public sealed class ShellViewModel : Observable
 {
     private readonly AgentControlLink _agent;
+    private readonly IAddressChange _adlAddress;
 
     private AgentStatusSnapshot? _status;
     private bool _serviceReached;
@@ -150,9 +152,18 @@ public sealed class ShellViewModel : Observable
     /// </remarks>
     private DateTimeOffset? _awaitedSync;
 
-    public ShellViewModel(AgentControlLink agent)
+    /// <param name="adlAddress">
+    /// How this window asks Windows to repoint the machine. Passed in by the
+    /// tray's own composition root beside the control link, and by tests,
+    /// which must not raise a consent prompt somebody has to click. The
+    /// fallback is what a window built with one argument gets, and it is the
+    /// real one on purpose: a default that quietly did nothing would be a
+    /// button that quietly did nothing.
+    /// </param>
+    public ShellViewModel(AgentControlLink agent, IAddressChange? adlAddress = null)
     {
         _agent = agent;
+        _adlAddress = adlAddress ?? new ElevatedAddressChange();
 
         PairCommand = new AsyncCommand(PairAsync, Failed, () => PairingCode.Trim().Length > 0);
         SyncCommand = new AsyncCommand(SyncAsync, Failed, () => _awaitedSync is null);
@@ -215,6 +226,31 @@ public sealed class ShellViewModel : Observable
     /// machine an address.
     /// </summary>
     public bool NeedsConfiguring => !IsConfigured;
+
+    /// <summary>
+    /// True when the ADL row should offer to change the address.
+    /// </summary>
+    /// <remarks>
+    /// From the moment the service has answered, and on every machine after
+    /// that -- including the one with no address at all, which is the state
+    /// the hint under this row is about, and including the machine whose
+    /// technician has no administrator rights.
+    /// <para>
+    /// That last one is the point rather than an oversight. Hiding the button
+    /// from whoever cannot use it would hide it from the person the window is
+    /// for: a technician without rights is who these visits are made by, and
+    /// the consent prompt is exactly where an administrator standing beside
+    /// them types a password. What this window must not do is hide the button,
+    /// or pretend the change succeeded.
+    /// </para>
+    /// <para>
+    /// Nothing at all before the first answer, for the same reason
+    /// <see cref="ShowsPairingBox"/> waits: there is no address to open the
+    /// box on, and a dialog pre-filled with a dash is one that offers to point
+    /// this machine at nothing.
+    /// </para>
+    /// </remarks>
+    public bool ShowsChangeAdl => _status is not null;
 
     public string AgentVersion => _status?.AgentVersion ?? "-";
 
@@ -928,6 +964,186 @@ public sealed class ShellViewModel : Observable
         await RefreshAsync().ConfigureAwait(true);
     }
 
+    // ---------- changing where this machine reports ----------
+
+    /// <summary>
+    /// Open the ADL address for editing, or return null before the service
+    /// has said what it is.
+    /// </summary>
+    /// <remarks>
+    /// The same two moves as <see cref="BeginEditing"/>, for the same two
+    /// reasons: the address is copied into a dialog rather than edited in
+    /// place, and the poll stops rebuilding rows while that dialog is over
+    /// the window.
+    /// <para>
+    /// The address itself rather than what the row draws. <see cref="AdlUrl"/>
+    /// renders a machine with none as a sentence, and a sentence in a box
+    /// somebody is about to save would be an address nothing could reach.
+    /// </para>
+    /// </remarks>
+    public AdlAddressViewModel? BeginChangingAdl()
+    {
+        if (_status is null)
+        {
+            return null;
+        }
+
+        _editing = true;
+        Message = "";
+
+        return new AdlAddressViewModel(this, _status.AdlUrl);
+    }
+
+    /// <summary>
+    /// Point this machine at <paramref name="address"/>, through Windows'
+    /// own consent (story 27).
+    /// </summary>
+    /// <remarks>
+    /// A thin caller of <c>adl-agent set-url</c>, and thin on purpose: the
+    /// verb validates, stops the service, writes the file, drops the pairing
+    /// and starts the service again, so a machine repointed from this window
+    /// and one repointed from a command prompt end up in the same state by
+    /// the same code.
+    /// <para>
+    /// The one thing decided before asking is whether the address is usable,
+    /// and it is decided with the agent's own rule rather than a second one
+    /// written here. Raising a consent prompt, taking an administrator's
+    /// password, and then reporting that the address was never going to work
+    /// is the one bad outcome this window can prevent by itself -- and the
+    /// check is free, because <see cref="AgentOptions"/> is the thing the
+    /// service will bind the file to at start-up.
+    /// </para>
+    /// </remarks>
+    public async Task<AddressChangeOutcome> ChangeAdlAddressAsync(string address, bool keepPairing)
+    {
+        var url = address.Trim();
+
+        if (AgentOptions.ProblemWith(url) is { } problem)
+        {
+            Message = problem;
+
+            return AddressChangeOutcome.Refused;
+        }
+
+        var answer = await _adlAddress.RequestAsync(url, keepPairing).ConfigureAwait(true);
+
+        if (answer.Outcome != AddressChangeOutcome.Changed)
+        {
+            Message = NotChanged(answer);
+
+            return answer.Outcome;
+        }
+
+        Message = Pointed(url, keepPairing);
+
+        // What the verb just did, applied to the window's copy of the machine
+        // until the service answers with its own. The alternative is a page
+        // that goes on saying "Paired" beside a line saying the pairing was
+        // cleared, for as long as the restarting service takes to answer --
+        // and a poll that cannot reach it keeps the last snapshot, so "as
+        // long as" has no upper bound. The window would be pretending the
+        // machine is one it knows it is not, which is the one thing this
+        // button must never do.
+        //
+        // Not an invention: it is the outcome of something this window asked
+        // for and was told succeeded, which is exactly what PairAsync does
+        // with the status a redeemed code answers with.
+        _status = Repointed(_status, url, keepPairing);
+
+        if (!keepPairing)
+        {
+            // The tab as well as the state, because ChooseTab has long since
+            // made its one choice. The one thing to do about this machine is
+            // the code box on this tab.
+            SelectedTab = TrayTabs.Status;
+        }
+
+        Restate();
+
+        return answer.Outcome;
+    }
+
+    /// <summary>
+    /// The machine as the verb has just left it: a new address, and -- unless
+    /// the pairing was kept -- no pairing.
+    /// </summary>
+    /// <remarks>
+    /// Only the facts the verb changed. Everything else on the snapshot is
+    /// the last thing the service said and stays that way, including the
+    /// heartbeat and the cycle counts: they describe what this machine did
+    /// before it was moved, which is still what it did.
+    /// <para>
+    /// The address is known configured because nothing reaches here that
+    /// <see cref="AgentOptions.ProblemWith"/> refused, so the hint and the
+    /// problem go with it.
+    /// </para>
+    /// </remarks>
+    private static AgentStatusSnapshot? Repointed(
+        AgentStatusSnapshot? status, string url, bool keepPairing)
+    {
+        if (status is null)
+        {
+            return null;
+        }
+
+        var pointed = status with
+        {
+            AdlUrl = url,
+            Configured = true,
+            ConfigurationProblem = null,
+            ConfigurationHint = null,
+        };
+
+        return keepPairing
+            ? pointed
+            : pointed with
+            {
+                PairingState = nameof(CorePairingState.Unpaired),
+                RePairNeeded = false,
+                DeviceId = null,
+                DeviceName = null,
+                PairedAt = null,
+            };
+    }
+
+    /// <summary>What to say about an address that did not move.</summary>
+    /// <remarks>
+    /// A declined prompt is told apart from everything else here and nowhere
+    /// else, because it is the one refusal that is somebody's decision rather
+    /// than a fault -- and the one where saying nothing at all would let a
+    /// window read as though the change had gone through. What every other
+    /// refusal has is a sentence of its own, from whichever of the two knows:
+    /// the agent's rule, or the verb's exit code.
+    /// </remarks>
+    private static string NotChanged(AddressChange answer)
+    {
+        var said = string.IsNullOrWhiteSpace(answer.Detail) ? "" : answer.Detail.Trim() + " ";
+
+        return answer.Outcome == AddressChangeOutcome.Declined
+            ? said + "Nothing has been changed on this machine."
+            : said.Length > 0 ? said.TrimEnd() : "The address was not changed.";
+    }
+
+    /// <summary>
+    /// What to say about an address that moved, in the two tenses its pairing
+    /// leaves it in.
+    /// </summary>
+    /// <remarks>
+    /// Both name the address, because the row above is still showing the old
+    /// one until the restarting service answers the next poll. What differs is
+    /// the instruction: one machine has to be paired again before anything is
+    /// sent, and the other only if the new ADL refuses the token it kept.
+    /// </remarks>
+    private static string Pointed(string url, bool keepPairing) => keepPairing
+        ? string.Create(
+            CultureInfo.CurrentCulture,
+            $"This machine now reports to {url}, keeping the pairing it had. If ADL refuses the "
+            + $"token, pair this machine again.")
+        : string.Create(
+            CultureInfo.CurrentCulture,
+            $"This machine now reports to {url}. Its pairing was cleared: paste a pairing code "
+            + $"from the new ADL below.");
+
     // ---------- editing one station, in a window of its own ----------
 
     /// <summary>
@@ -1365,7 +1581,7 @@ public sealed class ShellViewModel : Observable
     private static readonly IReadOnlyList<string> HeaderProperties =
     [
         nameof(ServiceRunning), nameof(AdlUrl), nameof(IsConfigured), nameof(NeedsConfiguring),
-        nameof(ConfigurationHint),
+        nameof(ConfigurationHint), nameof(ShowsChangeAdl),
         nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
         nameof(PairingLine), nameof(IsPaired), nameof(NeedsRePairing), nameof(HasEverPaired),
         nameof(PairedSince), nameof(ShowsPairingBox), nameof(ShowsPairAgain),

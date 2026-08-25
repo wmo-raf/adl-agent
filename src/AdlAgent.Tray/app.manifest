@@ -14,12 +14,19 @@
   <assemblyIdentity version="1.0.0.0" name="AdlAgent.Tray.app"/>
 
   <!--
-    asInvoker: the tray never elevates. It changes nothing on this machine.
-    Every setting it edits is written to ADL, and the only local thing it
-    touches is a named pipe it is on the allow list for (see
+    asInvoker: the tray never elevates, and this must stay as it is. Every
+    setting it edits is written to ADL, and the only local thing it touches
+    is a named pipe it is on the allow list for (see
     NamedPipeControlSurface.LocalUiSecurity). A technician without
     administrator rights is exactly who this window is for (story 3), so
-    asking them for a password they do not have would defeat it.
+    asking them for a password they do not have — at start-up, for a window
+    they mostly open to read — would defeat it.
+
+    The one thing on this machine the window can change is its ADL address,
+    and it does not change it: it asks Windows to run `adl-agent set-url`
+    elevated (ElevatedAddressChange), which raises a consent prompt of the
+    operating system's own. Requesting elevation here instead would move that
+    prompt to every launch and buy nothing.
   -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>

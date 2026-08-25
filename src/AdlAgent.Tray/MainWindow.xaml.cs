@@ -107,6 +107,44 @@ public partial class MainWindow : Window
     /// <summary>Put the code box away again, unused.</summary>
     private void CancelPairAgain(object sender, RoutedEventArgs args) => _shell.CancelPairAgain();
 
+    /// <summary>
+    /// Change where this machine reports, behind Windows' own consent.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as the station windows below, including the refresh
+    /// afterwards: while the dialog is open the shell is not rebuilding rows
+    /// at all, and a change that went through has just restarted the service
+    /// under it. Everything the dialog decides is in
+    /// <see cref="AdlAddressViewModel"/>; what is here is opening it.
+    /// </remarks>
+    private async void ChangeAdl(object sender, RoutedEventArgs args)
+    {
+        if (_shell.BeginChangingAdl() is not { } address)
+        {
+            return;
+        }
+
+        try
+        {
+            new AdlAddressWindow(address) { Owner = this }.ShowDialog();
+
+            await _shell.RefreshAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            // An async void handler: nothing above this can catch anything,
+            // and an exception escaping would take down the one program on
+            // the machine whose job is to explain what is wrong.
+            _shell.Failed(exception);
+
+            // Idempotent, and the window's own OnClosed has usually done it
+            // already. What this covers is a window that threw before it ever
+            // opened, where leaving the flag set would freeze the station list
+            // for as long as the tray runs.
+            _shell.EndEditing();
+        }
+    }
+
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
 
     private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();
