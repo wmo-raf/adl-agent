@@ -33,14 +33,38 @@ install nobody can reach.
 
 ## Installing
 
-The service tier needs to be told where its ADL is:
+The service tier needs to be told where its ADL is, and it asks. Double-click
+`AdlAgent-<version>-x64.msi`, accept the elevation prompt, and one screen in
+the middle of the installer wants the address of the ADL instance this machine
+reports to — the address the country's ADL operator opens ADL at.
+
+The screen refuses an address the agent would refuse, and says why, while
+somebody is standing there: `https`, or `localhost`, and no spaces. *Next*
+stays unavailable until the field holds one. What it does **not** do is
+contact the address — that would be a network call inside a Windows Installer
+transaction, and it would strand every site that installs before its firewall
+rule, its DNS entry or its certificate exists. Whether the instance answers is
+a question the tray's *Status* tab answers, live, seconds later.
+
+Installing a newer package over a machine that is already configured asks
+again, with an empty field. The installer's own registry value holds the
+address, but `adl-agent set-url` writes `agent.ini` without touching it, so
+offering it back would sometimes send a machine to the instance somebody had
+just moved it away from.
+
+For a fleet, a room full of machines, or a script, the property is still there
+and unchanged:
 
 ```powershell
 msiexec /i AdlAgent-0.2.0-x64.msi ADLURL=https://adl.example.org
 ```
 
-That URL is written to `%ProgramData%\ADL Agent\agent.ini`, which the
-service reads when it starts:
+Given `ADLURL`, the installer does not ask — it goes straight to the
+confirmation. Given `/qn`, it shows nothing at all, which is not a nicety: it
+is how the agent replaces itself.
+
+Either way the URL is written to `%ProgramData%\ADL Agent\agent.ini`, which
+the service reads when it starts:
 
 ```ini
 [Agent]
@@ -100,6 +124,46 @@ reach. Three details in `msi/AdlAgent.wxs` carry that:
   and Administrators only: the device token is stored in the clear, and on a
   shared vendor server every local account could otherwise read a credential
   that can send data to a national instance.
+
+The screen in `msi/AdlAgentUI.wxs` had to be added without weakening either of
+the first two, which is why the only thing that sets `ADLURL` is a control
+event on a dialog, in the user interface sequence. The tempting alternative —
+a registry search, so that an upgrade run by hand could offer back the address
+the machine already has — would have set the property on every silent
+self-update in the fleet too, because `AppSearch` runs in the execute sequence
+as well.
+
+Neither `.wxs` declares a custom action, for the same reason: `/qn` shows no
+dialog whatever a package asks for, so the way a screen breaks an unattended
+install is never the screen — it is something scheduled beside it, which then
+runs on every silent upgrade in the fleet. The ones the package does carry all
+come from the WiX util extension, for the service's failure actions and the
+state folder's permissions, and `verify-msi-install.ps1` refuses any that do
+not.
+
+## What is checked, and where
+
+| Check | Where | Runs on |
+|---|---|---|
+| The screen's rule matches the agent's, and every refusal is explained | `InstallerDialogTests` | every commit, both platforms |
+| The built package really carries the dialog, something leads to it, and no custom action of ours rides along | `verify-msi-install.ps1` | the packaging job |
+| `ADLURL=` still works, `/qn` still installs, and a silent upgrade keeps the address | `verify-msi-install.ps1` | the packaging job |
+| Windows will actually start what was packaged | `verify-tray-starts.ps1` | the packaging job |
+
+The dialog is the part of this product nothing else could check. WiX stores a
+control condition as an opaque string and never parses it, so a malformed one
+compiles, links, ships, and is first evaluated on a country server. The tests
+read the condition out of the source and run it against the same addresses
+`AgentOptions` is run against; the script installs the package and reads the
+file it wrote.
+
+Windows Installer's condition syntax has no regular expressions and cannot
+take a string apart, so the match is close rather than exact, and both edges
+are pinned by tests: the screen lets through a few addresses `Uri` would
+refuse (a doubled dot, a port that is not a number), and refuses a few it
+would take (`127.0.0.11`, and leading whitespace). A machine in the first
+group is not silent about it — the service reports that its address is not
+usable and the tray's *Status* tab says so.
 
 ## Publishing a release
 

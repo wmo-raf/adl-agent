@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The one screen the installer shows, and the dialog set it sits in.
+
+  Until this existed the MSI had no user interface at all: double-clicking it
+  gave a UAC prompt and a progress bar, installed the service, started it, and
+  produced a machine that had no idea where to report and said nothing about
+  it. The supported way to configure one was a command line -
+
+      msiexec /i AdlAgent-0.3.0-x64.msi ADLURL=https://adl.example.org
+
+  - which is a line somebody has to get right, unquoted, over a phone, on a
+  machine they cannot see. The person actually running the installer is a
+  station technician who was told to run the installer, and they double-click
+  it.
+
+  So: one field, feeding the same ADLURL property the command line sets.
+  Everything downstream of that property is unchanged, and deliberately so -
+  see the AgentAdlUrl component in AdlAgent.wxs for why the component that
+  reads it stays conditioned and permanent.
+
+  Two things this screen does not do.
+
+  It does not contact the address. That would be a network call from inside a
+  Windows Installer transaction, and it would strand every site that installs
+  before its firewall rule, its DNS entry or its certificate exists. Whether
+  the instance answers is a question the tray's Status tab answers live,
+  seconds later, and for the machine's whole life rather than once.
+
+  And it never appears on the unattended path. Self-update runs
+  `msiexec /i ... /qn`, which shows no dialog at any user interface level, and
+  nothing here is scheduled outside the InstallUISequence. That is the step
+  that could quietly break every automatic upgrade in the fleet, so it is
+  tested rather than assumed - see InstallerDialogTests and
+  packaging/verify-msi-install.ps1.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    What the agent itself will accept, said again in the only language a
+    Windows Installer control condition speaks.
+
+    This is a translation, and the thing that keeps a translation honest is a
+    test: InstallerDialogTests reads these strings out of this file and checks
+    them against AgentOptions.ResolveApiBaseAddress over a table of addresses.
+    A dialog that accepted what the service will refuse would produce a
+    machine that installs cleanly and never reports, which is the whole
+    failure this screen exists to end.
+
+    The condition syntax has no regular expressions and cannot take a string
+    apart, so "parseable" is approximated by what can be said: a scheme, a
+    host after it, and no spaces. That is enough for a person standing at a
+    keyboard, which is the only place this runs.
+  -->
+
+  <!--
+    Loopback, spelled out rather than matched as a prefix. `http://localhost`
+    exactly, or followed by the only two characters that can legally end a
+    host - a path or a port - so that `http://localhostage.example.org` is
+    refused here exactly as the agent refuses it.
+
+    The three hosts a person types. AgentOptions accepts any loopback address,
+    so `http://127.0.0.2` is accepted by the service and refused by this
+    screen; that is a test fixture's address, it is not something anybody
+    types into an installer, and the command line still takes it.
+  -->
+  <?define AdlUrlLoopback = ADLURL ~= "http://localhost" OR ADLURL ~<< "http://localhost/" OR ADLURL ~<< "http://localhost:" OR ADLURL ~= "http://127.0.0.1" OR ADLURL ~<< "http://127.0.0.1/" OR ADLURL ~<< "http://127.0.0.1:" OR ADLURL ~= "http://[::1]" OR ADLURL ~<< "http://[::1]/" OR ADLURL ~<< "http://[::1]:" ?>
+
+  <!--
+    https with something after it, or one of those. Empty is not an address,
+    and a space in one means the address was pasted with something else.
+  -->
+  <?define AdlUrlValid = ADLURL AND NOT (ADLURL >< " ") AND ((ADLURL ~<< "https://" AND NOT (ADLURL ~= "https://") AND NOT (ADLURL ~= "https:///")) OR $(var.AdlUrlLoopback)) ?>
+
+  <Fragment>
+    <UI>
+      <Dialog Id="AdlUrlDlg" Width="370" Height="270" Title="[ProductName] Setup">
+
+        <!--
+          The field, declared first so that it is the control the dialog opens
+          with the caret in. Windows Installer takes the first control in a
+          dialog as its initial focus, and the stock WiX dialogs put a button
+          there because they have several things to look at; this one has a
+          single thing to type, and a technician who has to click into it
+          first is a technician the installer made work for.
+
+          Bound straight to ADLURL, so that typing here and passing ADLURL= on
+          a command line are the same act and reach the same component.
+        -->
+        <Control Id="Url" Type="Edit" X="20" Y="86" Width="320" Height="18" Property="ADLURL" />
+
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Where your ADL is" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="This machine sends its station files to one ADL instance." />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="373" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+
+        <Control Id="UrlLabel" Type="Text" X="20" Y="60" Width="320" Height="20" NoPrefix="yes" Text="Address of the ADL instance this machine reports to. Your ADL operator can read it to you." />
+
+        <Control Id="Example" Type="Text" X="20" Y="108" Width="320" Height="12" NoPrefix="yes" Text="For example:  https://adl.example.org" />
+
+        <!--
+          Why, when there is a why. Hidden until something has been typed, so
+          that an empty field on first sight is not an error; hidden again the
+          moment the address becomes one the agent would accept. Both
+          directions matter: a Windows Installer control condition only fires
+          the action it names, so a control shown by one condition needs
+          another to hide it again.
+        -->
+        <Control Id="Problem" Type="Text" X="20" Y="128" Width="320" Height="44" NoPrefix="yes" Hidden="yes"
+                 Text="That is not an address the agent can use. It must start with https:// (a device token travels on every call), it must be the whole address, and it cannot contain a space. Plain http:// is accepted only for localhost."
+                 ShowCondition="ADLURL AND NOT ($(var.AdlUrlValid))"
+                 HideCondition="NOT ADLURL OR ($(var.AdlUrlValid))" />
+
+        <!--
+          Said here because it is the question a technician asks next, and
+          because the honest answer is reassuring: nothing is being checked
+          now, and nothing here can tell them whether it will work.
+        -->
+        <Control Id="NotChecked" Type="Text" X="20" Y="180" Width="320" Height="40" NoPrefix="yes" Text="The address is not contacted now: a site is often installed before its firewall rule or its certificate exists. Whether ADL answers is shown in the ADL Agent window, on the Status tab." />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+
+        <!--
+          Unavailable until the field holds something the service would
+          accept. The alternative - accept anything, complain later - is an
+          Event Log entry hours later on a machine nobody can reach, instead
+          of a sentence while the person who typed it is still standing there.
+        -->
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Disabled="yes"
+                 Text="!(loc.WixUINext)"
+                 EnableCondition="$(var.AdlUrlValid)"
+                 DisableCondition="NOT ($(var.AdlUrlValid))" />
+
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+
+      </Dialog>
+    </UI>
+  </Fragment>
+
+  <!--
+    The dialog set: welcome, the address, confirm, install.
+
+    Authored here rather than spliced into WixUI_Minimal because that set
+    opens on a licence agreement this product does not have. Four screens is
+    already more than a technician should have to read, and every one of them
+    that is not the address is a screen they click through.
+
+    The maintenance and patch paths are the stock ones. Neither asks for the
+    address: a machine being repaired or removed already has one, and this
+    screen would be a chance to lose it.
+
+    A major upgrade run by hand does come through here, though, because
+    Windows Installer sees a new product rather than the old one, and it
+    arrives with an empty field. Offering back the address the machine is
+    already using would be kinder, and the installer's own registry value is
+    sitting right there - but that value is written only by this package, and
+    `adl-agent set-url` (the supported way to repoint a machine) writes
+    agent.ini without touching it. So it goes stale, and a screen that offered
+    it would quietly send a machine back to the instance somebody had
+    deliberately moved it away from, without clearing the pairing that move
+    cleared. An empty field asks a question; a stale one gives a wrong answer.
+  -->
+  <Fragment>
+    <UI Id="WixUI_AdlAgent">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <!--
+        The address screen is for somebody who has not already given one.
+
+        `msiexec /i AdlAgent.msi ADLURL=https://...` is how a country deploys
+        a room full of machines, and it is what every existing document and
+        every existing site uses. Asking that person to click through a screen
+        for a value they have already typed would make the command line worse
+        than it was before this screen existed, so a package that was given an
+        address goes straight to the confirmation.
+
+        It is not validated on the way past, and that is deliberate rather
+        than an oversight: it was not validated before either, `/qn` cannot
+        show anybody anything, and the alternative (a launch condition) is a
+        silent install that fails instead of one that installs. What this
+        screen adds is a check while a person is standing there. Back from the
+        confirmation still opens it, with what was passed in the field, which
+        is where somebody who mistyped it finds out.
+      -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="AdlUrlDlg" Order="1" Condition="NOT Installed AND NOT ADLURL" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="2" Condition="NOT Installed AND ADLURL" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="3" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="AdlUrlDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="AdlUrlDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="AdlUrlDlg" Order="1" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <!--
+        No Change button in Add/Remove Programs. There is one feature and one
+        thing to configure, and the supported way to change that one thing is
+        `adl-agent set-url`, which also clears the pairing the old instance
+        issued - which re-running the installer would not.
+      -->
+      <Property Id="ARPNOMODIFY" Value="1" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>
