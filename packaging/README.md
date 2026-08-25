@@ -63,6 +63,14 @@ Given `ADLURL`, the installer does not ask — it goes straight to the
 confirmation. Given `/qn`, it shows nothing at all, which is not a nicety: it
 is how the agent replaces itself.
 
+An install a person watched ends with the tray open, on the tab with the
+pairing code box — the next thing to do anyway. It leaves a shortcut to the
+window on the all-users desktop, in the Start menu, and in the all-users
+Startup folder, so it comes back at the next logon; an uninstall takes all
+three away. The window is opened from the installer's finish screen rather
+than from the install itself, so a `/qn` install and a self-update open
+nothing.
+
 Either way the URL is written to `%ProgramData%\ADL Agent\agent.ini`, which
 the service reads when it starts:
 
@@ -137,17 +145,26 @@ Neither `.wxs` declares a custom action, for the same reason: `/qn` shows no
 dialog whatever a package asks for, so the way a screen breaks an unattended
 install is never the screen — it is something scheduled beside it, which then
 runs on every silent upgrade in the fleet. The ones the package does carry all
-come from the WiX util extension, for the service's failure actions and the
-state folder's permissions, and `verify-msi-install.ps1` refuses any that do
-not.
+come from the WiX util extension — the service's failure actions, the state
+folder's permissions, and the one the finish screen presses to open the tray —
+and `verify-msi-install.ps1` refuses any that do not.
+
+That last one is referenced rather than authored, so it arrives unscheduled:
+it sits in the `CustomAction` table and in no sequence, and the only thing
+that reaches it is a control event on the Exit dialog. An install that shows
+nobody anything therefore opens nothing, which is what a self-update on a
+server with nobody logged on has to be. `verify-msi-install.ps1` reads both
+halves back out of the built database.
 
 ## What is checked, and where
 
 | Check | Where | Runs on |
 |---|---|---|
 | The screen's rule matches the agent's, and every refusal is explained | `InstallerDialogTests` | every commit, both platforms |
+| The shortcuts and the finish screen's action are in the package, and the action is in no sequence | `InstallerFinishTests` | every commit, both platforms |
 | The built package really carries the dialog, something leads to it, and no custom action of ours rides along | `verify-msi-install.ps1` | the packaging job |
 | `ADLURL=` still works, `/qn` still installs, and a silent upgrade keeps the address | `verify-msi-install.ps1` | the packaging job |
+| An install leaves all three shortcuts on the machine, and an uninstall leaves none | `verify-msi-install.ps1` | the packaging job |
 | Windows will actually start what was packaged | `verify-tray-starts.ps1` | the packaging job |
 
 The dialog is the part of this product nothing else could check. WiX stores a

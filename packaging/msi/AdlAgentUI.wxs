@@ -9,7 +9,7 @@
 
       msiexec /i AdlAgent-0.3.0-x64.msi ADLURL=https://adl.example.org
 
-  - which is a line somebody has to get right, unquoted, over a phone, on a
+  — which is a line somebody has to get right, unquoted, over a phone, on a
   machine they cannot see. The person actually running the installer is a
   station technician who was told to run the installer, and they double-click
   it.
@@ -31,7 +31,7 @@
   `msiexec /i ... /qn`, which shows no dialog at any user interface level, and
   nothing here is scheduled outside the InstallUISequence. That is the step
   that could quietly break every automatic upgrade in the fleet, so it is
-  tested rather than assumed - see InstallerDialogTests and
+  tested rather than assumed — see InstallerDialogTests and
   packaging/verify-msi-install.ps1.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
@@ -56,7 +56,7 @@
   <!--
     Loopback, spelled out rather than matched as a prefix. `http://localhost`
     exactly, or followed by the only two characters that can legally end a
-    host - a path or a port - so that `http://localhostage.example.org` is
+    host — a path or a port — so that `http://localhostage.example.org` is
     refused here exactly as the agent refuses it.
 
     The three hosts a person types. AgentOptions accepts any loopback address,
@@ -123,7 +123,7 @@
 
         <!--
           Unavailable until the field holds something the service would
-          accept. The alternative - accept anything, complain later - is an
+          accept. The alternative — accept anything, complain later — is an
           Event Log entry hours later on a machine nobody can reach, instead
           of a sentence while the person who typed it is still standing there.
         -->
@@ -156,7 +156,7 @@
     Windows Installer sees a new product rather than the old one, and it
     arrives with an empty field. Offering back the address the machine is
     already using would be kinder, and the installer's own registry value is
-    sitting right there - but that value is written only by this package, and
+    sitting right there — but that value is written only by this package, and
     `adl-agent set-url` (the supported way to repoint a machine) writes
     agent.ini without touching it. So it goes stale, and a screen that offered
     it would quietly send a machine back to the instance somebody had
@@ -195,9 +195,11 @@
         Until this, a successful install had no visible outcome: the progress
         bar closed, the service started, and the technician was left with a
         Start menu entry they had no reason to look for and a tray that would
-        not appear until the next logon. The window opens on the tab with the
-        pairing code box on it, because pairing is the next thing to do
-        anyway — see TrayTabs.
+        not appear until the next logon. What the window then shows is the
+        tray's own doing rather than this button's: nothing is passed to it,
+        and it opens on the tab that matches what the machine is, which for a
+        machine that has just been installed is the one carrying the pairing
+        code box — see TrayTabs.
 
         Off the Exit dialog rather than the install sequence, and that is
         load-bearing rather than incidental. Self-update runs
@@ -262,7 +264,7 @@
         No Change button in Add/Remove Programs. There is one feature and one
         thing to configure, and the supported way to change that one thing is
         `adl-agent set-url`, which also clears the pairing the old instance
-        issued - which re-running the installer would not.
+        issued — which re-running the installer would not.
       -->
       <Property Id="ARPNOMODIFY" Value="1" />
     </UI>

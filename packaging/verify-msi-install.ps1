@@ -241,10 +241,18 @@ foreach ($sequence in @("InstallUISequence", "InstallExecuteSequence")) {
 }
 
 $pressed = Get-MsiRows $Msi `
-    "SELECT Dialog_, Control_, Event FROM ControlEvent WHERE Dialog_='ExitDialog' AND Argument='$launch'" 3
+    "SELECT Dialog_, Control_, Event, Condition FROM ControlEvent WHERE Dialog_='ExitDialog' AND Argument='$launch'" 4
 
 if ($pressed.Count -ne 1 -or $pressed[0][1] -ne "Finish" -or $pressed[0][2] -ne "DoAction") {
     throw "Nothing on the Exit dialog presses $launch, so a finished install would still show nobody anything."
+}
+
+# And only on a fresh install. A repair and an uninstall come through this
+# same dialog, and the second would launch a program the same transaction has
+# just deleted -- which is a broken window in front of somebody who was
+# removing the product.
+if ($pressed[0][3] -notmatch '(?i)NOT\s+Installed') {
+    throw "The Exit dialog presses $launch under '$($pressed[0][3])'. It has to be a fresh install: uninstalling would open a program that is no longer there."
 }
 
 $target = Get-MsiRows $Msi "SELECT Value FROM Property WHERE Property='WixShellExecTarget'" 1
@@ -309,6 +317,29 @@ function Invoke-Msi {
     }
 }
 
+function Assert-ServiceRunning {
+    param([string] $Message)
+
+    # Given a few seconds. The package starts the service inside the install
+    # transaction and waits for it, so this should be true the moment msiexec
+    # returns; the wait is for the Service Control Manager still reporting
+    # StartPending on a slow machine, which would be a false alarm rather than
+    # a finding.
+    foreach ($attempt in 1..15) {
+        $service = Get-Service "ADL Agent" -ErrorAction SilentlyContinue
+
+        if ($service -and $service.Status -eq "Running") {
+            return
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    $service = Get-Service "ADL Agent" -ErrorAction SilentlyContinue
+
+    throw "$Message It is $(if ($service) { $service.Status } else { 'not installed at all' })."
+}
+
 function Read-Address {
     if (-not (Test-Path $settings)) {
         throw "There is no $settings, so the installed machine does not know where to report."
@@ -343,9 +374,7 @@ try {
         throw "The installer was given $Address and wrote '$(Read-Address)'."
     }
 
-    if (-not (Get-Service "ADL Agent" -ErrorAction SilentlyContinue)) {
-        throw "The 'ADL Agent' service is not installed."
-    }
+    Assert-ServiceRunning "The 'ADL Agent' service is not running after a fresh install."
 
     Write-Host "    agent.ini says $(Read-Address)" -ForegroundColor Green
 
@@ -384,9 +413,7 @@ try {
         throw "A silent upgrade passed no properties changed the address from $Address to '$after'."
     }
 
-    if (-not (Get-Service "ADL Agent" -ErrorAction SilentlyContinue)) {
-        throw "The 'ADL Agent' service did not survive the upgrade."
-    }
+    Assert-ServiceRunning "The 'ADL Agent' service is not running after a silent upgrade."
 
     Write-Host "    agent.ini still says $after" -ForegroundColor Green
     Write-Host "==> The package installs, configures itself, and upgrades without forgetting." -ForegroundColor Green

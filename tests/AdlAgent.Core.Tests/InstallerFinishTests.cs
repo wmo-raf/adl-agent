@@ -36,18 +36,11 @@ public class InstallerFinishTests
     /// Every place a technician might look for the window, they find it.
     /// </summary>
     /// <remarks>
-    /// Three, and each answers a different person's question. The Start menu
-    /// is where somebody looks for a program they know is installed; the
-    /// Startup folder is what puts the tray in front of whoever logs on to
-    /// the server next, which is not necessarily the administrator who ran
-    /// the installer; and the desktop is what the technician who has just
-    /// watched the install finish is actually looking at.
-    /// <para>
-    /// The desktop one is not a checkbox. Every choice on an installer screen
-    /// is a question somebody has to have an opinion about and then explain
-    /// over a phone, and this one has a single right answer for this
-    /// audience.
-    /// </para>
+    /// Three, and each answers a different person's question -- which one is
+    /// whose is in <c>AdlAgent.wxs</c>, beside the shortcuts themselves. What
+    /// is here is that all three are in the package and point at the tray,
+    /// which is the part a source file cannot say twice and a compiler will
+    /// not check once.
     /// </remarks>
     [Theory]
     [InlineData("AgentMenuFolder")]
@@ -175,14 +168,18 @@ public class InstallerFinishTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void Opening_the_window_cannot_happen_without_a_window()
+    public void The_action_that_opens_the_window_is_never_scheduled()
     {
         foreach (var file in new[] { "AdlAgent.wxs", "AdlAgentUI.wxs" })
         {
             var document = Load(file);
 
+            // The execute sequence is InstallerDialogTests' to guard, and it
+            // already does. This is the half that is newly load-bearing: the
+            // action is reached from a button, so a package that also
+            // sequenced it in the user interface would open a window on every
+            // hand-run repair.
             Assert.Empty(document.Descendants(Wxs + "InstallUISequence"));
-            Assert.Empty(document.Descendants(Wxs + "InstallExecuteSequence"));
 
             // Every mention of it, anywhere in the sources: the reference that
             // pulls the action into the package, and the button that presses

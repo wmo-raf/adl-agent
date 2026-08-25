@@ -42,6 +42,13 @@
   <?define AssetsDir = "assets" ?>
   <?endif?>
 
+  <!--
+    What the tray is for, as Windows shows it under a shortcut. Once, because
+    it is worn by more than one of them and two copies would be two chances to
+    change one.
+  -->
+  <?define TrayShortcutDescription = "Pair this machine, bind station folders, and see what the agent is doing." ?>
+
   <Package
       Name="ADL Agent"
       Manufacturer="WMO RAF"
@@ -207,7 +214,7 @@
         <Shortcut
             Id="AgentTrayMenuShortcut"
             Name="ADL Agent"
-            Description="Pair this machine, bind station folders, and see what the agent is doing."
+            Description="$(TrayShortcutDescription)"
             Target="[INSTALLFOLDER]adl-agent-tray.exe"
             WorkingDirectory="INSTALLFOLDER" />
 
@@ -220,6 +227,7 @@
             Id="AgentTrayStartupShortcut"
             Directory="StartupFolder"
             Name="ADL Agent"
+            Description="$(TrayShortcutDescription)"
             Target="[INSTALLFOLDER]adl-agent-tray.exe"
             WorkingDirectory="INSTALLFOLDER" />
 
@@ -245,7 +253,7 @@
             Id="AgentTrayDesktopShortcut"
             Directory="DesktopFolder"
             Name="ADL Agent"
-            Description="Pair this machine, bind station folders, and see what the agent is doing."
+            Description="$(TrayShortcutDescription)"
             Target="[INSTALLFOLDER]adl-agent-tray.exe"
             WorkingDirectory="INSTALLFOLDER" />
 
