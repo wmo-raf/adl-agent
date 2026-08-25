@@ -117,12 +117,26 @@ public sealed class ShellViewModel : Observable
     /// <summary>True once somebody has picked a connection for themselves.</summary>
     private bool _connectionClicked;
 
+    /// <summary>
+    /// The moment the sync this window asked for was started, while its answer
+    /// is still owed.
+    /// </summary>
+    /// <remarks>
+    /// The moment rather than a flag, because the status carries the last
+    /// requested sync whoever asked for it -- another tray on another logon
+    /// session, or this one before the service restarted -- and a window that
+    /// reported the first finished attempt it saw would announce somebody
+    /// else's press as the answer to its own.
+    /// </remarks>
+    private DateTimeOffset? _awaitedSync;
+
     public ShellViewModel(AgentControlLink agent)
     {
         _agent = agent;
 
         PairCommand = new AsyncCommand(PairAsync, Failed, () => PairingCode.Trim().Length > 0);
         RefreshCommand = new AsyncCommand(() => RefreshAsync(), Failed);
+        SyncCommand = new AsyncCommand(SyncAsync, Failed, () => _awaitedSync is null);
     }
 
     /// <summary>
@@ -142,6 +156,16 @@ public sealed class ShellViewModel : Observable
     public AsyncCommand PairCommand { get; }
 
     public AsyncCommand RefreshCommand { get; }
+
+    /// <summary>
+    /// Ask ADL for this device's configuration now: the Refresh above the
+    /// connection list.
+    /// </summary>
+    /// <remarks>
+    /// Grey while an answer is owed, which is also what stops somebody
+    /// pressing it four times on a link slow enough to make them want to.
+    /// </remarks>
+    public AsyncCommand SyncCommand { get; }
 
     // ---------- what the header and the status tab draw ----------
 
@@ -526,11 +550,98 @@ public sealed class ShellViewModel : Observable
             }
         }
 
+        // Before the line, because the answer to a press is the more urgent
+        // of the two and the line is about to be rewritten from the same
+        // snapshot.
+        Synced();
+
         // Last, and on every path through the method above -- including the
         // ones that changed no row. This is the poll, and the line at the top
         // of the window is what tells a technician that waiting was the right
         // thing to be doing. It has to move on its own or it is not one.
         Restate();
+    }
+
+    /// <summary>
+    /// Ask ADL for this device's configuration now (the Refresh above the
+    /// connection list).
+    /// </summary>
+    /// <remarks>
+    /// The agent starts the call and answers at once, so this method returns
+    /// long before ADL has said anything. That is deliberate: the control pipe
+    /// serves one client at a time and times out in three seconds, and a
+    /// window that waited on an HTTP call over these links would freeze its own
+    /// header and then report a working service as absent.
+    /// <para>
+    /// What is remembered is the moment the attempt started, which is the only
+    /// thing that lets the poll below tell this press from the one before it,
+    /// or from a sync some other logon session's tray asked for.
+    /// </para>
+    /// </remarks>
+    public async Task SyncAsync()
+    {
+        var started = await _agent.SyncAsync().ConfigureAwait(true);
+
+        if (started.Value is null)
+        {
+            Message = started.Detail ?? "The agent could not ask ADL for the configuration.";
+
+            return;
+        }
+
+        _awaitedSync = started.Value.StartedAt;
+
+        Message = "Asking ADL for the latest configuration…";
+
+        SyncCommand.Refresh();
+    }
+
+    /// <summary>
+    /// Say what the sync this window asked for came to, once it has come to
+    /// anything.
+    /// </summary>
+    /// <remarks>
+    /// Read off the status the window is already polling rather than waited
+    /// for, so nothing about this holds the pipe. Matched on the moment it
+    /// started, so a press whose attempt the service has since replaced -- a
+    /// restart, another session -- stops being waited for rather than waiting
+    /// for ever.
+    /// </remarks>
+    private void Synced()
+    {
+        if (_awaitedSync is not { } awaited)
+        {
+            return;
+        }
+
+        var attempt = _status?.RequestedSync;
+
+        if (attempt?.StartedAt != awaited)
+        {
+            // Replaced by somebody else's, or lost to a restart. Either way
+            // this window's answer is never coming, and a Refresh button grey
+            // for the rest of the session would be the worse outcome.
+            _awaitedSync = null;
+
+            SyncCommand.Refresh();
+
+            return;
+        }
+
+        if (attempt.FinishedAt is null)
+        {
+            return;
+        }
+
+        _awaitedSync = null;
+
+        Message = attempt.Ok
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"Synced with ADL. Configuration is now at version {attempt.ConfigVersion}.")
+            : attempt.Detail ?? "ADL did not answer.";
+
+        SyncCommand.Refresh();
     }
 
     /// <summary>Redeem a pairing code (story 2).</summary>
@@ -616,6 +727,48 @@ public sealed class ShellViewModel : Observable
         Message = "";
 
         return new StationStatusViewModel(this, selected.Probing());
+    }
+
+    /// <summary>
+    /// Start collecting the selected station now, or say why that could not
+    /// happen.
+    /// </summary>
+    /// <remarks>
+    /// Returns null on every refusal, and writes the service's own sentence
+    /// into <see cref="Message"/> rather than one of its own. The three
+    /// reasons -- a cycle already running, a station switched off in ADL, a
+    /// station with no folder bound -- are things the service knows and this
+    /// window would only be guessing at: HQ can switch a station off between
+    /// the row being drawn and the item being pressed, and a menu item greyed
+    /// from a stale row is not a check.
+    /// <para>
+    /// The rows stop rebuilding only once a run is actually under way. A
+    /// refusal leaves the window exactly as it was, and freezing the list
+    /// behind a modal window that never opened is how a station list comes to
+    /// be frozen for the rest of the session.
+    /// </para>
+    /// </remarks>
+    public async Task<CollectViewModel?> BeginCollectingAsync()
+    {
+        if (SelectedStation is not { } selected)
+        {
+            return null;
+        }
+
+        Message = "";
+
+        var started = await _agent.CollectAsync(selected.StationLinkId).ConfigureAwait(true);
+
+        if (started.Value is null)
+        {
+            Message = started.Detail ?? "The agent would not collect that station now.";
+
+            return null;
+        }
+
+        _editing = true;
+
+        return new CollectViewModel(_agent, started.Value);
     }
 
     /// <summary>

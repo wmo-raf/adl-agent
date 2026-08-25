@@ -122,6 +122,49 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Collect the selected station now, and watch it happen.
+    /// </summary>
+    /// <remarks>
+    /// The run is started before the window opens, so a refusal -- a cycle
+    /// already running, a station HQ switched off while this row was on
+    /// screen -- is a sentence in the main window rather than a window that
+    /// opens saying nothing is happening. Which is also why the rows are only
+    /// frozen once a run is actually under way: see
+    /// <see cref="ShellViewModel.BeginCollectingAsync"/>.
+    /// </remarks>
+    private async void CollectStation(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            if (await _shell.BeginCollectingAsync().ConfigureAwait(true) is not { } collect)
+            {
+                return;
+            }
+
+            try
+            {
+                new CollectWindow(collect) { Owner = this }.ShowDialog();
+            }
+            finally
+            {
+                // Whatever the window did, and whether or not it threw on the
+                // way up. Leaving this unset would freeze the station list for
+                // as long as the tray runs.
+                _shell.EndEditing();
+            }
+
+            await _shell.RefreshAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            // An async void handler: nothing above this can catch anything,
+            // and an exception escaping would take down the one program on
+            // the machine whose job is to explain what is wrong.
+            _shell.Failed(exception);
+        }
+    }
+
+    /// <summary>
     /// Open the selected station's status, and re-read everything once the
     /// window closes.
     /// </summary>

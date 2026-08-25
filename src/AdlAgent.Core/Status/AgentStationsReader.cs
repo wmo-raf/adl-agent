@@ -1,5 +1,6 @@
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Heartbeat;
 
 namespace AdlAgent.Core.Status;
@@ -30,11 +31,14 @@ public sealed class AgentStationsReader
 {
     private readonly ConfigurationService _configuration;
     private readonly ICycleReportSource _cycles;
+    private readonly OnDemandCollect _requested;
 
-    public AgentStationsReader(ConfigurationService configuration, ICycleReportSource cycles)
+    public AgentStationsReader(
+        ConfigurationService configuration, ICycleReportSource cycles, OnDemandCollect requested)
     {
         _configuration = configuration;
         _cycles = cycles;
+        _requested = requested;
     }
 
     public AgentStationsSnapshot Read()
@@ -88,6 +92,11 @@ public sealed class AgentStationsReader
                     Uploaded = last?.Uploaded,
                     Failed = last?.Failed,
                     Error = last?.Error,
+                    // Null once a scheduled cycle has overtaken it, which is
+                    // the whole of the join: the row shows one age of one
+                    // fact, and which one it is decided here rather than in
+                    // each UI.
+                    Requested = _requested.For(link.Id, cycle?.CompletedAt),
                 });
             }
         }

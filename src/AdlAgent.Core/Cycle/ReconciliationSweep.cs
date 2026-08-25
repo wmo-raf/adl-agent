@@ -144,7 +144,13 @@ public sealed class ReconciliationSweep
             // the size of the fleet rather than the size of its history. A
             // station that comes back is swept once, which is what a station
             // whose folder nobody watched for a while wants anyway.
-            foreach (var stationLinkId in swept.Keys.Where(id => !plan.Known.Contains(id)).ToList())
+            //
+            // Only for a plan that saw the whole fleet. A collect-now's plan
+            // knows one station, and everything else is absent from it because
+            // nobody asked rather than because it has gone.
+            foreach (var stationLinkId in plan.Prunes
+                ? swept.Keys.Where(id => !plan.Known.Contains(id)).ToList()
+                : [])
             {
                 swept.Remove(stationLinkId);
                 changed = true;
@@ -201,6 +207,21 @@ public sealed class ReconciliationSweep
 /// </param>
 public sealed record SweepPlan(IReadOnlySet<long> Links, IReadOnlySet<long> Known)
 {
+    /// <summary>
+    /// True when <see cref="Known"/> is the whole fleet, and so when a station
+    /// missing from it has really gone.
+    /// </summary>
+    /// <remarks>
+    /// False for the plan a collect-now builds, which is drawn from a
+    /// configuration narrowed to one station link. Every other station on the
+    /// machine is absent from such a plan because nobody asked about it, and
+    /// pruning on that would wipe the entire sweep log every time a technician
+    /// pressed a button -- so the next scheduled cycle would sweep all forty
+    /// stations at once, offering every folder in full, on the link this
+    /// product exists for.
+    /// </remarks>
+    public bool Prunes { get; init; } = true;
+
     /// <summary>True when this station offers its whole folder this cycle.</summary>
     public bool Includes(long stationLinkId) => Links.Contains(stationLinkId);
 }

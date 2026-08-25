@@ -372,9 +372,25 @@ column always shrinks to fit the window, which is what stopped one from ever
 being readable in full. Each column has a ceiling as well as a floor, so one
 pathological path cannot push the rest off the right-hand edge.
 
+Above the pane, beside its heading, is **Refresh**: it asks ADL for this
+machine's configuration now. Machine-wide, and so there rather than repeated
+down the rows, because ADL's sync serves the whole device in one answer and a
+Refresh on each connection would promise a scope it does not have. It asks for
+the configuration and nothing else — no scan, no upload — because "what is this
+machine meant to be doing" and "do it now" are different questions with
+different waits, and the second one is on the station rows.
+
+It is grey while an answer is owed, and the answer lands in the line along the
+bottom: *"Synced with ADL. Configuration is now at version 42."*, or *"ADL is
+not answering, so this machine is still working from the configuration it last
+received."* The second sentence is why the attempt is tracked at all — a sync
+against an unreachable ADL comes back with the configuration off the disk
+rather than with nothing, which is right for the cycle and would otherwise
+read here as a refresh that succeeded and changed nothing.
+
 Arrow keys move between connections and Enter or Right moves into the stations
-beside them. Right-clicking a row selects it and offers **Edit settings…** and
-**Check status…**.
+beside them. Right-clicking a row selects it and offers **Edit settings…**,
+**Check status…** and **Collect now…**.
 
 The split is not a filter. A connection was a value repeated down a column
 before this, which left two facts with nowhere to be said: a connection ADL
@@ -437,6 +453,56 @@ Nothing on it writes, which is what makes it safe to open on a station a cycle
 is in the middle of. Like the settings window it is modal and stops the list
 behind it rebuilding, for the same reason: it holds a copy of a row.
 
+#### Collecting one station now
+
+**Collect now…** on a row runs a cycle for that station immediately, in a
+window that shows where it has got to — syncing, scanning, offering — with the
+counts moving and a **Cancel**. **Close** stops watching; the run belongs to
+the service and goes on either way.
+
+It is the scheduled cycle over a configuration narrowed to one station link,
+which is the point: the sweep planner, the scanner, the pager and the uploader
+are the ones the loop uses, so a station collected this way is collected
+exactly as it would have been an hour later. Its neighbours' folders are never
+walked, so a machine serving forty stations does not pay for thirty-nine of
+them.
+
+Three things about it are deliberately not the scheduled cycle's behaviour:
+
+- **It always sweeps.** The reason somebody presses this is almost always that
+  they have just put files in the folder, and a backfill copied in with its
+  original timestamps preserved is invisible to the candidate window — so a
+  collect-now that only looked at the window would report "nothing new" to the
+  one person who knows there is something. It offers the whole folder back to
+  the collection start date, and records the sweep, so the station's next daily
+  one is a day from now rather than a day from whenever the loop last got to
+  it. It does not prune the sweep log the way a full cycle does: its plan knows
+  one station, and pruning on that would empty the log on every press.
+- **It is refused rather than queued when a cycle is running.** *"A cycle is
+  already running on this machine — Kisumu will be collected as part of it."*
+  A queued run would start minutes after the button, against a window nobody
+  still has open. The scheduled cycle, conversely, waits for a collect rather
+  than being skipped: a cycle silently dropped because somebody was pressing a
+  button is the sort of gap that reaches HQ as a machine that has quietly
+  stopped.
+- **Its result does not reach the heartbeat.** Recorded as a cycle, a run
+  covering one station of forty would reach ADL as a cycle that had just
+  finished having scanned one — and ADL's own cycle-stuck and coverage checks
+  would read that as the machine having stopped collecting the rest. So it sits
+  beside the cycle instead, and the row labels it: *"on request: 412 seen, 12
+  sent, 0 failed"*, until a scheduled cycle overtakes it with fresher numbers
+  and the row goes back to showing that.
+
+The item is grey when there is nothing for it to do — the station is switched
+off in ADL, or no folder is bound to it yet — with the reason on its tooltip.
+The service refuses either case anyway, because HQ can switch a station off
+between a row being drawn and the item on it being pressed, so the refusal
+always comes from the thing that knows.
+
+Nothing is repaired by cancelling, and nothing needs to be. The agent keeps no
+record of what it delivered, so files a stopped run did not reach are offered
+again by the next cycle exactly as if it had never run.
+
 #### Folders the service cannot see
 
 The window browses as the technician standing at the machine. The service
@@ -491,9 +557,9 @@ admin's fleet listing within a heartbeat.
 
 ### The control surface
 
-One protocol, one JSON object per line, five commands — served over a named
-pipe on Windows and (later) a unix socket on Linux, and implemented once in
-the core so that both heads mean the same thing by each of them:
+One protocol, one JSON object per line — served over a named pipe on Windows
+and (later) a unix socket on Linux, and implemented once in the core so that
+both heads mean the same thing by each of them:
 
 | Command | What it does |
 |---|---|
@@ -502,6 +568,26 @@ the core so that both heads mean the same thing by each of them:
 | `stations` | Every station ADL linked to this device, its local binding, and its last cycle |
 | `preview` | Count what a folder and a pattern would match, saving nothing |
 | `configure` | Write one station's app-tier settings through to ADL |
+| `sync` | Ask ADL for this device's configuration now |
+| `collect` | Run a cycle for one station now |
+| `collect_status` | Where that run has got to |
+| `collect_cancel` | Stop it |
+
+The last four all **start** something and answer at once rather than waiting
+for it, and that is the surface's shape rather than a preference. It serves
+one client at a time and times out in three seconds, so a command that waited
+for an HTTP call — let alone an upload of a station with months of backlog —
+would hold the only slot for its duration: the tray's own status poll would
+stall, and with it the header, the next-step line and the colour of the icon
+in the corner. Worse, the poll would time out and report a working service as
+absent.
+
+So the answer to `sync` is the attempt, and its outcome arrives on the next
+`status` as `requested_sync`. The answer to `collect` is the run, and its
+progress arrives on `collect_status`, asked once a second in short round trips
+that leave the surface free between them. That is also what makes
+`collect_cancel` possible at all: a held connection has nowhere for a second
+command to arrive.
 
 The pipe carries an explicit ACL: the service's own account and the machine's
 administrators in full, the technician's interactive logon session enough to

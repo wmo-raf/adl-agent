@@ -39,6 +39,18 @@ public sealed class UploadCycle
     private readonly TimeProvider _time;
     private readonly ILogger<UploadCycle> _logger;
 
+    /// <summary>
+    /// One cycle at a time on this machine, of either kind.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the loop above it, because the loop is no longer
+    /// the only thing that starts a cycle. Two cycles over one folder would
+    /// hash every file twice and offer ADL the same manifest from both, and
+    /// the hash memo cache -- which is cleared at the end of a cycle -- would
+    /// be cleared out from under whichever of them was still running.
+    /// </remarks>
+    private readonly SemaphoreSlim _running = new(1, 1);
+
     public UploadCycle(
         ConfigurationService configuration,
         FolderScanner scanner,
@@ -63,8 +75,39 @@ public sealed class UploadCycle
         _logger = logger;
     }
 
+    /// <summary>True while a cycle of either kind is running.</summary>
+    /// <remarks>
+    /// Read by the collect-now command so it can refuse in a sentence rather
+    /// than queue behind the scheduled cycle or run beside it. Both would be
+    /// worse than the refusal: a queued run starts minutes after the button,
+    /// on a window that has been closed, and a concurrent one hashes the same
+    /// folder twice and offers ADL the same files from two manifests.
+    /// </remarks>
+    public bool Running => _running.CurrentCount == 0;
+
     /// <summary>Run one cycle to its end, or to the point where it cannot go on.</summary>
+    /// <remarks>
+    /// Waits for a collect-now to finish rather than skipping the cycle. The
+    /// scheduled cycle is the thing that must happen; a technician's button
+    /// merely brings one station's turn forward, and a cycle silently dropped
+    /// because somebody was pressing it is the sort of gap that reaches HQ as
+    /// a machine that has quietly stopped.
+    /// </remarks>
     public async Task RunAsync(CancellationToken cancellationToken = default)
+    {
+        await _running.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await RunEveryStationAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _running.Release();
+        }
+    }
+
+    private async Task RunEveryStationAsync(CancellationToken cancellationToken)
     {
         var configuration = await SyncAsync(cancellationToken).ConfigureAwait(false);
 
@@ -107,6 +150,173 @@ public sealed class UploadCycle
         _sweeps.Record(sweep, scan.Reconciled, now);
 
         Record(scan);
+    }
+
+    /// <summary>
+    /// Run a cycle for one station, now, because somebody at the machine
+    /// asked.
+    /// </summary>
+    /// <remarks>
+    /// The same four steps as a scheduled cycle -- sync, scan, offer, send --
+    /// over a configuration narrowed to one station link. Narrowing the
+    /// configuration rather than filtering inside the scan is what keeps this
+    /// from being a second implementation of the cycle: the sweep planner, the
+    /// scanner, the pager and the uploader are the ones the loop uses,
+    /// unchanged, and a station collected this way is collected exactly as it
+    /// would have been an hour later.
+    /// <para>
+    /// It always sweeps. The reason somebody presses this button is almost
+    /// always that they have just put files in the folder, and a backfill
+    /// copied in with its original timestamps preserved is invisible to the
+    /// candidate window -- so a collect-now that only looked at the window
+    /// would report "nothing new" to the one person who knows there is.
+    /// </para>
+    /// <para>
+    /// The result is returned rather than recorded as a cycle. See
+    /// <see cref="RequestedCollect"/>.
+    /// </para>
+    /// </remarks>
+    /// <returns>What the run came to, or null when a cycle was already running.</returns>
+    public async Task<RequestedCollect?> CollectStationAsync(
+        long stationLinkId, ICollectWatcher watcher, CancellationToken cancellationToken)
+    {
+        if (!await _running.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await CollectOneAsync(stationLinkId, watcher, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _running.Release();
+        }
+    }
+
+    private async Task<RequestedCollect> CollectOneAsync(
+        long stationLinkId, ICollectWatcher watcher, CancellationToken cancellationToken)
+    {
+        watcher.Step("Asking ADL for the latest configuration…");
+
+        var configuration = await SyncAsync(cancellationToken).ConfigureAwait(false);
+        var token = _session.ActiveToken;
+
+        if (configuration is null)
+        {
+            return Came(watcher, "This machine has no configuration to work from yet.");
+        }
+
+        if (token is null)
+        {
+            return Came(watcher, "This machine is not paired with ADL, so nothing can be sent.");
+        }
+
+        if (Only(configuration, stationLinkId) is not { } narrowed)
+        {
+            // The configuration moved under the button: HQ unlinked the
+            // station between the window drawing the row and somebody
+            // pressing the item on it.
+            return Came(watcher, UnknownStationLinkException.Describe(stationLinkId));
+        }
+
+        var now = _time.GetUtcNow();
+
+        // Never mind whether this station is due one. Due-ness is about
+        // spending a daily budget wisely, and a person standing at the machine
+        // asking for this station now is a better reason than the clock.
+        var sweep = new SweepPlan(
+            new HashSet<long> { stationLinkId },
+            new HashSet<long> { stationLinkId })
+        {
+            Prunes = false,
+        };
+
+        watcher.Step("Scanning the folder…");
+
+        var scan = _scanner.Scan(narrowed, sweep, now);
+
+        // Before the delivery rather than after it, because the counts move
+        // during the delivery and this is what the window watching reads them
+        // through.
+        watcher.Counting(scan.For(stationLinkId));
+
+        watcher.Step("Offering what was found to ADL…");
+
+        var delivered = await DeliverAsync(token, narrowed, scan, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Cleared whether or not the delivery finished. Unlike the scheduled
+        // cycle's, this cache holds one station's working set, and the next
+        // thing to walk this folder is a full cycle that has its own opinion
+        // about what is in it.
+        _hashes.Forget();
+
+        if (delivered)
+        {
+            // The sweep is recorded on this run alone, so the station's next
+            // scheduled sweep is a day from now rather than a day from
+            // whenever the loop last got to it. One just happened.
+            _sweeps.Record(sweep, scan.Reconciled, now);
+        }
+
+        var tally = scan.For(stationLinkId);
+
+        return new RequestedCollect
+        {
+            At = _time.GetUtcNow(),
+            Scanned = tally?.Scanned ?? 0,
+            Offered = tally?.Offered ?? 0,
+            Uploaded = tally?.Uploaded ?? 0,
+            Failed = tally?.Failed ?? 0,
+            Cancelled = cancellationToken.IsCancellationRequested,
+            Error = tally?.Error
+                ?? (delivered ? null : "ADL stopped answering before this station finished."),
+        };
+    }
+
+    /// <summary>
+    /// This configuration with everything but one station link taken out of
+    /// it, or null when it holds no such link.
+    /// </summary>
+    /// <remarks>
+    /// The connection is kept around the link rather than the link lifted out
+    /// of it, because the connection's own enabled flag is what the scanner
+    /// and the sweep planner both read first. A link hoisted into a connection
+    /// invented here would be collected from a connection HQ has switched off.
+    /// </remarks>
+    private static AgentConfiguration? Only(AgentConfiguration configuration, long stationLinkId)
+    {
+        foreach (var connection in configuration.Sync.Connections)
+        {
+            var link = connection.StationLinks
+                .FirstOrDefault(candidate => candidate.Id == stationLinkId);
+
+            if (link is null)
+            {
+                continue;
+            }
+
+            return configuration with
+            {
+                Sync = configuration.Sync with
+                {
+                    Connections = [connection with { StationLinks = [link] }],
+                },
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>A run that could not start, as the result it is.</summary>
+    private RequestedCollect Came(ICollectWatcher watcher, string problem)
+    {
+        watcher.Step(problem);
+
+        return new RequestedCollect { At = _time.GetUtcNow(), Error = problem };
     }
 
     /// <summary>

@@ -22,6 +22,29 @@
         <ContextMenu x:Key="StationRowMenu">
             <MenuItem Header="Edit settings…" Click="EditStation" />
             <MenuItem Header="Check status…" Click="CheckStation" />
+            <Separator />
+            <!--
+                Grey when there is nothing for it to do, with the reason on
+                the tooltip: switched off in ADL, or no folder bound yet. The
+                service refuses either anyway — HQ can switch a station off
+                between this row being drawn and the item being pressed — but
+                a grey item saves the press, and a grey item with no stated
+                reason is one somebody stares at.
+            -->
+            <!--
+                Through PlacementTarget rather than by inheriting a
+                DataContext. This menu is one shared instance — a resource,
+                because a Setter.Value inside a Style has no namescope to wire
+                a Click in — and a shared menu's inherited DataContext is
+                whichever row it was last attached to. The row it is being
+                opened over is the one WPF puts in PlacementTarget.
+            -->
+            <MenuItem Header="Collect now…" Click="CollectStation"
+                      ToolTipService.ShowOnDisabled="True"
+                      IsEnabled="{Binding PlacementTarget.DataContext.CanCollect,
+                                          RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      ToolTip="{Binding PlacementTarget.DataContext.CollectBlockedReason,
+                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
         </ContextMenu>
     </Window.Resources>
 
@@ -197,8 +220,27 @@
                             control with no label on a window whose whole
                             manner is to say the quiet thing out loud.
                         -->
-                        <TextBlock DockPanel.Dock="Top" Text="Connections"
-                                   FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,4">
+                            <!--
+                                Machine-wide, and so here rather than repeated
+                                down the rows: ADL's sync serves this device's
+                                whole configuration in one answer, and a
+                                Refresh on each connection would promise a
+                                scope it does not have.
+
+                                It asks for the configuration and nothing else
+                                — no scan, no upload. "What is this machine
+                                meant to be doing" and "do it now" are
+                                different questions with different waits, and
+                                the second one is on the station rows.
+                            -->
+                            <Button DockPanel.Dock="Right" Content="Refresh"
+                                    Padding="8,1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    ToolTip="Ask ADL for this machine's configuration now"
+                                    Command="{Binding SyncCommand}" />
+                            <TextBlock Text="Connections" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
 
                         <!--
                             Until somebody picks one, and then never again. The

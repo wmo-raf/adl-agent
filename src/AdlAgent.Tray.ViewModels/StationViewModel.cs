@@ -140,12 +140,74 @@ public sealed class StationViewModel : Observable
 
     public string Watermark => Display.Moment(_station.Watermark);
 
-    /// <summary>What the last cycle did for this station, in one cell.</summary>
-    public string LastCycle => _station.Scanned is null
-        ? "no cycle yet"
-        : string.Create(
-            CultureInfo.CurrentCulture,
-            $"{_station.Scanned} seen, {_station.Uploaded} sent, {_station.Failed} failed");
+    /// <summary>
+    /// What last happened for this station, in one cell.
+    /// </summary>
+    /// <remarks>
+    /// A collect somebody asked for at the machine takes precedence, because
+    /// the service only offers one when it is the more recent of the two --
+    /// and because the person reading this cell a moment after pressing the
+    /// item is reading it to find out what the item did. It is labelled, so
+    /// that a number from a run covering one station is never mistaken for the
+    /// machine's own cycle.
+    /// </remarks>
+    public string LastCycle
+    {
+        get
+        {
+            if (_station.Requested is { } requested)
+            {
+                var how = requested.Cancelled ? "on request, stopped" : "on request";
+
+                return string.Create(
+                    CultureInfo.CurrentCulture,
+                    $"{how}: {requested.Scanned} seen, {requested.Uploaded} sent, {requested.Failed} failed");
+            }
+
+            return _station.Scanned is null
+                ? "no cycle yet"
+                : string.Create(
+                    CultureInfo.CurrentCulture,
+                    $"{_station.Scanned} seen, {_station.Uploaded} sent, {_station.Failed} failed");
+        }
+    }
+
+    /// <summary>
+    /// True when there is anything for a collect asked for now to do.
+    /// </summary>
+    /// <remarks>
+    /// The two states where there is not are the two the service would refuse
+    /// anyway. Refusing is still the service's job -- HQ can switch a station
+    /// off between the row being drawn and the item being pressed -- but a
+    /// menu item that is grey before it is pressed saves somebody pressing it,
+    /// and <see cref="CollectBlockedReason"/> is what stops that being a
+    /// mystery.
+    /// </remarks>
+    public bool CanCollect => Enabled && LocalFolderPath.Trim().Length > 0;
+
+    /// <summary>
+    /// Why "Collect now" is grey, or nothing when it is not.
+    /// </summary>
+    /// <remarks>
+    /// A disabled control with no stated reason is a control somebody stares
+    /// at, and the two reasons want two different people: one is HQ's
+    /// decision and nothing to fix here, the other is the box on this
+    /// machine that has not been filled in yet.
+    /// </remarks>
+    public string CollectBlockedReason
+    {
+        get
+        {
+            if (!Enabled)
+            {
+                return "Switched off in ADL — nothing under it is scanned or sent.";
+            }
+
+            return LocalFolderPath.Trim().Length == 0
+                ? "No folder is bound to this station yet. Set one under Edit settings…"
+                : "";
+        }
+    }
 
     /// <summary>What went wrong for this station last cycle, if anything did.</summary>
     public string Error => _station.Error ?? "";

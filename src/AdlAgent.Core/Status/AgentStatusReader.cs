@@ -18,6 +18,7 @@ public sealed class AgentStatusReader
     private readonly UpdateService _updates;
     private readonly IUpdateInstaller _installer;
     private readonly IHostLifecycle _host;
+    private readonly OnDemandSync _syncs;
     private readonly AgentOptions _options;
 
     public AgentStatusReader(
@@ -28,6 +29,7 @@ public sealed class AgentStatusReader
         UpdateService updates,
         IUpdateInstaller installer,
         IHostLifecycle host,
+        OnDemandSync syncs,
         IOptions<AgentOptions> options)
     {
         _session = session;
@@ -37,6 +39,7 @@ public sealed class AgentStatusReader
         _updates = updates;
         _installer = installer;
         _host = host;
+        _syncs = syncs;
         _options = options.Value;
     }
 
@@ -117,6 +120,7 @@ public sealed class AgentStatusReader
             UpdatePinned = update.Pinned,
             UpdateDetail = update.Detail,
             UpdateCheckedAt = update.At == default ? null : update.At,
+            RequestedSync = _syncs.Last,
         };
     }
 }
