@@ -1,0 +1,5 @@
+# What a run produces, and the instance it ran against.
+ledger/
+poll.log
+config.json
+__pycache__/
