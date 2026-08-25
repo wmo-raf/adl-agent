@@ -30,14 +30,12 @@
                 between this row being drawn and the item being pressed — but
                 a grey item saves the press, and a grey item with no stated
                 reason is one somebody stares at.
-            -->
-            <!--
-                Through PlacementTarget rather than by inheriting a
-                DataContext. This menu is one shared instance — a resource,
-                because a Setter.Value inside a Style has no namescope to wire
-                a Click in — and a shared menu's inherited DataContext is
-                whichever row it was last attached to. The row it is being
-                opened over is the one WPF puts in PlacementTarget.
+
+                Read through PlacementTarget rather than off an inherited
+                DataContext, because this menu is one shared instance and a
+                shared menu's inherited DataContext is whichever row it was
+                last attached to. The row it is being opened over is the one
+                WPF puts in PlacementTarget.
             -->
             <MenuItem Header="Collect now…" Click="CollectStation"
                       ToolTipService.ShowOnDisabled="True"
@@ -215,45 +213,71 @@
                     <DockPanel Grid.Row="1" Grid.Column="0" Margin="0,0,12,0" LastChildFill="True">
 
                         <!--
-                            The pane is named, and told what it is for. It was
+                            The pane is named, told what it is for, and given
+                            the one button that acts on the whole of it. It was
                             a bare list against the left edge, which is a
                             control with no label on a window whose whole
                             manner is to say the quiet thing out loud.
-                        -->
-                        <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,4">
-                            <!--
-                                Machine-wide, and so here rather than repeated
-                                down the rows: ADL's sync serves this device's
-                                whole configuration in one answer, and a
-                                Refresh on each connection would promise a
-                                scope it does not have.
 
-                                It asks for the configuration and nothing else
-                                — no scan, no upload. "What is this machine
-                                meant to be doing" and "do it now" are
-                                different questions with different waits, and
-                                the second one is on the station rows.
-                            -->
-                            <Button DockPanel.Dock="Right" Content="Refresh"
-                                    Padding="8,1" Margin="8,0,0,0" VerticalAlignment="Center"
-                                    ToolTip="Ask ADL for this machine's configuration now"
-                                    Command="{Binding SyncCommand}" />
-                            <TextBlock Text="Connections" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                        </DockPanel>
-
-                        <!--
-                            Until somebody picks one, and then never again. The
-                            pane is a master list beside a detail grid, which
-                            is an idiom — but it is one this window did not
-                            have until recently, and the person it was split
-                            for opens it once, on a country server, having
-                            been told to on the telephone.
+                            A strip rather than three loose things above a
+                            list: a title, a button and a caption floating on
+                            the page ground read as three unrelated items that
+                            happen to be stacked, and the button in particular
+                            looked like it belonged to whatever was above it.
+                            Tinted, bordered on three sides, and flush against
+                            the list below — whose own top border is the line
+                            between them — so the strip and the list are one
+                            panel with a head on it.
                         -->
-                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6"
-                                   Foreground="#5A6472" FontSize="11" TextWrapping="Wrap"
-                                   Text="Click one to see its linked stations."
-                                   Visibility="{Binding ShowsConnectionHint, Converter={StaticResource Visible}}" />
+                        <Border DockPanel.Dock="Top" Background="#EEF1F4"
+                                BorderBrush="#DCE0E6" BorderThickness="1,1,1,0"
+                                CornerRadius="3,3,0,0" Padding="10,7">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <!--
+                                        Machine-wide, and so here rather than
+                                        repeated down the rows: ADL's sync
+                                        serves this device's whole
+                                        configuration in one answer, and a
+                                        Refresh on each connection would
+                                        promise a scope it does not have.
+
+                                        It asks for the configuration and
+                                        nothing else — no scan, no upload.
+                                        "What is this machine meant to be
+                                        doing" and "do it now" are different
+                                        questions with different waits, and the
+                                        second one is on the station rows.
+                                    -->
+                                    <Button DockPanel.Dock="Right" Content="Refresh"
+                                            Padding="10,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            ToolTip="Ask ADL for this machine's configuration now"
+                                            Command="{Binding SyncCommand}" />
+                                    <TextBlock Text="Connections" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+                                </DockPanel>
+
+                                <!--
+                                    Until somebody picks one, and then never
+                                    again. The pane is a master list beside a
+                                    detail grid, which is an idiom — but it is
+                                    one this window did not have until
+                                    recently, and the person it was split for
+                                    opens it once, on a country server, having
+                                    been told to on the telephone.
+
+                                    Inside the strip, under the name of the
+                                    thing it is explaining. Below it, on the
+                                    page ground, it read as a caption for the
+                                    list rather than as part of its heading —
+                                    and left a gap behind when it went.
+                                -->
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="#5A6472" FontSize="11" TextWrapping="Wrap"
+                                           Text="Click one to see its linked stations."
+                                           Visibility="{Binding ShowsConnectionHint, Converter={StaticResource Visible}}" />
+                            </StackPanel>
+                        </Border>
 
                         <ListBox BorderBrush="#DCE0E6" BorderThickness="1"
                                  HorizontalContentAlignment="Stretch"
@@ -321,10 +345,19 @@
                             stated nowhere but by a highlight in another
                             control. Which is how somebody reads the wrong
                             vendor's stations and does not know they have.
+
+                            The same strip as the connection pane's, for the
+                            same reason and so that the two panes are the same
+                            kind of thing: a headed panel each, rather than one
+                            headed panel beside a line of text above a grid.
                         -->
-                        <TextBlock DockPanel.Dock="Top" Text="{Binding StationsHeading}"
-                                   FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis"
-                                   Visibility="{Binding HasSelectedConnection, Converter={StaticResource Visible}}" />
+                        <Border DockPanel.Dock="Top" Background="#EEF1F4"
+                                BorderBrush="#DCE0E6" BorderThickness="1,1,1,0"
+                                CornerRadius="3,3,0,0" Padding="10,7"
+                                Visibility="{Binding HasSelectedConnection, Converter={StaticResource Visible}}">
+                            <TextBlock Text="{Binding StationsHeading}" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Border>
 
                         <Grid>
                             <DataGrid x:Name="StationGrid" AutoGenerateColumns="False" IsReadOnly="True"
