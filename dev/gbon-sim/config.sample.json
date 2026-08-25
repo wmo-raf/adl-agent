@@ -1,0 +1,24 @@
+{
+  "base_url": "https://adl.climtech.africa",
+
+  "_api_key": "Prefer the ADL_API_KEY environment variable. Put it here only if you must.",
+
+  "_station_links": "Station link ids, from the URL of each link's edit page in the Wagtail admin. STN01 is the repurposed link 4.",
+  "station_links": {
+    "STN01": 4,
+    "STN02": 0,
+    "STN03": 0,
+    "STN04": 0,
+    "STN05": 0
+  },
+
+  "_parameters": "CSV column -> the exact ADL DataParameter name it maps to. Change the right-hand side if climtech already names them differently.",
+  "parameters": {
+    "Temp_C": "air_temperature",
+    "RH_pct": "relative_humidity",
+    "Press_Pa": "atmospheric_pressure",
+    "WS_ms": "wind_speed",
+    "WD_deg": "wind_direction",
+    "Rain_mm": "rainfall"
+  }
+}
