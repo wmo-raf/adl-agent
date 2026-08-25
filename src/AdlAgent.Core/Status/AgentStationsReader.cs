@@ -32,19 +32,30 @@ public sealed class AgentStationsReader
     private readonly ConfigurationService _configuration;
     private readonly ICycleReportSource _cycles;
     private readonly OnDemandCollect _requested;
+    private readonly TimeProvider _time;
 
     public AgentStationsReader(
-        ConfigurationService configuration, ICycleReportSource cycles, OnDemandCollect requested)
+        ConfigurationService configuration,
+        ICycleReportSource cycles,
+        OnDemandCollect requested,
+        TimeProvider time)
     {
         _configuration = configuration;
         _cycles = cycles;
         _requested = requested;
+        _time = time;
     }
 
     public AgentStationsSnapshot Read()
     {
         var snapshot = _configuration.Snapshot();
         var cycle = _cycles.LastCompletedCycle;
+
+        // Read once for the whole walk rather than per station, so that forty
+        // rows built in one pass are judged against one instant. Two stations
+        // either side of the same window ought not to disagree because the
+        // clock moved between them.
+        var now = _time.GetUtcNow();
 
         // Keyed rather than searched per station: a device may serve forty
         // stations and this is drawn every time the window opens.
@@ -66,11 +77,19 @@ public sealed class AgentStationsReader
                 ConnectionName = connection.Name,
                 Network = connection.Admin.Network,
                 Enabled = connection.Admin.Enabled,
+                StaleAfterMinutes = connection.Admin.StaleAfterMinutes,
             });
 
             foreach (var link in connection.StationLinks)
             {
                 counts.TryGetValue(link.Id, out var last);
+
+                // Both flags, for the same reason Enabled below folds them:
+                // a station under a switched-off connection is switched off
+                // however its own flag reads, and a verdict that said
+                // otherwise would put an amber dot on a row an administrator
+                // deliberately silenced.
+                var enabled = connection.Admin.Enabled && link.Admin.Enabled;
 
                 stations.Add(new AgentStationSnapshot
                 {
@@ -80,10 +99,23 @@ public sealed class AgentStationsReader
                     StationName = link.Admin.Station.Name,
                     StationId = link.Admin.Station.StationId,
                     WigosId = link.Admin.Station.WigosId,
-                    // Both, because a station under a switched-off connection
-                    // is switched off however its own flag reads.
-                    Enabled = connection.Admin.Enabled && link.Admin.Enabled,
+                    Enabled = enabled,
                     Watermark = link.Watermark,
+                    LastReceivedAt = link.LastReceivedAt,
+                    // The connection's window resolved onto its station, so
+                    // that everything downstream can judge a flat list. The
+                    // machine-wide questions -- what the line at the top of
+                    // the window says, which connection it opens on -- span
+                    // connections that may state different windows, and
+                    // re-finding each station's connection to answer them
+                    // would be this walk done a second time.
+                    Flow = StationFlows.Of(
+                        enabled,
+                        link.Config.LocalFolderPath,
+                        last?.Error,
+                        link.LastReceivedAt,
+                        connection.Admin.StaleAfterMinutes,
+                        now),
                     StartDate = link.Admin.StartDate,
                     Timezone = link.Admin.Timezone,
                     Config = link.Config,
@@ -105,6 +137,7 @@ public sealed class AgentStationsReader
         {
             Connections = connections,
             Stations = stations,
+            AsOf = now,
             LastSyncedAt = snapshot.LastSyncedAt,
             ConfigFromCache = snapshot.Configuration?.FromCache ?? false,
             ConfigVersion = snapshot.Configuration?.Version,

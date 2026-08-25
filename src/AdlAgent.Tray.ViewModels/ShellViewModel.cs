@@ -896,6 +896,16 @@ public sealed class ShellViewModel : Observable
         var arrived = JsonSerializer.Serialize(
             new { stations.Connections, stations.Stations }, AgentJson.Options);
 
+        // Before the comparison, and deliberately outside it. How long a
+        // station has been quiet moves with the clock and with nothing else,
+        // so it is the one thing on a row that has to advance on a poll where
+        // the machine said exactly what it said last time -- and the moment it
+        // were inside `arrived`, every poll would rebuild every row.
+        foreach (var row in Connections.SelectMany(connection => connection.Stations))
+        {
+            row.Aged(stations.AsOf);
+        }
+
         if (arrived == _shown)
         {
             return;
@@ -945,7 +955,7 @@ public sealed class ShellViewModel : Observable
         {
             byConnection.TryGetValue(each.ConnectionId, out var owned);
 
-            Connections.Add(new ConnectionViewModel(each, owned ?? []));
+            Connections.Add(new ConnectionViewModel(each, owned ?? [], stations.AsOf));
         }
 
         SelectedConnection =
@@ -1000,6 +1010,7 @@ public sealed class ShellViewModel : Observable
         {
             StandingKind.BindAFolder => standing.Unbound[0].ConnectionId,
             StandingKind.FixAStation => standing.Failing[0].ConnectionId,
+            StandingKind.Quiet => standing.Quiet[0].ConnectionId,
 
             // Nothing wants a person, so nothing is a better place to start
             // than the top of the list.

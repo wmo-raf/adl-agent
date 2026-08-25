@@ -84,6 +84,24 @@ public sealed record ConnectionAdminConfig
 {
     public bool Enabled { get; init; } = true;
     public string Network { get; init; } = "";
+
+    /// <summary>
+    /// How long one of this vendor's stations may say nothing before this
+    /// machine calls it quiet.
+    /// </summary>
+    /// <remarks>
+    /// Per connection because a cadence belongs to the vendor's software and
+    /// not to the station it happens to be writing for: a device serving two
+    /// vendors and forty stations has two cadences, not forty.
+    /// <para>
+    /// Already resolved when it arrives -- ADL folds its own default in
+    /// before sending, so a deployment that changes that default is followed
+    /// by the whole fleet on the next cycle. Nullable only for an ADL that
+    /// predates the field, where <see cref="StationFlow"/>'s own fallback
+    /// stands in.
+    /// </para>
+    /// </remarks>
+    public int? StaleAfterMinutes { get; init; }
 }
 
 public sealed record StationLinkConfig
@@ -92,6 +110,24 @@ public sealed record StationLinkConfig
 
     /// <summary>The oldest file worth offering for this station. A floor.</summary>
     public DateTimeOffset? Watermark { get; init; }
+
+    /// <summary>
+    /// When ADL last received anything for this station, or null if it never
+    /// has.
+    /// </summary>
+    /// <remarks>
+    /// ADL's record rather than this machine's, and that is the whole reason
+    /// it is on the wire: the agent keeps no history of what it delivered, so
+    /// after a restart its own memory of every station is empty while this is
+    /// not. It is what the station list judges a row by.
+    /// <para>
+    /// Every file ADL received counts toward it, whatever ADL then made of
+    /// it. A file that failed to decode still proves the folder, the pattern,
+    /// the share and the upload all worked, and that fault is fixed in the
+    /// ADL admin rather than by anybody standing at this machine.
+    /// </para>
+    /// </remarks>
+    public DateTimeOffset? LastReceivedAt { get; init; }
 
     /// <summary>The tier this machine may write. Exactly what the config endpoint accepts.</summary>
     public StationLinkAppConfig Config { get; init; } = new();

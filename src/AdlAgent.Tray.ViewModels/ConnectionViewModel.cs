@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -40,12 +41,14 @@ public sealed class ConnectionViewModel
     private readonly StationStanding _standing;
 
     public ConnectionViewModel(
-        AgentConnectionSnapshot connection, IReadOnlyList<AgentStationSnapshot> stations)
+        AgentConnectionSnapshot connection,
+        IReadOnlyList<AgentStationSnapshot> stations,
+        DateTimeOffset asOf)
     {
         _connection = connection;
         _standing = StationStanding.Of(stations);
 
-        Stations = [.. stations.Select(station => new StationViewModel(station))];
+        Stations = [.. stations.Select(station => new StationViewModel(station, asOf: asOf))];
     }
 
     /// <summary>This connection's rows, built once and outliving every click.</summary>
@@ -95,7 +98,8 @@ public sealed class ConnectionViewModel
             {
                 StandingKind.NoStations => "No stations linked",
                 StandingKind.BindAFolder => Needing(_standing.Unbound.Count, "a folder"),
-                StandingKind.FixAStation => Quiet(_standing.Failing.Count),
+                StandingKind.FixAStation => Reporting(_standing.Failing.Count),
+                StandingKind.Quiet => Silent(_standing.Quiet.Count),
                 StandingKind.AllSwitchedOff => "Every station switched off in ADL",
                 _ => "Collecting",
             };
@@ -138,7 +142,23 @@ public sealed class ConnectionViewModel
         ? $"1 station needs {what}"
         : string.Create(CultureInfo.CurrentCulture, $"{count} stations need {what}");
 
-    private static string Quiet(int count) => count == 1
-        ? "1 station collected nothing"
-        : string.Create(CultureInfo.CurrentCulture, $"{count} stations collected nothing");
+    /// <summary>
+    /// A station that failed, and said so.
+    /// </summary>
+    /// <remarks>
+    /// It used to read "collected nothing", which was accurate and is now
+    /// taken: the rung below says the same thing about a station that failed
+    /// at nothing. Two neighbouring rungs whose sentences a reader cannot
+    /// tell apart is two rungs that might as well be one, so this one is
+    /// worded from what distinguishes it -- there is an error, and it is on
+    /// the row.
+    /// </remarks>
+    private static string Reporting(int count) => count == 1
+        ? "1 station reported a problem"
+        : string.Create(CultureInfo.CurrentCulture, $"{count} stations reported a problem");
+
+    /// <summary>A station that is configured, blaming nothing, and silent.</summary>
+    private static string Silent(int count) => count == 1
+        ? "1 station has sent nothing"
+        : string.Create(CultureInfo.CurrentCulture, $"{count} stations have sent nothing");
 }

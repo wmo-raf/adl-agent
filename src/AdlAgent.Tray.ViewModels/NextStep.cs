@@ -111,6 +111,12 @@ public enum NextStepKind
     /// <summary>A station collected nothing last cycle and said why.</summary>
     FixAStation,
 
+    /// <summary>
+    /// A station is configured, blaming nothing, and ADL has had nothing from
+    /// it for longer than its vendor's window.
+    /// </summary>
+    StationWentQuiet,
+
     /// <summary>Everything a person could do has been done.</summary>
     NothingToDo,
 }
@@ -297,7 +303,29 @@ public static class NextSteps
                 Text = string.Create(
                     CultureInfo.CurrentCulture,
                     $"{Subject(first)} collected nothing last cycle: {first.Error}"
-                    + $"{AlsoWentQuiet(standing.Failing.Count)}"),
+                    + $"{AlsoReportedOne(standing.Failing.Count)}"),
+            };
+        }
+
+        // An instruction rather than a statement, which is what this class
+        // owes an amber icon in the corner of the screen. Nobody standing at
+        // this machine can know from here whether the logger died, the share
+        // unmounted, or the vendor changed what it writes -- but all three are
+        // answered by looking, and looking is a thing that can be told to
+        // somebody.
+        if (standing.Kind == StandingKind.Quiet)
+        {
+            var first = standing.Quiet[0];
+
+            return new NextStep
+            {
+                Kind = NextStepKind.StationWentQuiet,
+                Attention = standing.Attention,
+                Text = string.Create(
+                    CultureInfo.CurrentCulture,
+                    $"{Subject(first)} {Silence(first)} Open the Stations tab, select it, and "
+                    + $"check status — the folder may be empty, or its pattern may no longer "
+                    + $"match what the vendor is writing.{AlsoSilent(standing.Quiet.Count)}"),
             };
         }
 
@@ -376,12 +404,37 @@ public static class NextSteps
         _ => string.Create(CultureInfo.CurrentCulture, $" {total - 1} other stations need one too."),
     };
 
-    private static string AlsoWentQuiet(int total) => total switch
+    /// <summary>
+    /// How long this station has been silent, or that it never started.
+    /// </summary>
+    /// <remarks>
+    /// The two are different instructions wearing one colour. A station that
+    /// has sent and stopped is one whose folder used to work; a station that
+    /// has never sent is one whose folder may never have been right, and
+    /// telling somebody it "has sent nothing since" a date that does not
+    /// exist would be the line inventing a history.
+    /// </remarks>
+    private static string Silence(AgentStationSnapshot station) =>
+        station.LastReceivedAt is { } received
+            ? string.Create(
+                CultureInfo.CurrentCulture,
+                $"has sent nothing to ADL since {Display.Moment(received)}.")
+            : "has never sent anything to ADL.";
+
+    private static string AlsoReportedOne(int total) => total switch
     {
         <= 1 => "",
-        2 => " One other station collected nothing either.",
+        2 => " One other station reported a problem too.",
         _ => string.Create(
-            CultureInfo.CurrentCulture, $" {total - 1} other stations collected nothing either."),
+            CultureInfo.CurrentCulture, $" {total - 1} other stations reported a problem too."),
+    };
+
+    private static string AlsoSilent(int total) => total switch
+    {
+        <= 1 => "",
+        2 => " One other station has gone quiet too.",
+        _ => string.Create(
+            CultureInfo.CurrentCulture, $" {total - 1} other stations have gone quiet too."),
     };
 
     private static string Counted(int count) => count == 1

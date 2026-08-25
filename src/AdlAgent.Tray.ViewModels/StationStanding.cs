@@ -9,12 +9,12 @@ namespace AdlAgent.Tray;
 /// </summary>
 /// <remarks>
 /// The ladder is: ignore what HQ has switched off, then a folder that has not
-/// been bound, then a station that collected nothing, then nothing to do. It
-/// is asked twice over -- once of every station on the machine, to write the
-/// line at the top of the window, and once of each connection's own stations,
-/// to write that connection's row in the list -- and it is one function here
-/// rather than two implementations because the two answers appear on screen
-/// together. A connection row reading "3 need a folder" beside a line reading
+/// been bound, then a station that reported a problem, then a station that has
+/// gone quiet, then nothing to do. It is asked twice over -- once of every
+/// station on the machine, to write the line at the top of the window, and
+/// once of each connection's own stations, to write that connection's row in
+/// the list -- and it is one function here rather than two implementations
+/// because the two answers appear on screen together. A connection row reading "3 need a folder" beside a line reading
 /// "nothing to do" is not a cosmetic disagreement; it is the window telling
 /// a technician two different things about the same machine.
 /// <para>
@@ -40,6 +40,17 @@ public sealed record StationStanding
     /// <summary>Live stations that said something went wrong last cycle.</summary>
     public required IReadOnlyList<AgentStationSnapshot> Failing { get; init; }
 
+    /// <summary>
+    /// Live stations that are configured, blaming nothing, and sending
+    /// nothing.
+    /// </summary>
+    /// <remarks>
+    /// The rung that needed ADL's help to exist. Every other one is decided
+    /// from what this machine did; this one is decided from what ADL received,
+    /// which is the only party that remembers across a restart.
+    /// </remarks>
+    public required IReadOnlyList<AgentStationSnapshot> Quiet { get; init; }
+
     /// <summary>The colour this standing carries, wherever it is drawn.</summary>
     /// <remarks>
     /// Here rather than at each call site so the dot beside a connection and
@@ -51,7 +62,8 @@ public sealed record StationStanding
     /// </remarks>
     public TrayState Attention => Kind switch
     {
-        StandingKind.BindAFolder or StandingKind.FixAStation => TrayState.NeedsAttention,
+        StandingKind.BindAFolder or StandingKind.FixAStation or StandingKind.Quiet
+            => TrayState.NeedsAttention,
         _ => TrayState.Working,
     };
 
@@ -76,11 +88,21 @@ public sealed record StationStanding
             .Where(station => !string.IsNullOrEmpty(station.Error))
             .ToList();
 
+        // Read off the snapshot rather than recomputed from a clock this
+        // class would have to be given. The verdict is decided once, in
+        // AgentStationsReader, so the dot on a row and the sentence written
+        // from this ladder are the same decision -- and this stays a pure
+        // function of the list it is handed.
+        var quiet = live
+            .Where(station => station.Flow == StationFlow.Quiet)
+            .ToList();
+
         var kind = stations.Count switch
         {
             0 => StandingKind.NoStations,
             _ when unbound.Count > 0 => StandingKind.BindAFolder,
             _ when failing.Count > 0 => StandingKind.FixAStation,
+            _ when quiet.Count > 0 => StandingKind.Quiet,
             _ when live.Count == 0 => StandingKind.AllSwitchedOff,
             _ => StandingKind.Collecting,
         };
@@ -92,6 +114,7 @@ public sealed record StationStanding
             Live = live,
             Unbound = unbound,
             Failing = failing,
+            Quiet = quiet,
         };
     }
 }
@@ -107,6 +130,19 @@ public enum StandingKind
 
     /// <summary>A station collected nothing last cycle and said why.</summary>
     FixAStation,
+
+    /// <summary>
+    /// A station is configured, blaming nothing, and has sent ADL nothing for
+    /// longer than its vendor's window.
+    /// </summary>
+    /// <remarks>
+    /// Below <see cref="FixAStation"/> because a station with an error is
+    /// necessarily also quiet, and the error is the more useful of the two
+    /// things to be told. Above <see cref="AllSwitchedOff"/> only for
+    /// tidiness: quiet is judged of live stations, so a machine with none
+    /// cannot reach this rung anyway.
+    /// </remarks>
+    Quiet,
 
     /// <summary>Stations are linked, and HQ has switched every one of them off.</summary>
     AllSwitchedOff,

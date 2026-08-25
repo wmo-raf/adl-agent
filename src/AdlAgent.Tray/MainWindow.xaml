@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ADL Agent"
         Icon="adl-agent-tray.ico"
-        Height="620" Width="1100"
+        Height="620" Width="1280"
         MinHeight="480" MinWidth="900"
         WindowStartupLocation="CenterScreen"
         Background="#F6F7F9">
@@ -464,6 +464,61 @@
                                         have in them — and the two are quoted at
                                         each other over the telephone.
                                     -->
+                                    <!--
+                                        Whether anything is actually reaching
+                                        ADL for this station, which is the one
+                                        question the rest of the row cannot
+                                        answer: every other column is about
+                                        what this machine did, and all of it
+                                        reads healthy for a station that is
+                                        configured perfectly and sending
+                                        nothing.
+
+                                        Leftmost because it is the column that
+                                        decides whether the others are worth
+                                        reading, and headed rather than bare —
+                                        a coloured dot under a blank header is
+                                        a thing people guess at. The reason is
+                                        on the tooltip for the same reason it
+                                        is on the greyed-out menu item.
+
+                                        The same four marks as the connection
+                                        pane's dot, and deliberately so: green
+                                        and amber mean here what they mean
+                                        three hundred pixels to the left. Grey
+                                        is the absence of a verdict rather than
+                                        a fourth one — a station switched off
+                                        in ADL is not collecting, is not
+                                        failing, and is nobody's to fix.
+                                    -->
+                                    <DataGridTemplateColumn Header="Status" Width="Auto" MinWidth="54"
+                                                            SortMemberPath="Flow">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Ellipse Width="9" Height="9"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"
+                                                         ToolTip="{Binding FlowReason}">
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Fill" Value="#5FA773" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Flow}" Value="Quiet">
+                                                                    <Setter Property="Fill" Value="#E4B93C" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Flow}" Value="Blocked">
+                                                                    <Setter Property="Fill" Value="#C46B6B" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Flow}" Value="NotJudged">
+                                                                    <Setter Property="Fill" Value="#B4BCC4" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="Link ID" Width="Auto" MinWidth="64"
                                                         Binding="{Binding StationLinkId}">
                                         <DataGridTextColumn.ElementStyle>
@@ -478,6 +533,30 @@
                                                         Binding="{Binding LocalFolderPath}" />
                                     <DataGridTextColumn Header="Pattern" Width="Auto" MinWidth="100" MaxWidth="220"
                                                         Binding="{Binding FilePattern}" />
+                                    <!--
+                                        ADL's record, not this machine's, and
+                                        named for it: "collected" is what the
+                                        agent does every cycle, and a column
+                                        called that beside "Last cycle" would
+                                        read as two facts about this machine
+                                        when one of them is ADL's.
+
+                                        Absolute, and in the machine's own
+                                        timezone like every other moment here.
+                                        The age is on the tooltip, where it is
+                                        rebuilt as it opens — a relative string
+                                        in the cell would be as fresh as the
+                                        poll that wrote it and no fresher.
+                                    -->
+                                    <DataGridTextColumn Header="ADL last received" Width="Auto"
+                                                        MinWidth="130" MaxWidth="200"
+                                                        Binding="{Binding LastReceived}">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="ToolTip" Value="{Binding LastReceivedAgo}" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
                                     <DataGridTextColumn Header="Last cycle" Width="Auto" MinWidth="130" MaxWidth="260"
                                                         Binding="{Binding LastCycle}" />
                                     <DataGridTextColumn Header="Problem" Width="Auto" MinWidth="160" MaxWidth="600"
