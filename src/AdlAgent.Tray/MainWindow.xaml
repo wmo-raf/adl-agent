@@ -606,6 +606,20 @@
                         -->
                         <StackPanel Grid.Row="0" Grid.Column="1">
                             <TextBlock Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
+                            <!--
+                                Offered on every machine the service has
+                                answered for, including one whose technician
+                                has no administrator rights: the consent
+                                prompt behind it is exactly where an
+                                administrator standing beside them types a
+                                password, which is how these visits actually
+                                go. Hiding it from the person the window is
+                                for would be the worse of the two mistakes;
+                                the other is pretending the change worked.
+                            -->
+                            <Button Content="Change…" Style="{StaticResource Quiet}"
+                                    Margin="0,2,0,0" Click="ChangeAdl"
+                                    Visibility="{Binding ShowsChangeAdl, Converter={StaticResource Visible}}" />
                             <TextBlock Style="{StaticResource Value}" Text="{Binding ConfigurationHint}"
                                        TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
                                        Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />

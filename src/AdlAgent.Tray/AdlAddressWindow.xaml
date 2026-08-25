@@ -1,0 +1,95 @@
+<Window x:Class="AdlAgent.Tray.AdlAddressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title}"
+        Icon="adl-agent-tray.ico"
+        SizeToContent="Height"
+        Width="520"
+        MinWidth="440"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#F6F7F9">
+
+    <!--
+        Where this machine reports, and the one box that decides what happens
+        to its pairing. Nothing else: everything this window can do is done by
+        the `adl-agent set-url` verb, elevated, so that a machine with no
+        desktop and a machine with one end up in the same state by the same
+        code.
+
+        The same DockPanel-with-the-footer-docked-first shape as the station
+        settings window, for the same reason: the fields may be any height and
+        the buttons are still the last thing given room.
+    -->
+    <DockPanel LastChildFill="True" Margin="14">
+
+        <Border DockPanel.Dock="Bottom" Margin="0,12,0,0" Padding="0,12,0,0"
+                BorderBrush="#DCE0E6" BorderThickness="0,1,0,0">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            VerticalAlignment="Center" Margin="12,0,0,0">
+                    <!--
+                        The ellipsis is a promise: pressing this does not
+                        change anything yet — Windows asks first.
+                    -->
+                    <Button Content="Change address…" Padding="14,6" MinWidth="130"
+                            Command="{Binding SaveCommand}" />
+                    <Button Content="Cancel" Padding="14,6" MinWidth="90" Margin="8,0,0,0"
+                            IsCancel="True" />
+                </StackPanel>
+
+                <!--
+                    Why the button beside this is grey, or what came of the
+                    last press of it — including an administrator declining
+                    the prompt, which this window must say rather than close
+                    over.
+                -->
+                <TextBlock Text="{Binding Answer}" TextWrapping="Wrap"
+                           VerticalAlignment="Center" Foreground="#33475B" />
+            </DockPanel>
+        </Border>
+
+        <StackPanel>
+
+            <TextBlock Foreground="#5A6472" TextWrapping="Wrap" Margin="0,0,0,4">
+                Everything else about this machine comes from ADL. This is the one setting that
+                cannot, because it is how this machine finds ADL at all.
+            </TextBlock>
+
+            <TextBlock Style="{StaticResource Field}" Text="ADL address" />
+            <TextBox Style="{StaticResource Entry}" x:Name="AddressBox"
+                     Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" />
+
+            <CheckBox Margin="0,6,0,4"
+                      Content="The same ADL at a new address — keep the pairing"
+                      IsChecked="{Binding KeepPairing, Mode=TwoWay}" />
+
+            <!--
+                What the box above will cost either way, said before it costs
+                it. A machine repointed with the pairing cleared stops sending
+                until somebody types a code from the new ADL, and a technician
+                should read that here rather than discover it on the Status
+                tab afterwards.
+            -->
+            <TextBlock Text="{Binding Consequence}" TextWrapping="Wrap"
+                       Foreground="#5A6472" Margin="24,0,0,6" />
+
+            <!--
+                The consent prompt is not a wart to apologise for; it is what
+                stops anything running in an interactive session from quietly
+                pointing this machine at a host of its choosing. Saying so
+                here also warns whoever has no rights that they are about to
+                need somebody who has.
+            -->
+            <Border Background="#EEF3F8" BorderBrush="#CFD9E4" BorderThickness="1"
+                    Padding="10,7" CornerRadius="3" Margin="0,6,0,0">
+                <TextBlock TextWrapping="Wrap">
+                    Windows will ask for permission before anything changes. The ADL Agent service
+                    is restarted as part of the change, so this machine stops collecting for a
+                    moment.
+                </TextBlock>
+            </Border>
+        </StackPanel>
+    </DockPanel>
+</Window>

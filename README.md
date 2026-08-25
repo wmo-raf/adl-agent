@@ -310,6 +310,40 @@ double-click it.
   to the instance somebody had deliberately moved it away from, and without
   clearing the pairing that move cleared.
 
+The tray can do it too ([wmo-raf/adl#295](https://github.com/wmo-raf/adl/issues/295))
+— the Status tab showed the machine's ADL address as its first row, read-only,
+beside a hint naming a command. **Change…** beside it opens that address for
+editing and saves it through the verb above.
+
+- **the tray does not elevate, and never will** — its manifest is `asInvoker`,
+  because a technician without administrator rights is who the window is for.
+  Saving launches `adl-agent set-url` with the `runas` verb: Windows raises its
+  own consent prompt, the verb does the whole job, and the tray goes back to
+  polling and shows the machine reconnecting.
+- **the prompt is the design** — the alternative, a sixth control command
+  letting the service write the address on the tray's behalf, would let
+  anything running in an interactive session point the agent at a host of its
+  choosing, silently, while the window went on looking healthy. The pipe can
+  pair this device and rebind a station's folder; it must not be able to move
+  the machine.
+- **the button is never hidden** — including from whoever cannot use it. The
+  consent prompt is exactly where an administrator standing beside a technician
+  types a password, which is how these visits actually go. What the window must
+  not do is hide the button, or pretend the change succeeded: an administrator
+  who declines the prompt is told nothing was changed, and the dialog stays
+  open.
+- **it refuses before it prompts** — an address the agent would refuse is
+  refused in the window, by the agent's own rule, so nobody is asked for a
+  password to write something that was never going to work.
+- **the pairing choice is stated, not buried** — *"The same ADL at a new
+  address — keep the pairing"* is off by default and says underneath it what
+  either reading will cost. After a change with the pairing cleared the window
+  moves to the Status tab, where the code box is.
+- **deliberately a thin caller** — everything that decides anything is the
+  verb, so a machine with no desktop and a machine with one end up in the same
+  state by the same code. What is tested here is the handful of decisions that
+  are the window's own.
+
 ## Structure
 
 ```
@@ -690,6 +724,43 @@ Nothing is repaired by cancelling, and nothing needs to be. The agent keeps no
 record of what it delivered, so files a stopped run did not reach are offered
 again by the next cycle exactly as if it had never run.
 
+#### Changing where this machine reports
+
+The **Status** tab's first row is the ADL address, and **Change…** beside it
+opens it for editing. The tray never elevates — its manifest is `asInvoker`,
+and a technician without administrator rights is who the window is for — so
+saving launches `adl-agent set-url` with the `runas` verb and Windows raises
+its own consent prompt. Approve it and the machine reports to the new address
+without a reinstall; decline it and nothing changes, which the window says
+rather than closing over.
+
+That prompt is the design rather than a wart. Redirecting where a country's
+observations are sent is an administrative act, and the alternative — a control
+command letting the service write the address on the tray's behalf — would let
+anything running in an interactive session point the agent at a host of its
+choosing, silently, while the window went on looking healthy.
+
+The button is there on every machine the service has answered for, including
+one whose technician has no rights: the prompt is exactly where an
+administrator standing beside them types a password, which is how these visits
+actually go. It is there on a machine with no address at all, too — that is the
+state the hint under this row is about, and the button is the same command with
+the typing done.
+
+Whether the pairing survives is stated on the dialog: **The same ADL at a new
+address — keep the pairing** is off by default, with a line underneath saying
+what either reading costs. Left off, the machine is unpaired when the service
+comes back and the window moves to the Status tab, where the code box is. An
+address the agent would refuse is refused here, before any prompt is raised.
+
+Everything else is [`adl-agent set-url`](#changing-where-a-machine-reports)
+itself — the validation, the pairing, the restart — so a machine with no
+desktop and a machine with one end up in the same state by the same code. The
+only thing this window cannot show is the verb's own output: `runas` requires
+`UseShellExecute`, which forbids redirecting the standard streams, so a change
+that does not finish reports its exit code and names the command to run in a
+window where its words can be read.
+
 #### Folders the service cannot see
 
 The window browses as the technician standing at the machine. The service
@@ -786,6 +857,11 @@ adl-agent set-url https://adl.example.org --keep-pairing
 instance to a new domain, same database, same tokens, where the default would
 mean re-pairing every machine in the fleet one admin-issued code at a time,
 each code with a 72-hour life.
+
+The tray's Status tab calls this verb, and only this verb: **Change…** on
+the ADL row launches it with the `runas` verb, so the machine a technician
+repoints from the window and the machine an administrator repoints from a
+command prompt end up in the same state by the same code.
 
 Run without administrator rights it says so and changes nothing, rather than
 failing on a file permission. A machine with no state folder is told it is not
