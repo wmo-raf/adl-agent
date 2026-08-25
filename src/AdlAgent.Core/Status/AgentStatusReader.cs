@@ -50,9 +50,11 @@ public sealed class AgentStatusReader
     /// <remarks>
     /// The service tier's answer needs an administrator: the settings file
     /// sits in a directory whose permissions the MSI replaced with SYSTEM and
-    /// Administrators, and the service has to be restarted to re-read it.
-    /// (wmo-raf/adl#292 turns that into one verb, and #295 into a button; the
-    /// sentence should name them once they exist.)
+    /// Administrators, and the service has to be restarted to re-read it. It
+    /// names the verb that does all of that in one go (wmo-raf/adl#292) rather
+    /// than the three manual steps, and still names the file -- which is what
+    /// a technician reads out over a telephone, and what an administrator
+    /// looks at when the verb is not what they want to use.
     /// <para>
     /// The per-user tier has no installer property to have been given and no
     /// elevation available to the technician it exists for, so its answer is
@@ -74,7 +76,9 @@ public sealed class AgentStatusReader
 
         return file is null
             ? "An administrator must set Agent:AdlBaseUrl on this machine and restart the agent."
-            : $"An administrator must set AdlBaseUrl under [Agent] in {file}, then restart the ADL Agent service.";
+            : "An administrator must run, from an elevated command prompt: "
+                + "adl-agent set-url https://your-adl.example.org"
+                + $" -- which writes AdlBaseUrl under [Agent] in {file} and restarts the ADL Agent service.";
     }
 
     public AgentStatusSnapshot Read()

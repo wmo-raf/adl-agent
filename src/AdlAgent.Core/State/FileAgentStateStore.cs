@@ -18,10 +18,10 @@ namespace AdlAgent.Core.State;
 /// building. Keeping them apart means a bad write to a noisy one can never
 /// take the precious one with it.
 /// <para>
-/// Each is flushed to the disk under a temporary name and then moved into
-/// place, so a crash mid-write leaves the previous contents rather than half
-/// of the new ones. Country servers lose power; a token file that survives
-/// the outage as a truncated fragment is a machine somebody has to visit.
+/// Each is written through <see cref="AtomicFile"/>, so a crash mid-write
+/// leaves the previous contents rather than half of the new ones. Country
+/// servers lose power; a token file that survives the outage as a truncated
+/// fragment is a machine somebody has to visit.
 /// </para>
 /// </remarks>
 public sealed class FileAgentStateStore : IAgentStateStore
@@ -68,6 +68,28 @@ public sealed class FileAgentStateStore : IAgentStateStore
 
     public void SaveSweeps(SweepLog sweeps) => Write(SweepLogFileName, sweeps);
 
+    /// <summary>
+    /// Delete all three files, so the machine comes back knowing only where
+    /// it reports.
+    /// </summary>
+    /// <remarks>
+    /// Deleted rather than written empty. An absent token file is already how
+    /// an unpaired machine looks to <see cref="Load"/>, and an absent cache
+    /// is already a cache miss -- so this leaves the disk in a state the rest
+    /// of the agent has always known how to read, rather than in a new one
+    /// that would need its own handling.
+    /// </remarks>
+    public void ForgetInstance()
+    {
+        lock (_fileLock)
+        {
+            foreach (var fileName in new[] { StateFileName, ConfigCacheFileName, SweepLogFileName })
+            {
+                File.Delete(Path.Combine(_directory, fileName));
+            }
+        }
+    }
+
     private T? Read<T>(string fileName) where T : class
     {
         var path = Path.Combine(_directory, fileName);
@@ -102,21 +124,9 @@ public sealed class FileAgentStateStore : IAgentStateStore
         {
             Directory.CreateDirectory(_directory);
 
-            var path = Path.Combine(_directory, fileName);
-            var temporary = path + ".tmp";
-
-            using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var writer = new StreamWriter(file))
-            {
-                writer.Write(JsonSerializer.Serialize(value, AgentJson.Options));
-                writer.Flush();
-
-                // On the disk, not merely in the operating system's hands,
-                // before anything is moved over the file that is still good.
-                file.Flush(flushToDisk: true);
-            }
-
-            File.Move(temporary, path, overwrite: true);
+            AtomicFile.Write(
+                Path.Combine(_directory, fileName),
+                JsonSerializer.Serialize(value, AgentJson.Options));
         }
     }
 }

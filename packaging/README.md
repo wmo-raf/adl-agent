@@ -55,9 +55,19 @@ had just set — and would crash-loop until the server was rebooted.
 
 The setting is deliberately *permanent*: a silent self-update is passed no
 properties at all, and a machine that forgot where to report after updating
-itself at three in the morning would be a machine somebody has to visit. An
-administrator changing where a machine reports edits that file and restarts
-the service.
+itself at three in the morning would be a machine somebody has to visit.
+
+Changing it afterwards is `adl-agent set-url`, run from an elevated command
+prompt — it validates the address the way the service will, writes this file,
+drops the device token (the old instance issued it) and restarts the service:
+
+```powershell
+adl-agent set-url https://adl.example.org
+```
+
+Add `--keep-pairing` for an instance that has only moved domain, with the same
+database behind it. See *Changing where a machine reports* in the
+[README](../README.md#changing-where-a-machine-reports).
 
 The per-user tier has no installer property to pass, so it takes the URL from
 the environment of the user it runs as — set before the next logon:

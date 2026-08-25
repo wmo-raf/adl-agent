@@ -451,6 +451,14 @@ public sealed class InMemoryAgentStateStore : IAgentStateStore
         SweepWrites++;
     }
 
+    public void ForgetInstance()
+    {
+        _state = new AgentState();
+        _config = null;
+        _sweeps = new SweepLog();
+        Writes++;
+    }
+
     /// <summary>Put a cached configuration in place, as a previous run would have left it.</summary>
     public void Seed(SyncResponse config, DateTimeOffset fetchedAt) => SaveConfig(config, fetchedAt);
 }

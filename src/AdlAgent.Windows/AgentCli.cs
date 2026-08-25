@@ -13,6 +13,12 @@ namespace AdlAgent.Windows;
 /// running service over the same control protocol the tray will use. They
 /// exist because an agent that cannot be paired cannot be installed: without
 /// them the whole product waits on a WPF window.
+/// <para>
+/// <c>adl-agent set-url</c> is a verb too and is deliberately not one of
+/// these: it changes a setting read once at start-up, so it writes the file
+/// and restarts the service itself, elevated, rather than asking a pipe any
+/// logon session can reach. See <see cref="SetUrl"/>.
+/// </para>
 /// </remarks>
 public static class AgentCli
 {
