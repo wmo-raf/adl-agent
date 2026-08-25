@@ -27,28 +27,7 @@ internal static class WixSource
     public static string MsiDirectory => Path.Combine(PackagingDirectory, "msi");
 
     /// <summary>Where the packaging scripts are.</summary>
-    public static string PackagingDirectory
-    {
-        get
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-
-            while (directory is not null)
-            {
-                var packaging = Path.Combine(directory.FullName, "packaging");
-
-                if (Directory.Exists(packaging))
-                {
-                    return packaging;
-                }
-
-                directory = directory.Parent;
-            }
-
-            throw new DirectoryNotFoundException(
-                "Could not find packaging/ above the test binary. These tests read the installer's sources.");
-        }
-    }
+    public static string PackagingDirectory => Path.Combine(RepositoryRoot.Path, "packaging");
 
     /// <summary>
     /// One condition off an element, as the WiX preprocessor would leave it.

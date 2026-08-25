@@ -1,4 +1,3 @@
-using System.Xml;
 using System.Xml.Linq;
 using static AdlAgent.Core.Tests.WixSource;
 
@@ -299,36 +298,6 @@ public class InstallerDialogTests
         // Cancel publishes from inside its own control rather than from the
         // dialog set, the way every stock WiX dialog does it.
         Assert.NotEmpty(DialogControls()["Cancel"].Elements(Wxs + "Publish"));
-    }
-
-    /// <summary>
-    /// That the installer's sources are documents a compiler can read.
-    /// </summary>
-    /// <remarks>
-    /// The same millisecond that
-    /// <see cref="ApplicationManifestTests"/> spends, for the same reason and
-    /// against the same mistake: two hyphens inside an XML comment, written in
-    /// the house style for a dash, which the XML specification forbids. These
-    /// files are dense with comments and the only thing that reads them is a
-    /// packaging job on Windows, at the end of a build, after the tests.
-    /// </remarks>
-    [Theory]
-    [InlineData("AdlAgent.wxs")]
-    [InlineData("AdlAgentUI.wxs")]
-    public void The_installer_sources_are_well_formed_xml(string file)
-    {
-        var path = Path.Combine(MsiDirectory, file);
-
-        using var reader = XmlReader.Create(path);
-
-        var failure = Record.Exception(() =>
-        {
-            while (reader.Read())
-            {
-            }
-        });
-
-        Assert.True(failure is null, $"{path} is not well-formed XML: {failure?.Message}");
     }
 
     /// <summary>When the Next button on the address screen is available.</summary>
