@@ -104,7 +104,14 @@ public sealed class ElevatedAddressChange : IAddressChange
 
         try
         {
-            running = Process.Start(start);
+            // Off the calling thread, and that is not tidiness. ShellExecute
+            // does not return until the consent prompt has been answered, and
+            // the caller is the tray's dispatcher: started here directly, the
+            // window would stop pumping messages for exactly the interval an
+            // administrator is walking over to type a password into it, and
+            // Windows would grey it out as Not Responding while they did.
+            running = await Task.Run(() => Process.Start(start), cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Win32Exception refused) when (refused.NativeErrorCode == ConsentRefused)
         {

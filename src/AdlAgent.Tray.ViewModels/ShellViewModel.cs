@@ -153,8 +153,12 @@ public sealed class ShellViewModel : Observable
     private DateTimeOffset? _awaitedSync;
 
     /// <param name="adlAddress">
-    /// How this window asks Windows to repoint the machine. Supplied by
-    /// tests, which must not raise a consent prompt somebody has to click.
+    /// How this window asks Windows to repoint the machine. Passed in by the
+    /// tray's own composition root beside the control link, and by tests,
+    /// which must not raise a consent prompt somebody has to click. The
+    /// fallback is what a window built with one argument gets, and it is the
+    /// real one on purpose: a default that quietly did nothing would be a
+    /// button that quietly did nothing.
     /// </param>
     public ShellViewModel(AgentControlLink agent, IAddressChange? adlAddress = null)
     {
@@ -1014,7 +1018,7 @@ public sealed class ShellViewModel : Observable
     {
         var url = address.Trim();
 
-        if (new AgentOptions { AdlBaseUrl = url }.DescribeConfigurationProblem() is { } problem)
+        if (AgentOptions.ProblemWith(url) is { } problem)
         {
             Message = problem;
 
@@ -1023,45 +1027,122 @@ public sealed class ShellViewModel : Observable
 
         var answer = await _adlAddress.RequestAsync(url, keepPairing).ConfigureAwait(true);
 
-        if (answer.Outcome == AddressChangeOutcome.Declined)
-        {
-            Message = string.IsNullOrWhiteSpace(answer.Detail)
-                ? "Nothing has been changed on this machine."
-                : answer.Detail + " Nothing has been changed on this machine.";
-
-            return answer.Outcome;
-        }
-
         if (answer.Outcome != AddressChangeOutcome.Changed)
         {
-            Message = string.IsNullOrWhiteSpace(answer.Detail)
-                ? "The address was not changed."
-                : answer.Detail;
+            Message = NotChanged(answer);
 
             return answer.Outcome;
         }
 
-        Message = keepPairing
-            ? string.Create(
-                CultureInfo.CurrentCulture,
-                $"This machine now reports to {url}, keeping the pairing it had. If ADL refuses "
-                + $"the token, pair this machine again.")
-            : string.Create(
-                CultureInfo.CurrentCulture,
-                $"This machine now reports to {url}. Its pairing was cleared: paste a pairing "
-                + $"code from the new ADL below.");
+        Message = Pointed(url, keepPairing);
+
+        // What the verb just did, applied to the window's copy of the machine
+        // until the service answers with its own. The alternative is a page
+        // that goes on saying "Paired" beside a line saying the pairing was
+        // cleared, for as long as the restarting service takes to answer --
+        // and a poll that cannot reach it keeps the last snapshot, so "as
+        // long as" has no upper bound. The window would be pretending the
+        // machine is one it knows it is not, which is the one thing this
+        // button must never do.
+        //
+        // Not an invention: it is the outcome of something this window asked
+        // for and was told succeeded, which is exactly what PairAsync does
+        // with the status a redeemed code answers with.
+        _status = Repointed(_status, url, keepPairing);
 
         if (!keepPairing)
         {
-            // Said now rather than waited for. The service is restarting, so
-            // the next poll or two will go on describing the machine it was;
-            // but the token is gone, this machine is unpaired, and the one
-            // thing to do about it is the code box on this tab.
+            // The tab as well as the state, because ChooseTab has long since
+            // made its one choice. The one thing to do about this machine is
+            // the code box on this tab.
             SelectedTab = TrayTabs.Status;
         }
 
+        Restate();
+
         return answer.Outcome;
     }
+
+    /// <summary>
+    /// The machine as the verb has just left it: a new address, and -- unless
+    /// the pairing was kept -- no pairing.
+    /// </summary>
+    /// <remarks>
+    /// Only the facts the verb changed. Everything else on the snapshot is
+    /// the last thing the service said and stays that way, including the
+    /// heartbeat and the cycle counts: they describe what this machine did
+    /// before it was moved, which is still what it did.
+    /// <para>
+    /// The address is known configured because nothing reaches here that
+    /// <see cref="AgentOptions.ProblemWith"/> refused, so the hint and the
+    /// problem go with it.
+    /// </para>
+    /// </remarks>
+    private static AgentStatusSnapshot? Repointed(
+        AgentStatusSnapshot? status, string url, bool keepPairing)
+    {
+        if (status is null)
+        {
+            return null;
+        }
+
+        var pointed = status with
+        {
+            AdlUrl = url,
+            Configured = true,
+            ConfigurationProblem = null,
+            ConfigurationHint = null,
+        };
+
+        return keepPairing
+            ? pointed
+            : pointed with
+            {
+                PairingState = nameof(CorePairingState.Unpaired),
+                RePairNeeded = false,
+                DeviceId = null,
+                DeviceName = null,
+                PairedAt = null,
+            };
+    }
+
+    /// <summary>What to say about an address that did not move.</summary>
+    /// <remarks>
+    /// A declined prompt is told apart from everything else here and nowhere
+    /// else, because it is the one refusal that is somebody's decision rather
+    /// than a fault -- and the one where saying nothing at all would let a
+    /// window read as though the change had gone through. What every other
+    /// refusal has is a sentence of its own, from whichever of the two knows:
+    /// the agent's rule, or the verb's exit code.
+    /// </remarks>
+    private static string NotChanged(AddressChange answer)
+    {
+        var said = string.IsNullOrWhiteSpace(answer.Detail) ? "" : answer.Detail.Trim() + " ";
+
+        return answer.Outcome == AddressChangeOutcome.Declined
+            ? said + "Nothing has been changed on this machine."
+            : said.Length > 0 ? said.TrimEnd() : "The address was not changed.";
+    }
+
+    /// <summary>
+    /// What to say about an address that moved, in the two tenses its pairing
+    /// leaves it in.
+    /// </summary>
+    /// <remarks>
+    /// Both name the address, because the row above is still showing the old
+    /// one until the restarting service answers the next poll. What differs is
+    /// the instruction: one machine has to be paired again before anything is
+    /// sent, and the other only if the new ADL refuses the token it kept.
+    /// </remarks>
+    private static string Pointed(string url, bool keepPairing) => keepPairing
+        ? string.Create(
+            CultureInfo.CurrentCulture,
+            $"This machine now reports to {url}, keeping the pairing it had. If ADL refuses the "
+            + $"token, pair this machine again.")
+        : string.Create(
+            CultureInfo.CurrentCulture,
+            $"This machine now reports to {url}. Its pairing was cleared: paste a pairing code "
+            + $"from the new ADL below.");
 
     // ---------- editing one station, in a window of its own ----------
 

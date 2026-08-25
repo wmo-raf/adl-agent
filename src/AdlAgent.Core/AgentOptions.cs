@@ -100,6 +100,29 @@ public sealed class AgentOptions
         }
     }
 
+    /// <summary>
+    /// What is wrong with <paramref name="adlBaseUrl"/> as an address for a
+    /// machine to report to, or <c>null</c> when nothing is.
+    /// </summary>
+    /// <remarks>
+    /// The same question <see cref="DescribeConfigurationProblem"/> answers,
+    /// asked about an address nothing is configured with yet. Two callers ask
+    /// it before writing one: <c>adl-agent set-url</c>, so that a verb never
+    /// writes a file the service will refuse to start from, and the tray's
+    /// Change… dialog, so that nobody is asked for an administrator's password
+    /// to write something that was never going to work.
+    /// <para>
+    /// Named here rather than left as a two-line expression at each of them.
+    /// It was exactly that, twice, and the two copies are the one thing in
+    /// this product that must never drift: a window that accepted what the
+    /// verb refuses would raise a consent prompt for nothing, and a window
+    /// that refused what the verb accepts would hide a usable address behind
+    /// a sentence nobody could act on.
+    /// </para>
+    /// </remarks>
+    public static string? ProblemWith(string adlBaseUrl) =>
+        new AgentOptions { AdlBaseUrl = adlBaseUrl }.DescribeConfigurationProblem();
+
     /// <summary>True when this machine has somewhere to send to.</summary>
     public bool IsConfigured => DescribeConfigurationProblem() is null;
 

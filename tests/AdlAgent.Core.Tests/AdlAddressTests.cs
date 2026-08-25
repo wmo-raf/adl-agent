@@ -333,6 +333,93 @@ public class AdlAddressTests
     }
 
     [Fact]
+    public async Task A_repointed_machine_is_unpaired_on_the_page_before_the_service_says_so()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var window = new ShellViewModel(serving.Link, new RecordingAddressChange());
+
+        await window.RefreshAsync();
+
+        Assert.True(window.IsPaired);
+
+        var change = window.BeginChangingAdl()!;
+
+        change.Address = Elsewhere;
+
+        await change.SaveAsync();
+
+        // Not on the next poll. The service is restarting, and a poll that
+        // cannot reach it keeps the last snapshot -- so "Paired" would stand
+        // beside a line saying the pairing was cleared, for as long as the
+        // machine took to come back. The window would be describing a machine
+        // it knows this is not.
+        Assert.False(window.IsPaired);
+        Assert.Equal("Not paired yet", window.PairingLine);
+        Assert.True(window.ShowsPairingBox);
+        Assert.Equal(Elsewhere, window.AdlUrl);
+        Assert.Equal(NextStepKind.NotPaired, window.NextStep.Kind);
+    }
+
+    [Fact]
+    public async Task An_instance_that_only_moved_domain_is_still_the_paired_one()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var window = new ShellViewModel(serving.Link, new RecordingAddressChange());
+
+        await window.RefreshAsync();
+
+        var change = window.BeginChangingAdl()!;
+
+        change.Address = Elsewhere;
+        change.KeepPairing = true;
+
+        await change.SaveAsync();
+
+        // The address moved and nothing else did. A machine whose token was
+        // deliberately kept must not be told to pair again.
+        Assert.Equal(Elsewhere, window.AdlUrl);
+        Assert.True(window.IsPaired);
+        Assert.Equal(agent.Server.Device.Name, window.DeviceName);
+    }
+
+    [Fact]
+    public async Task A_machine_that_had_no_address_stops_saying_so_the_moment_it_has_one()
+    {
+        await using var agent = Unconfigured();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link, new RecordingAddressChange());
+
+        await window.RefreshAsync();
+
+        Assert.False(window.IsConfigured);
+
+        var change = window.BeginChangingAdl()!;
+
+        change.Address = Elsewhere;
+
+        await change.SaveAsync();
+
+        // The hint under this row names a command for a machine with no
+        // address. Leaving it there over an address somebody has just given
+        // it would send them to do again what they have just done.
+        Assert.True(window.IsConfigured);
+        Assert.False(window.NeedsConfiguring);
+        Assert.Equal("", window.ConfigurationHint);
+        Assert.Equal(Elsewhere, window.AdlUrl);
+    }
+
+    [Fact]
     public async Task A_change_that_kept_the_pairing_leaves_the_technician_where_they_were()
     {
         await using var agent = new AgentHarness();

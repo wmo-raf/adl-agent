@@ -337,8 +337,16 @@ editing and saves it through the verb above.
   password to write something that was never going to work.
 - **the pairing choice is stated, not buried** — *"The same ADL at a new
   address — keep the pairing"* is off by default and says underneath it what
-  either reading will cost. After a change with the pairing cleared the window
-  moves to the Status tab, where the code box is.
+  either reading will cost. After a change with the pairing cleared the page
+  says the machine is unpaired at once and moves to the Status tab, where the
+  code box is, rather than waiting on a poll that may not reach a service
+  still restarting.
+- **the prompt does not freeze the window** — `ShellExecute` does not return
+  until the consent prompt has been answered, and the caller is the tray's
+  dispatcher, so the launch happens off it. Started on the dispatcher, the
+  window would stop pumping messages for exactly the interval an administrator
+  is walking over to type a password into it, and Windows would grey it out as
+  Not Responding while they did.
 - **deliberately a thin caller** — everything that decides anything is the
   verb, so a machine with no desktop and a machine with one end up in the same
   state by the same code. What is tested here is the handful of decisions that
@@ -749,9 +757,14 @@ the typing done.
 
 Whether the pairing survives is stated on the dialog: **The same ADL at a new
 address — keep the pairing** is off by default, with a line underneath saying
-what either reading costs. Left off, the machine is unpaired when the service
-comes back and the window moves to the Status tab, where the code box is. An
-address the agent would refuse is refused here, before any prompt is raised.
+what either reading costs. Left off, the page says the machine is unpaired at
+once rather than on the next poll, and moves to the Status tab where the code
+box is: the service is restarting, a poll that cannot reach it keeps the last
+snapshot, and "Paired" standing beside a line saying the pairing was cleared
+would be the window describing a machine it knows this is not. What it applies
+is only what the verb just did — the new address, and the pairing — and the
+service's own answer replaces it a second later. An address the agent would
+refuse is refused here, before any prompt is raised.
 
 Everything else is [`adl-agent set-url`](#changing-where-a-machine-reports)
 itself — the validation, the pairing, the restart — so a machine with no
@@ -985,7 +998,14 @@ there.
   tier's answer. What it still cannot do is take the address: closing this
   properly means the tray writing the setting itself, which is more than
   [#297](https://github.com/wmo-raf/adl/issues/297) did — it made the state
-  legible, not fixable from the window.
+  legible, not fixable from the window. **Change…** does not close it either:
+  the tray offers the button on every machine, and on this tier the verb
+  behind it writes `agent.ini` and then fails to start a service that is not
+  there, so the window reports a change that did not finish over a machine
+  whose address did in fact move. That is exactly what the verb does from a
+  command prompt on this tier, which is the property the button was built to
+  have — a machine with no desktop and a machine with one behave identically
+  — so closing this belongs in the verb rather than in the window.
 - **A folder the technician can see is not necessarily a folder the service
   can read.** The tray is per-user and the service is LocalSystem, so a drive
   letter mapped in somebody's session does not exist for the thing that will
@@ -1043,7 +1063,11 @@ there.
   Manager, which no runner in this suite has. A machine
   without administrator rights, or without the service installed, is told so
   in a sentence — but the happy path's final line is unproven until somebody
-  runs the verb on a machine with a real service on it.
+  runs the verb on a machine with a real service on it. The tray's **Change…**
+  button has the same shape: what it sends, what it refuses before sending,
+  and what it does with each of the three answers are driven at the
+  `IAddressChange` seam, but the elevation itself is `ShellExecute` with the
+  `runas` verb, which raises a prompt no runner can answer.
 - **The per-user tier shows a console window at logon.** It is the same
   console program as the service tier, started by a shortcut rather than by
   the SCM, so it appears as a window in the technician's session. That is

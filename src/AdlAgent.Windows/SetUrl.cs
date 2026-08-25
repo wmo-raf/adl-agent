@@ -241,7 +241,7 @@ public sealed class SetUrl
         // The address before the machine, because a mistyped address is the
         // likelier of the two and is the one whoever ran this can fix where
         // they are standing.
-        if (new AgentOptions { AdlBaseUrl = url }.DescribeConfigurationProblem() is { } problem)
+        if (AgentOptions.ProblemWith(url) is { } problem)
         {
             return problem;
         }
