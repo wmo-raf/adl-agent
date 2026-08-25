@@ -7,8 +7,9 @@
     inside an XML comment are forbidden by the XML specification, and this
     file was shipped with a pair of them: Windows refused to start the tray
     at all, saying "the side-by-side configuration is incorrect", before any
-    of the program ran. It was telling the exact truth. A test asserts this
-    file parses, because nothing else here reads it until it is far too late.
+    of the program ran. It was telling the exact truth. A test asserts that
+    every XML this repository ships parses, this file included, because
+    nothing here reads it until it is far too late.
   -->
 
   <assemblyIdentity version="1.0.0.0" name="AdlAgent.Tray.app"/>

@@ -166,6 +166,7 @@ halves back out of the built database.
 | `ADLURL=` still works, `/qn` still installs, and a silent upgrade keeps the address | `verify-msi-install.ps1` | the packaging job |
 | An install leaves all three shortcuts on the machine, and an uninstall leaves none | `verify-msi-install.ps1` | the packaging job |
 | Windows will actually start what was packaged | `verify-tray-starts.ps1` | the packaging job |
+| Every XML the repository ships parses, these two included | `ShippedXmlTests` | every commit, both platforms |
 
 The dialog is the part of this product nothing else could check. WiX stores a
 control condition as an opaque string and never parses it, so a malformed one
