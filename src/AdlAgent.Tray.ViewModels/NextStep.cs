@@ -13,8 +13,8 @@ namespace AdlAgent.Tray;
 /// <remarks>
 /// The tray used to say only what the machine <em>is</em>. That is enough for
 /// somebody who already knows how ADL and this agent fit together, and it is
-/// nothing at all for the technician the product is for: three tabs, two of
-/// them empty until an administrator in another building acts, and nothing on
+/// nothing at all for the technician the product is for: tabs that stay
+/// empty until an administrator in another building acts, and nothing on
 /// screen saying which of them matters now.
 /// <para>
 /// This is deliberately not a wizard. The moments that need guidance are not
@@ -197,7 +197,7 @@ public static class NextSteps
                 Attention = TrayState.NeedsAttention,
                 Text = "ADL has revoked this machine, and nothing is being sent until it is paired "
                     + "again. Ask your ADL administrator for a new pairing code, then paste it on "
-                    + "the Pairing tab.",
+                    + "the Status tab.",
                 NoStations = "ADL has revoked this machine, so it can no longer read the stations "
                     + "linked to it.",
             };
@@ -210,7 +210,7 @@ public static class NextSteps
                 Kind = NextStepKind.NotPaired,
                 ListIsStale = true,
                 Attention = TrayState.NeedsAttention,
-                Text = "Paste the pairing code your ADL administrator gave you, on the Pairing tab. "
+                Text = "Paste the pairing code your ADL administrator gave you, on the Status tab. "
                     + "Nothing else about ADL needs setting up on this machine.",
                 NoStations = "This machine is not paired with ADL yet, so ADL has not told it about "
                     + "any stations.",

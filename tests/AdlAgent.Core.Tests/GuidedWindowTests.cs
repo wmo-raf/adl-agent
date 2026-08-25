@@ -37,7 +37,7 @@ public class GuidedWindowTests
 
         await window.RefreshAsync();
 
-        Assert.Equal(TrayTabs.Pairing, window.SelectedTab);
+        Assert.Equal(TrayTabs.Status, window.SelectedTab);
     }
 
     [Fact]
@@ -66,8 +66,9 @@ public class GuidedWindowTests
 
         await window.RefreshAsync();
 
-        // Not Pairing: there is nothing to pair with, and a code box is the
-        // one thing on this machine that cannot be the answer.
+        // Not Stations: there is nothing to pair with and nothing linked, and
+        // the code box this tab now carries is the one thing on this machine
+        // that cannot be the answer.
         Assert.Equal(TrayTabs.Status, window.SelectedTab);
     }
 
@@ -98,13 +99,19 @@ public class GuidedWindowTests
 
         var window = new ShellViewModel(ServedAgent.NothingServing());
 
+        var opened = window.SelectedTab;
+
         await window.RefreshAsync();
 
         // Nothing is known about this machine, so there is no tab that
         // matches it. It stays where it opened, and the line says what is
         // wrong -- rather than the window guessing, and then being unable to
         // correct itself once the service comes up.
-        Assert.Equal(TrayTabs.Pairing, window.SelectedTab);
+        //
+        // Against where it opened rather than against a named tab: the
+        // invariant is that nothing was chosen, and a constant here would go
+        // on passing while claiming the window had chosen that one.
+        Assert.Equal(opened, window.SelectedTab);
 
         using var serving = await ServedAgent.ServingAsync(agent);
 
@@ -116,6 +123,282 @@ public class GuidedWindowTests
         await reachable.RefreshAsync();
 
         Assert.Equal(TrayTabs.Stations, reachable.SelectedTab);
+    }
+
+    // ---------- the pairing row, and what it offers ----------
+
+    [Fact]
+    public async Task An_unpaired_machine_shows_a_code_box()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.Equal("Not paired yet", window.PairingLine);
+        Assert.True(window.ShowsPairingBox);
+
+        // Nothing to offer a way back to: the way is already open.
+        Assert.False(window.ShowsPairAgain);
+    }
+
+    [Fact]
+    public async Task A_machine_that_has_never_paired_shows_no_ADL_facts()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // ADL has told this machine nothing, so the rows ADL fills are not
+        // drawn at all. They were six dashes and a blank row around the one
+        // thing there was to do.
+        Assert.False(window.HasEverPaired);
+        Assert.Equal("", window.PairedSince);
+
+        // Including in the strip above every tab, which would otherwise go on
+        // announcing a scan interval this machine is not keeping.
+        Assert.Equal("", window.HeaderFacts);
+    }
+
+    [Fact]
+    public async Task A_paired_machine_shows_no_code_box_but_can_ask_for_one()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.Equal("Paired", window.PairingLine);
+        Assert.True(window.HasEverPaired);
+        Assert.StartsWith("since ", window.PairedSince);
+
+        // The whole point of folding the tab in: a machine that paired months
+        // ago is not shown a box it must not use.
+        Assert.False(window.ShowsPairingBox);
+        Assert.True(window.ShowsPairAgain);
+    }
+
+    [Fact]
+    public async Task A_revoked_machine_shows_a_code_box_again()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        agent.Server.TokenRevoked = true;
+
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.Equal("Revoked by ADL", window.PairingLine);
+        Assert.True(window.ShowsPairingBox);
+        Assert.False(window.ShowsPairAgain);
+
+        // "since" would say the machine is still paired. The moment is when
+        // what is on screen stopped being true, not when it started.
+        Assert.StartsWith("paired ", window.PairedSince);
+    }
+
+    [Fact]
+    public async Task A_revoked_machine_keeps_the_facts_ADL_gave_it()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        agent.Server.TokenRevoked = true;
+
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // The regression this test exists for. Gating ADL's rows on "is
+        // paired" reads correctly on a machine that has just been installed,
+        // and takes the last heartbeat, the last sync and the last problem
+        // off the screen of a machine that has just been cut off -- which is
+        // the one moment in its life somebody needs to read them.
+        Assert.True(window.HasEverPaired);
+        Assert.NotEqual("-", window.LastHeartbeat);
+        Assert.NotEqual("", window.HeaderFacts);
+    }
+
+    [Fact]
+    public async Task Pair_again_opens_the_box_on_a_healthy_machine()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // ADL rotates a code without revoking the token it replaces, on
+        // purpose, so that a machine still shipping data does not stop
+        // between an administrator's click and a technician typing the code
+        // in. Nothing about this machine will ever ask for a box, and
+        // somebody is standing at it holding a code.
+        window.PairAgain();
+
+        Assert.True(window.ShowsPairingBox);
+        Assert.False(window.ShowsPairAgain);
+
+        // And the poll does not close it again under whoever is typing.
+        await window.RefreshAsync();
+
+        Assert.True(window.ShowsPairingBox);
+    }
+
+    [Fact]
+    public async Task A_box_opened_by_mistake_can_be_put_away_again()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        window.PairAgain();
+        window.PairingCode = "KX7M-93";
+
+        // Only here. On a machine that has never paired, or one ADL has
+        // revoked, the box is the page and there is nothing to cancel to.
+        Assert.True(window.ShowsCancelPairing);
+
+        window.CancelPairAgain();
+
+        Assert.False(window.ShowsPairingBox);
+        Assert.True(window.ShowsPairAgain);
+
+        // The half-typed credential goes with it, rather than waiting in the
+        // box for whoever opens this window next.
+        Assert.Equal("", window.PairingCode);
+
+        // The window hides rather than closes, so this has to survive the
+        // poll -- a box that reopened five seconds later would be no cancel
+        // at all.
+        await window.RefreshAsync();
+
+        Assert.False(window.ShowsPairingBox);
+    }
+
+    [Fact]
+    public async Task A_machine_that_needs_pairing_is_not_offered_a_way_out_of_it()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.True(window.ShowsPairingBox);
+        Assert.False(window.ShowsCancelPairing);
+    }
+
+    // ---------- what ADL makes of this machine ----------
+
+    [Theory]
+    [InlineData("online", "Collecting and sending")]
+    [InlineData("degraded", "Heartbeats are late")]
+    [InlineData("offline", "No heartbeats arriving")]
+    [InlineData("cycle_stuck", "Alive but not scanning")]
+    [InlineData("unknown", "Nothing reported yet")]
+    public async Task ADLs_verdict_reaches_the_window_in_words(string state, string said)
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        agent.Server.FleetStatus = state;
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // ADL stores and sends its own identifier. What a technician on a
+        // country server reads should not be it.
+        Assert.Equal(said, window.FleetStatus);
+        Assert.DoesNotContain("_", window.FleetStatus);
+    }
+
+    [Fact]
+    public async Task Offline_and_a_stuck_cycle_do_not_read_the_same()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+
+        agent.Server.FleetStatus = "offline";
+
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        var offline = window.FleetStatus;
+
+        agent.Server.FleetStatus = "cycle_stuck";
+
+        await agent.HeartbeatLoop.BeatAsync();
+        await window.RefreshAsync();
+
+        // Both mean nothing is arriving. The difference is whether somebody
+        // has to walk to the machine, and it is the only thing these two
+        // words have to carry.
+        Assert.NotEqual(offline, window.FleetStatus);
+    }
+
+    [Fact]
+    public async Task A_state_this_build_has_never_heard_of_is_still_readable()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        agent.Server.FleetStatus = "clock_skewed";
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // ADL owns this vocabulary and can add to it, and an agent in the
+        // field is months behind whatever HQ deployed. The words are wrong;
+        // an identifier on the screen would be worse.
+        Assert.Equal("Clock skewed", window.FleetStatus);
     }
 
     // ---------- the line, in each state it has to be right for ----------

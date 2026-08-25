@@ -27,6 +27,41 @@
             <Setter Property="Padding" Value="4,3" />
         </Style>
 
+        <!--
+            A button that reads as a line of text: no border, no fill, the
+            colour of something to follow. For an action that has to be
+            reachable on a machine where nothing is wrong, without standing on
+            the page as though something were — which is the whole difficulty
+            with offering to pair a machine that is already paired.
+        -->
+        <Style x:Key="Quiet" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#1B6AC9" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   Background="Transparent">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="TextDecorations" Value="Underline" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="Caption" TargetType="TextBlock">
             <Setter Property="Margin" Value="0,8,0,0" />
             <Setter Property="FontWeight" Value="SemiBold" />

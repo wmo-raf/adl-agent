@@ -65,11 +65,17 @@
                        RenderOptions.BitmapScalingMode="HighQuality" />
                 <StackPanel>
                     <TextBlock Text="{Binding Headline}" FontSize="14" TextWrapping="Wrap" />
+                    <!--
+                        The version is this machine's own and always true. The
+                        rest is ADL's, and is one string from the view model
+                        rather than four runs here, because a Run cannot be
+                        hidden — see ShellViewModel.HeaderFacts. Before ADL has
+                        ever answered it is empty, so this strip does not
+                        announce a scan interval the machine is not keeping.
+                    -->
                     <TextBlock Margin="0,4,0,0" Foreground="#5A6472" TextWrapping="Wrap">
-                        <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" />
-                        <Run Text="  ·  last heartbeat " /><Run Text="{Binding LastHeartbeat, Mode=OneWay}" />
-                        <Run Text="  ·  last synced " /><Run Text="{Binding LastSynced, Mode=OneWay}" />
-                        <Run Text="  ·  scans " /><Run Text="{Binding CheckInterval, Mode=OneWay}" />
+                        <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" /><Run
+                            Text="{Binding HeaderFacts, Mode=OneWay}" />
                     </TextBlock>
                 </StackPanel>
             </DockPanel>
@@ -116,47 +122,6 @@
         <TabControl Margin="0,10,0,0" Background="White"
                     SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
 
-            <!-- ============ Pairing (story 2) ============ -->
-            <TabItem Header="Pairing">
-                <StackPanel Margin="16" MaxWidth="560" HorizontalAlignment="Left">
-                    <TextBlock TextWrapping="Wrap" Foreground="#5A6472">
-                        Your ADL administrator creates this machine in the ADL admin and gives you a
-                        pairing code. Paste it here. Nothing else about ADL needs setting up on this
-                        machine, and no password is ever stored on it.
-                    </TextBlock>
-
-                    <TextBlock Style="{StaticResource Caption}" Text="Pairing code" />
-                    <TextBox Style="{StaticResource Entry}" FontFamily="Consolas" FontSize="16"
-                             Text="{Binding PairingCode, UpdateSourceTrigger=PropertyChanged}" />
-
-                    <Button Content="Pair this machine" HorizontalAlignment="Left" Padding="14,6"
-                            Command="{Binding PairCommand}" />
-
-                    <TextBlock Style="{StaticResource Caption}" Text="This machine" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AdlUrl}" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="State" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
-                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
-                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="Paired" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairedAt}" />
-                    </Grid>
-                </StackPanel>
-            </TabItem>
-
             <!-- ============ Stations (stories 6, 7, 9) ============ -->
             <TabItem Header="Stations">
                 <!--
@@ -179,7 +144,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" MinHeight="90" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <!--
@@ -249,7 +213,7 @@
                                         questions with different waits, and the
                                         second one is on the station rows.
                                     -->
-                                    <Button DockPanel.Dock="Right" Content="Refresh"
+                                    <Button DockPanel.Dock="Right" Content="Sync with ADL"
                                             Padding="10,2" Margin="8,0,0,0" VerticalAlignment="Center"
                                             ToolTip="Ask ADL for this machine's configuration now"
                                             Command="{Binding SyncCommand}" />
@@ -581,25 +545,12 @@
                         </Grid>
                     </DockPanel>
 
-                    <!--
-                        The one action a selected row has, named. A row that
-                        opens on a double-click and says so nowhere is a row
-                        whose settings a technician on a country server does
-                        not find at all.
-                    -->
-                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal"
-                                HorizontalAlignment="Right" Margin="0,10,0,0">
-                        <Button Content="Edit settings…" Padding="14,6"
-                                IsEnabled="{Binding HasSelectedStation}"
-                                Click="EditStation" />
-                    </StackPanel>
-
                 </Grid>
             </TabItem>
 
             <!-- ============ Status (stories 23, 27) ============ -->
             <TabItem Header="Status">
-                <StackPanel Margin="16" HorizontalAlignment="Left">
+                <StackPanel Margin="16" HorizontalAlignment="Left" Grid.IsSharedSizeScope="True">
 
                     <!--
                         What this program is, above what this machine is
@@ -624,20 +575,20 @@
 
                     <Separator Margin="0,14,0,4" Background="#DCE0E6" />
 
+                    <!--
+                        Two grids and not one, sharing a label column so they
+                        read as a single list. The first is what this machine
+                        is on its own; the second is what ADL has told it, and
+                        is not drawn at all until ADL has told it something.
+                        A server on its first morning used to answer "what is
+                        this machine?" with six dashes and a blank row.
+                    -->
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="StatusLabel" />
                             <ColumnDefinition Width="*" MinWidth="320" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -659,20 +610,124 @@
                                        TextWrapping="Wrap" Margin="0,2,0,0" Opacity="0.75"
                                        Visibility="{Binding NeedsConfiguring, Converter={StaticResource Visible}}" />
                         </StackPanel>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}" />
+
+                        <!--
+                            ADL's, and so hidden with the rest of ADL's until
+                            there is one — but kept here rather than moved down
+                            into the second grid, so that the order a paired
+                            machine reads in is the order it has always read in.
+                        -->
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Device"
+                                   Visibility="{Binding HasEverPaired, Converter={StaticResource Visible}}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DeviceName}"
+                                   Visibility="{Binding HasEverPaired, Converter={StaticResource Visible}}" />
+
                         <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Pairing" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding PairingState}" />
-                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding FleetStatus}" />
-                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Last heartbeat" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastHeartbeat}" />
-                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Last synced" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
-                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
-                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
-                        <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
+                        <!--
+                            The tab this used to be. A code box a machine uses
+                            once had the leftmost tab of the window to itself,
+                            beside a copy of four facts this page already
+                            carried — so a technician on a server that paired
+                            months ago was shown a screen with nothing on it to
+                            do, and the one thing it was for was somewhere else
+                            from the row that says whether it is needed.
+
+                            Here it is the row: the state, the moment it began,
+                            and the remedy underneath it — which is the shape
+                            the ADL row above already has, so the page has one
+                            rule rather than two.
+                        -->
+                        <StackPanel Grid.Row="2" Grid.Column="1">
+                            <TextBlock Style="{StaticResource Value}" Text="{Binding PairingLine}" />
+
+                            <!--
+                                The history and the way back to a code box, on
+                                one line and in the quietest thing on the page.
+                                A machine that is working has nothing to do
+                                here on all but a handful of days in its life —
+                                but ADL rotates a code without revoking the
+                                token it replaces, deliberately, so a machine
+                                being rotated never asks for anything and
+                                whoever is holding that code needs somewhere to
+                                put it.
+                            -->
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <TextBlock Text="{Binding PairedSince}" Opacity="0.75"
+                                           Visibility="{Binding HasEverPaired, Converter={StaticResource Visible}}" />
+                                <TextBlock Text="  ·  " Opacity="0.75"
+                                           Visibility="{Binding ShowsPairAgain, Converter={StaticResource Visible}}" />
+                                <Button Content="Pair again…" Style="{StaticResource Quiet}" Click="PairAgain"
+                                        Visibility="{Binding ShowsPairAgain, Converter={StaticResource Visible}}" />
+                            </StackPanel>
+
+                            <!--
+                                One sentence and not the four this had as a tab
+                                of its own. The line at the top of every tab
+                                already says to paste the code and that nothing
+                                else needs setting up; what it cannot say, and
+                                what somebody typing a credential into a
+                                ministry's server wants to know, is what
+                                happens to it afterwards.
+                            -->
+                            <StackPanel Margin="0,8,0,0" MaxWidth="420"
+                                        Visibility="{Binding ShowsPairingBox, Converter={StaticResource Visible}}">
+                                <TextBlock TextWrapping="Wrap" Foreground="#5A6472"
+                                           Text="No password is ever stored on this machine." />
+                                <TextBlock Style="{StaticResource Caption}" Text="Pairing code" />
+                                <TextBox Style="{StaticResource Entry}" FontFamily="Consolas" FontSize="16"
+                                         Text="{Binding PairingCode, UpdateSourceTrigger=PropertyChanged}" />
+                                <!--
+                                    Cancel only where there is something to
+                                    cancel to. On a machine that has never
+                                    paired, or one ADL has revoked, this box
+                                    is the page — but the window hides rather
+                                    than closes, so a box opened by mistake on
+                                    a working machine would still be standing
+                                    open tomorrow.
+                                -->
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Pair this machine" Padding="14,6"
+                                            Command="{Binding PairCommand}" />
+                                    <Button Content="Cancel" Padding="14,6" Margin="8,0,0,0"
+                                            Click="CancelPairAgain"
+                                            Visibility="{Binding ShowsCancelPairing, Converter={StaticResource Visible}}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <!--
+                        Everything ADL supplies, gated on ADL having ever
+                        admitted this machine — and deliberately not on its
+                        being paired now. A machine revoked this morning wants
+                        its last heartbeat, its last sync and its last problem
+                        on screen more than at any other time in its life.
+                    -->
+                    <Grid Visibility="{Binding HasEverPaired, Converter={StaticResource Visible}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="StatusLabel" />
+                            <ColumnDefinition Width="*" MinWidth="320" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding FleetStatus}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Field}" Text="Last heartbeat" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastHeartbeat}" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Field}" Text="Last synced" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
                         <!--
                             What this machine is doing about its version. The
                             number itself is in the block above; this is the half
@@ -682,15 +737,11 @@
                             is pinned, unable to reach the feed, or simply already
                             current.
                         -->
-                        <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
-                        <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
                                    TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
-                        <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
-
-                        <Button Grid.Row="10" Grid.Column="1" Content="Refresh now" Padding="14,6"
-                                HorizontalAlignment="Left" Margin="0,14,0,0"
-                                Command="{Binding RefreshCommand}" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
                     </Grid>
                 </StackPanel>
             </TabItem>
