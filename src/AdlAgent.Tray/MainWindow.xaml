@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ADL Agent"
         Icon="adl-agent-tray.ico"
-        Height="620" Width="900"
-        MinHeight="480" MinWidth="720"
+        Height="620" Width="1100"
+        MinHeight="480" MinWidth="900"
         WindowStartupLocation="CenterScreen"
         Background="#F6F7F9">
 
@@ -122,13 +122,20 @@
             <!-- ============ Stations (stories 6, 7, 9) ============ -->
             <TabItem Header="Stations">
                 <!--
-                    The list, and the one button that opens a station. The
-                    settings themselves are in a window of their own: they were
-                    in a row beneath this grid, under a fixed-height scroll
-                    area, and between them the two asked for more height than
-                    this tab has on a 620-pixel window — so the Save button
-                    below them was drawn off the bottom edge and could only be
-                    reached by making the window bigger.
+                    Two panes: the connections ADL has given this machine, and
+                    the stations under the one selected. Split because a
+                    connection had nowhere to be a thing rather than a repeated
+                    value in a column — so a connection switched off in ADL was
+                    indistinguishable from its stations each being switched off,
+                    and a connection with no stations linked to it yet did not
+                    appear at all.
+
+                    The settings themselves are in a window of their own: they
+                    were in a row beneath this grid, under a fixed-height
+                    scroll area, and between them the two asked for more height
+                    than this tab has — so the Save button below them was drawn
+                    off the bottom edge and could only be reached by making the
+                    window bigger.
                 -->
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
@@ -136,48 +143,149 @@
                         <RowDefinition Height="*" MinHeight="90" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <!--
+                            Fixed, and no GridSplitter. A splitter's position
+                            is state nobody persists, and on a window that
+                            hides rather than closes it silently keeps whatever
+                            it was last dragged to for the rest of the session
+                            — which is how a station list ends up 40 pixels
+                            wide with nothing on screen explaining why.
+                        -->
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
                     <!--
-                        Above the grid rather than inside it, and only when
-                        the grid has nothing in it. A device an administrator
-                        has not linked anything to yet, an ADL that is not
-                        answering and a service that is not running all used
-                        to draw the same nothing — three problems, three
-                        different people to go and find, one blank rectangle.
+                        Across both panes, and only when there is nothing in
+                        either. A device an administrator has not linked
+                        anything to yet, an ADL that is not answering and a
+                        service that is not running all used to draw the same
+                        nothing — three problems, three different people to go
+                        and find, one blank rectangle.
                     -->
-                    <Border Grid.Row="0" Margin="0,0,0,10" Padding="12,9" CornerRadius="3"
+                    <Border Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,10"
+                            Padding="12,9" CornerRadius="3"
                             Background="#EEF3F8" BorderBrush="#CFD9E4" BorderThickness="1"
-                            Visibility="{Binding HasNoStations, Converter={StaticResource Visible}}">
+                            Visibility="{Binding ShowsMachineReason, Converter={StaticResource Visible}}">
                         <TextBlock Text="{Binding NoStationsReason}" TextWrapping="Wrap" />
                     </Border>
 
-                    <DataGrid Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
-                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
-                              SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
-                              ItemsSource="{Binding Stations}"
-                              SelectedItem="{Binding SelectedStation, Mode=TwoWay}"
-                              PreviewKeyDown="StationKeyed">
+                    <!-- The connections ADL has given this machine. -->
+                    <ListBox Grid.Row="1" Grid.Column="0" Margin="0,0,12,0"
+                             BorderBrush="#DCE0E6" BorderThickness="1"
+                             HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ItemsSource="{Binding Connections}"
+                             SelectedItem="{Binding SelectedConnection, Mode=TwoWay}"
+                             PreviewKeyDown="ConnectionKeyed">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="2,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <!--
+                                        The same three colours the tray icon
+                                        and the next-step band use, from the
+                                        same TrayState. A row that invented a
+                                        fourth would be a fourth vocabulary to
+                                        learn.
+                                    -->
+                                    <Ellipse Grid.Column="0" Width="8" Height="8"
+                                             VerticalAlignment="Top" Margin="0,5,8,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="#E4B93C" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="Working">
+                                                        <Setter Property="Fill" Value="#5FA773" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="Stopped">
+                                                        <Setter Property="Fill" Value="#C46B6B" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="Unknown">
+                                                        <Setter Property="Fill" Value="#B4BCC4" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding ConnectionName}" FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Foreground="#5A6472" FontSize="11" Margin="0,1,0,0"
+                                                   TextWrapping="Wrap">
+                                            <Run Text="{Binding StationCount, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Standing, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- The stations under the connection selected on the left. -->
+                    <Grid Grid.Row="1" Grid.Column="1">
+                        <DataGrid x:Name="StationGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                  SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
+                                  ItemsSource="{Binding SelectedConnection.Stations}"
+                                  SelectedItem="{Binding SelectedStation, Mode=TwoWay}"
+                                  PreviewKeyDown="StationKeyed">
+                            <!--
+                                Double-click opens the station, on the row
+                                rather than on the grid: the grid's own
+                                double-clicks include the column headers, where
+                                opening whatever happened to be selected would
+                                be a window nobody asked for.
+                            -->
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <EventSetter Event="MouseDoubleClick" Handler="StationActivated" />
+                                </Style>
+                            </DataGrid.RowStyle>
+                            <DataGrid.Columns>
+                                <!--
+                                    No Connection column: every row here is by
+                                    definition from the connection selected on
+                                    the left, so it would be 130 pixels
+                                    repeating the selection back. Folder is the
+                                    column that gets them, being the one thing
+                                    on this tab the technician actually owns.
+
+                                    Folder and Pattern stay side by side
+                                    deliberately: "scanned 0, no error" almost
+                                    always means the glob does not match what is
+                                    in that folder, and reading the two together
+                                    is how somebody sees it. Last cycle is the
+                                    other half of the same diagnosis.
+                                -->
+                                <DataGridTextColumn Header="Station" Width="130" Binding="{Binding StationName}" />
+                                <DataGridTextColumn Header="Folder" Width="*" MinWidth="150" Binding="{Binding LocalFolderPath}" />
+                                <DataGridTextColumn Header="Pattern" Width="120" Binding="{Binding FilePattern}" />
+                                <DataGridTextColumn Header="Last cycle" Width="120" Binding="{Binding LastCycle}" />
+                                <DataGridTextColumn Header="Problem" Width="160" Binding="{Binding Error}" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+
                         <!--
-                            Double-click opens the station, on the row rather
-                            than on the grid: the grid's own double-clicks
-                            include the column headers, where opening whatever
-                            happened to be selected would be a window nobody
-                            asked for.
+                            Over the grid rather than above it, and about this
+                            connection rather than about the machine. "ADL has
+                            linked nothing to this connection" and "this
+                            connection is switched off in ADL" are two
+                            different problems wanting two different people,
+                            and neither is a fact about the list on the left.
                         -->
-                        <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
-                                <EventSetter Event="MouseDoubleClick" Handler="StationActivated" />
-                            </Style>
-                        </DataGrid.RowStyle>
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Station" Width="150" Binding="{Binding StationName}" />
-                            <DataGridTextColumn Header="Connection" Width="130" Binding="{Binding ConnectionName}" />
-                            <DataGridTextColumn Header="Folder" Width="*" Binding="{Binding LocalFolderPath}" />
-                            <DataGridTextColumn Header="Pattern" Width="140" Binding="{Binding FilePattern}" />
-                            <DataGridTextColumn Header="Last cycle" Width="150" Binding="{Binding LastCycle}" />
-                            <DataGridTextColumn Header="Problem" Width="200" Binding="{Binding Error}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                        <Border Background="White" Padding="14,11" Margin="1"
+                                Visibility="{Binding ShowsConnectionReason, Converter={StaticResource Visible}}">
+                            <TextBlock Text="{Binding SelectedConnection.NoStationsReason}"
+                                       TextWrapping="Wrap" VerticalAlignment="Top"
+                                       Foreground="#33475B" />
+                        </Border>
+                    </Grid>
 
                     <!--
                         The one action a selected row has, named. A row that
@@ -185,8 +293,8 @@
                         whose settings a technician on a country server does
                         not find at all.
                     -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
-                                Margin="0,10,0,0">
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal"
+                                HorizontalAlignment="Right" Margin="0,10,0,0">
                         <Button Content="Edit settings…" Padding="14,6"
                                 IsEnabled="{Binding HasSelectedStation}"
                                 Click="EditStation" />

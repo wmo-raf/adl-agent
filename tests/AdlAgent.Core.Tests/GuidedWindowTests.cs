@@ -327,8 +327,13 @@ public class GuidedWindowTests
 
         await window.RefreshAsync();
 
-        Assert.True(window.HasNoStations);
-        Assert.Contains("has not linked any stations", window.NoStationsReason);
+        // One connection, and ADL has linked nothing under it -- which is
+        // the connection's own sentence to say now, not the tab's.
+        Assert.False(window.ShowsMachineReason);
+        Assert.True(window.ShowsConnectionReason);
+        Assert.Contains(
+            "has not linked any stations to this connection",
+            window.SelectedConnection!.NoStationsReason);
     }
 
     [Fact]
@@ -351,7 +356,15 @@ public class GuidedWindowTests
         await window.RefreshAsync();
 
         Assert.Equal(NextStepKind.AdlNotAnswering, window.NextStep.Kind);
-        Assert.True(window.HasNoStations);
+
+        // The connection is on screen -- it came off the disk -- so this is
+        // not the empty-list case. It is the untrustworthy-list case, and the
+        // tab says so across both panes rather than letting a cached
+        // connection with nothing under it blame an administrator for a
+        // network outage.
+        Assert.False(window.HasNoConnections);
+        Assert.True(window.ShowsMachineReason);
+        Assert.False(window.ShowsConnectionReason);
 
         // The same empty grid as the test above, and a different problem for
         // a different person. Telling them apart is the whole point.
@@ -366,7 +379,8 @@ public class GuidedWindowTests
 
         await window.RefreshAsync();
 
-        Assert.True(window.HasNoStations);
+        Assert.True(window.HasNoConnections);
+        Assert.True(window.ShowsMachineReason);
         Assert.Contains("service is not running", window.NoStationsReason);
         Assert.DoesNotContain("has not linked any stations", window.NoStationsReason);
     }

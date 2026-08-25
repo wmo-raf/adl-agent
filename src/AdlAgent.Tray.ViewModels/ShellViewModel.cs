@@ -45,6 +45,7 @@ public sealed class ShellViewModel : Observable
     private bool _serviceReached;
     private string _pairingCode = "";
     private string _message = "";
+    private ConnectionViewModel? _selectedConnection;
     private StationViewModel? _selectedStation;
     private NextStep _nextStep = NextSteps.Unknown;
     private int _selectedTab = TrayTabs.Pairing;
@@ -65,8 +66,29 @@ public sealed class ShellViewModel : Observable
     /// <summary>True once the tab has been picked from the machine's state.</summary>
     private bool _tabChosen;
 
-    /// <summary>The station list the rows were last built from, as it arrived.</summary>
-    private string _shownStations = "";
+    /// <summary>True once the connection has been picked from the machine's state.</summary>
+    private bool _connectionChosen;
+
+    /// <summary>
+    /// The connections and stations the rows were last built from, as they
+    /// arrived.
+    /// </summary>
+    /// <remarks>
+    /// Both, in one string, and the connections are not optional. Comparing
+    /// the stations alone -- which is what this did while the list was flat --
+    /// is blind to a connection that has no station links: creating one, or
+    /// switching one off, leaves the flat station list byte-identical, so the
+    /// left-hand list would never learn the connection existed for as long as
+    /// the tray ran.
+    /// <para>
+    /// One string rather than two comparisons because the two halves are
+    /// built from a single walk of the configuration and always move
+    /// together. Rebuilding them independently would let the list say
+    /// "3 need a folder" beside a grid that has already been rebuilt without
+    /// them.
+    /// </para>
+    /// </remarks>
+    private string _shown = "";
 
     /// <summary>True while the settings window is open over this one.</summary>
     private bool _editing;
@@ -79,7 +101,19 @@ public sealed class ShellViewModel : Observable
         RefreshCommand = new AsyncCommand(() => RefreshAsync(), Failed);
     }
 
-    public ObservableCollection<StationViewModel> Stations { get; } = [];
+    /// <summary>
+    /// The connections, each holding its own stations.
+    /// </summary>
+    /// <remarks>
+    /// What the window binds its left-hand list to. The stations are reached
+    /// through the selected one rather than from a flat collection here,
+    /// because a flat collection plus a filter would put the decision "which
+    /// stations belong to this connection" either in this class as a
+    /// repopulate-on-click (which destroys the rows) or in the window as a
+    /// WPF collection view (which the test project cannot reference, this
+    /// assembly being deliberately WPF-free).
+    /// </remarks>
+    public ObservableCollection<ConnectionViewModel> Connections { get; } = [];
 
     public AsyncCommand PairCommand { get; }
 
@@ -252,18 +286,50 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// True when there are no station rows to draw.
+    /// True when there is nothing at all in the left-hand list.
     /// </summary>
     /// <remarks>
+    /// The tab-wide emptiness, and the only one that is about the whole
+    /// machine: the service is not running, this machine is not paired, ADL
+    /// is not answering, or an administrator has linked nothing here. A
+    /// connection that merely has no stations of its own is a fact about one
+    /// row, and says so beside that row rather than across the tab.
+    /// <para>
     /// About the rows on the screen and not about
     /// <see cref="NextStep"/>'s view of what ADL holds, because it decides
-    /// whether to draw a sentence in place of a grid. The two can disagree
-    /// for a moment -- ADL dropping every station while somebody is typing
-    /// into a row leaves the rows there, on purpose -- and when they do, the
-    /// right thing is to leave the rows a technician is working in alone and
-    /// let the line say what has happened.
+    /// whether to draw a sentence in place of a list. The two can disagree
+    /// for a moment -- ADL dropping everything while somebody is typing into
+    /// a row leaves the rows there, on purpose -- and when they do, the right
+    /// thing is to leave the rows a technician is working in alone and let
+    /// the line say what has happened.
+    /// </para>
     /// </remarks>
-    public bool HasNoStations => Stations.Count == 0;
+    public bool HasNoConnections => Connections.Count == 0;
+
+    /// <summary>
+    /// True when the tab should explain the machine instead of drawing a
+    /// list.
+    /// </summary>
+    /// <remarks>
+    /// Either there is nothing to draw, or what would be drawn is a memory:
+    /// during an outage the connections come off the disk, and a cached
+    /// connection with nothing under it would otherwise announce that an
+    /// administrator has not linked anything -- true of the last sync, and
+    /// exactly the wrong person to send somebody to find while the network
+    /// is what is broken.
+    /// </remarks>
+    public bool ShowsMachineReason => HasNoConnections || NextStep.ListIsStale;
+
+    /// <summary>
+    /// True when the selected connection should explain its own empty grid.
+    /// </summary>
+    /// <remarks>
+    /// Only when the machine has nothing to say first. The two sentences are
+    /// answers to different questions and never both right at once: one is
+    /// about this machine, the other about the row somebody just clicked.
+    /// </remarks>
+    public bool ShowsConnectionReason =>
+        !ShowsMachineReason && SelectedConnection?.HasNoStations == true;
 
     /// <summary>
     /// Why the station list is empty, in the words of the reason it is.
@@ -309,6 +375,36 @@ public sealed class ShellViewModel : Observable
             }
         }
     }
+
+    /// <summary>
+    /// Which connection is highlighted, and so whose stations the grid shows.
+    /// </summary>
+    /// <remarks>
+    /// Changing it moves to that connection's first station rather than
+    /// leaving nothing selected. Without that, every click on the left lands
+    /// on an empty grid selection with "Edit settings…" greyed out, and a
+    /// technician has to click twice to do anything -- which is the same
+    /// reason <see cref="Show"/> falls back to the first station when it
+    /// rebuilds.
+    /// </remarks>
+    public ConnectionViewModel? SelectedConnection
+    {
+        get => _selectedConnection;
+        set
+        {
+            if (!Set(ref _selectedConnection, value))
+            {
+                return;
+            }
+
+            SelectedStation = value?.Stations.FirstOrDefault();
+
+            Raise(nameof(HasSelectedConnection));
+            Raise(nameof(ShowsConnectionReason));
+        }
+    }
+
+    public bool HasSelectedConnection => SelectedConnection is not null;
 
     /// <summary>
     /// Which row is highlighted, and so which station the settings window
@@ -509,9 +605,9 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// Replace the rows with what the service just said, keeping the
-    /// selection -- but only when the stations themselves have changed and
-    /// no settings window is open over this one.
+    /// Replace the connections and their rows with what the service just
+    /// said, keeping the selection -- but only when they have changed and no
+    /// settings window is open over this one.
     /// </summary>
     /// <remarks>
     /// Both guards are about the poll rather than about pressing Refresh.
@@ -530,15 +626,15 @@ public sealed class ShellViewModel : Observable
     /// telling the truth.
     /// </para>
     /// <para>
-    /// The comparison is against the stations alone and not the whole answer,
-    /// which also carries the moment of the last sync and the last cycle.
-    /// Those move on every cycle without any station having changed, and
-    /// rebuilding on them would move the highlighted row out from under
+    /// The comparison is against the connections and stations and not the
+    /// whole answer, which also carries the moment of the last sync and the
+    /// last cycle. Those move on every cycle without anything having changed,
+    /// and rebuilding on them would move the highlighted row out from under
     /// somebody about to press Edit settings.
     /// </para>
     /// <para>
-    /// What it does compare is the stations as they arrived, rather than a
-    /// hand-listed set of fields, so a field added to the station snapshot is
+    /// What it does compare is the two lists as they arrived, rather than a
+    /// hand-listed set of fields, so a field added to either snapshot is
     /// noticed here without anybody remembering to add it.
     /// </para>
     /// </remarks>
@@ -549,28 +645,96 @@ public sealed class ShellViewModel : Observable
             return;
         }
 
-        var arrived = JsonSerializer.Serialize(stations.Stations, AgentJson.Options);
+        var arrived = JsonSerializer.Serialize(
+            new { stations.Connections, stations.Stations }, AgentJson.Options);
 
-        if (arrived == _shownStations)
+        if (arrived == _shown)
         {
             return;
         }
 
-        _shownStations = arrived;
+        _shown = arrived;
 
-        var selected = SelectedStation?.StationLinkId;
+        var connection = SelectedConnection?.ConnectionId;
+        var station = SelectedStation?.StationLinkId;
 
-        SelectedStation = null;
-        Stations.Clear();
+        SelectedConnection = null;
+        Connections.Clear();
 
-        foreach (var station in stations.Stations)
+        // Keyed rather than filtered per connection: a device may serve forty
+        // stations across two connections, and this runs on every poll that
+        // moved anything.
+        var byConnection = stations.Stations
+            .GroupBy(each => each.ConnectionId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<AgentStationSnapshot>)[.. group]);
+
+        foreach (var each in stations.Connections)
         {
-            Stations.Add(new StationViewModel(station));
+            byConnection.TryGetValue(each.ConnectionId, out var owned);
+
+            Connections.Add(new ConnectionViewModel(each, owned ?? []));
         }
 
+        SelectedConnection =
+            Connections.FirstOrDefault(each => each.ConnectionId == connection)
+            ?? Choose(stations);
+
+        // After the connection, which has already moved the selection to its
+        // first station. Restoring the station the technician had is only
+        // possible once the rows it might be among exist.
         SelectedStation =
-            Stations.FirstOrDefault(station => station.StationLinkId == selected)
-            ?? Stations.FirstOrDefault();
+            SelectedConnection?.Stations.FirstOrDefault(each => each.StationLinkId == station)
+            ?? SelectedStation;
+    }
+
+    /// <summary>
+    /// Which connection to open on, when there is no previous selection to
+    /// restore.
+    /// </summary>
+    /// <remarks>
+    /// The one the next-step line is pointing at, so a window that says
+    /// "Bind a folder to Kakamega, under Vaisala AWS" opens already showing
+    /// Vaisala AWS. The line names the connection because the list is split
+    /// and the instruction has to be followable; this is the other half of
+    /// the same fix, and it saves the technician the click the line just told
+    /// them to make.
+    /// <para>
+    /// Once, and only from the first answer -- the same rule, for the same
+    /// reason, as the tab. A pane that re-picked "the connection with work in
+    /// it" on every poll would drag somebody off the connection they were
+    /// reading, five seconds after they opened it, and would do it again
+    /// every cycle. Getting it wrong costs one click; getting it wrong
+    /// repeatedly costs the window's trustworthiness.
+    /// </para>
+    /// </remarks>
+    private ConnectionViewModel? Choose(AgentStationsSnapshot stations)
+    {
+        if (_connectionChosen)
+        {
+            return Connections.FirstOrDefault();
+        }
+
+        _connectionChosen = true;
+
+        // The same standing the line is written from, so the station it names
+        // and the connection this opens on are the same station. Asked of the
+        // standing directly rather than of the finished line, because the line
+        // renders a station into a sentence and reading the connection back
+        // out of a sentence is not a thing to do.
+        var standing = StationStanding.Of(stations.Stations);
+
+        var wanted = standing.Kind switch
+        {
+            StandingKind.BindAFolder => standing.Unbound[0].ConnectionId,
+            StandingKind.FixAStation => standing.Failing[0].ConnectionId,
+
+            // Nothing wants a person, so nothing is a better place to start
+            // than the top of the list.
+            _ => (long?)null,
+        };
+
+        return Connections.FirstOrDefault(each => each.ConnectionId == wanted)
+            ?? Connections.FirstOrDefault();
     }
 
     /// <summary>
@@ -644,6 +808,7 @@ public sealed class ShellViewModel : Observable
         nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
-        nameof(Headline), nameof(HasNoStations),
+        nameof(Headline), nameof(HasNoConnections),
+        nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
     ];
 }
