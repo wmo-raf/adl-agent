@@ -99,6 +99,66 @@ public partial class MainWindow : Window
     private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();
 
     /// <summary>
+    /// The right button selects the row it landed on, before the menu over it
+    /// opens.
+    /// </summary>
+    /// <remarks>
+    /// WPF selects on the left button and not on the right, so without this a
+    /// context menu would appear over the row under the pointer and act on
+    /// whichever row was selected before -- opening one station's settings
+    /// from another station's menu, which is a mistake nobody would see
+    /// themselves make.
+    /// <para>
+    /// Deliberately not marked handled: the menu still has to open, and the
+    /// grid still has to do whatever else it does with the press.
+    /// </para>
+    /// </remarks>
+    private void StationRightClicked(object sender, MouseButtonEventArgs args)
+    {
+        if (sender is DataGridRow row)
+        {
+            row.IsSelected = true;
+        }
+    }
+
+    /// <summary>
+    /// Open the selected station's status, and re-read everything once the
+    /// window closes.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as <see cref="OpenSettings"/>, including the refresh
+    /// afterwards. Nothing in the status window writes, so there is nothing of
+    /// its own for the refresh to pick up -- but the poll behind it has been
+    /// suppressed for as long as it was open, and the list is that much out of
+    /// date the moment it closes.
+    /// </remarks>
+    private async void CheckStation(object sender, RoutedEventArgs args)
+    {
+        if (_shell.BeginWatching() is not { } status)
+        {
+            return;
+        }
+
+        try
+        {
+            new StationStatusWindow(status) { Owner = this }.ShowDialog();
+
+            await _shell.RefreshAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            // An async void handler: nothing above this can catch anything.
+            _shell.Failed(exception);
+
+            // Idempotent, and the window's own OnClosed has usually done it
+            // already. What this covers is a window that threw before it ever
+            // opened, where leaving the flag set would freeze the station list
+            // for as long as the tray runs.
+            _shell.EndEditing();
+        }
+    }
+
+    /// <summary>
     /// Enter opens the highlighted station.
     /// </summary>
     /// <remarks>
