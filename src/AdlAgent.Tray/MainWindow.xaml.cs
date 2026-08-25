@@ -94,6 +94,19 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Ask for the code box on a machine that is already paired.
+    /// </summary>
+    /// <remarks>
+    /// The decision is the view model's — what the line and the box do about
+    /// each other is <see cref="ShellViewModel.PairAgain"/>, where a test can
+    /// reach it. This forwards a click, which is all this file is for.
+    /// </remarks>
+    private void PairAgain(object sender, RoutedEventArgs args) => _shell.PairAgain();
+
+    /// <summary>Put the code box away again, unused.</summary>
+    private void CancelPairAgain(object sender, RoutedEventArgs args) => _shell.CancelPairAgain();
+
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
 
     private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();

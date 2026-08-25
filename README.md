@@ -162,13 +162,12 @@ it. It opened on Pairing whatever the machine was, and a paired device whose
 administrator had not yet linked any stations showed the same empty grid as
 one whose sync was failing.
 
-- **it opens on the tab that matters** — Pairing while there is a code to
-  paste, Stations once there is not, and the Status tab on a machine that has
-  not been told where its ADL is, because a code box is the one thing that
-  cannot be the answer there. Chosen once, from the first answer the service
-  gives, and never moved again: a window that re-picked on every poll would
-  take somebody off the tab they had just opened, five seconds after they
-  opened it.
+- **it opens on the tab that matters** — Status while there is something to
+  do to this machine, Stations once there is not. Chosen once, from the first
+  answer the service gives, and never moved again: a window that re-picked on
+  every poll would take somebody off the tab they had just opened, five
+  seconds after they opened it. (It opened on a Pairing tab then; that tab has
+  since been folded into Status — see below.)
 - **one line, always right, on every tab** — what to do now and who has to do
   it. Paste the code your administrator gave you; wait while ADL links
   stations to this device; bind a folder to *Kisumu*; nothing, this machine is
@@ -194,6 +193,55 @@ one whose sync was failing.
   `net10.0-windows` tray assembly into one the `net10.0` test project can
   reference, which is what makes any of the above assertable. See
   *Testing approach*.
+
+The Pairing tab, folded in — choosing which tab to open on treated the
+symptom. The disease was that a code box a machine uses once had the leftmost
+tab of the window to itself, beside a copy of four facts the Status tab
+already carried, so a technician on a server that paired months ago could
+still walk into a screen with nothing on it to do. It is now a row on Status,
+under the state it is the remedy for.
+
+- **the row carries state, history and remedy** — `Paired` / `Not paired yet`
+  / `Revoked by ADL`, the moment it last paired beneath that, and the code box
+  beneath *that* when there is a code to type. It is the shape the ADL row
+  above it already had, where an address that has not been set carries what to
+  do about it — so the page has one rule rather than two, and `RePairNeeded`
+  is no longer printed at a technician in the enum's own words.
+- **a working machine can still pair again** — quietly, from a *Pair again…*
+  line rather than a standing box. This is not a courtesy: ADL rotates a
+  pairing code **without revoking the token it replaces**, deliberately, so a
+  machine still shipping data does not stop between an administrator's click
+  and a technician getting round to typing the code in (see
+  `AgentDevice.issue_pairing_code` in `adl-agent-plugin`). A machine being
+  rotated therefore stays `Paired` and never asks for anything, and a box that
+  appeared only on failure would leave whoever is holding that code with
+  nowhere to put it. It closes again on **Cancel**, taking the half-typed code
+  with it — offered only on a machine that is paired, because the window hides
+  rather than closes and a box opened by mistake would otherwise still be
+  standing open tomorrow.
+- **ADL's facts appear once ADL has said anything** — gated on the machine
+  having *ever* paired, and pointedly not on its being paired now. The two
+  read the same on a new install and come apart on a revocation: a machine cut
+  off this morning wants its last heartbeat, its last sync and its last
+  problem on screen more than at any other time in its life. The strip above
+  every tab is gated on the same question, so it cannot go on announcing a
+  scan interval the machine is not keeping.
+- **ADL's verdict is in words** — the heartbeat answer carries the state ADL
+  stores, `cycle_stuck`, and the plugin keeps the words for it on its own side
+  of the wire — so the row and the sentence above it printed an identifier at
+  a technician. The tray renders them instead: *Collecting and sending*,
+  *Heartbeats are late*, *No heartbeats arriving*, *Alive but not scanning*,
+  *Nothing reported yet*. The pair worth separating is the middle two: both
+  mean nothing is arriving, and the difference is whether somebody has to walk
+  to the machine. Rendered here rather than asked for, because 26 instances do
+  not upgrade together and a phrase that only arrived from a new enough ADL
+  would leave the old ones showing exactly what this fixes; a state this build
+  has never heard of loses its underscores rather than its readability.
+- **and one Refresh, not two** — the button on Status re-read the local
+  service, which the window already does every five seconds on its own, while
+  the similarly-named one above the connection list was the one that actually
+  called ADL. The first is gone; the second is **Sync with ADL**, which is the
+  word the rest of the window uses for it.
 
 ## Structure
 
@@ -326,7 +374,7 @@ from the ADL instance they are paired with.
 notification area — green when the machine is paired, synced and ADL is
 answering; amber when it is not yet doing its job, whether or not the person
 who can change that is standing at it; red when the service is not running —
-and opens a window with three tabs: **Pairing**, **Stations**, and **Status**.
+and opens a window with two tabs: **Stations** and **Status**.
 
 Amber covers waiting as well as acting, deliberately. A machine paired ten
 seconds ago whose administrator has not linked a station to it yet is not
@@ -334,10 +382,10 @@ collecting anything, and green there would say it was. The line in the window
 is what says whether the next move is the technician's or somebody else's;
 the colour only says whether this machine is working.
 
-It opens on the tab that matches the machine — Pairing while there is a code
-to paste, Stations once there is not — and every tab carries one line at the
-top saying what to do now and who has to do it, including when the answer is
-that there is nothing to do. The line follows the machine on the window's own
+It opens on the tab that matches the machine — Status while there is something
+to do to the machine itself, Stations once there is not — and every tab carries
+one line at the top saying what to do now and who has to do it, including when
+the answer is that there is nothing to do. The line follows the machine on the window's own
 poll, so nobody has to press anything to find out that an administrator has
 linked a station.
 
@@ -467,8 +515,8 @@ the service gives, and never moved again: a pane that re-chose on every poll
 would drag somebody off the connection they were reading, five seconds after
 they opened it.
 
-Selecting a station and pressing **Edit settings…** — or double-clicking it,
-or pressing Enter on it — opens that station's settings in a window of its
+**Edit settings…** on a row — or double-clicking it, or pressing Enter on it —
+opens that station's settings in a window of its
 own, titled with the station *and* its connection, because pointing a station
 at the wrong vendor's folder is a mistake nothing refuses and which surfaces a
 cycle later as "scanned 0".
@@ -604,8 +652,8 @@ not something to write to a technician's disk every session.
 ### Pairing
 
 Ask your ADL administrator to create the device in the admin and give you the
-pairing code, then paste it into the tray's Pairing tab — or, on a machine
-with no desktop:
+pairing code, then paste it into the tray's Status tab, under **Pairing** —
+or, on a machine with no desktop:
 
 ```powershell
 adl-agent pair KX7M-93QA

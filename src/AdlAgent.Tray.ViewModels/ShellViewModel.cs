@@ -48,7 +48,7 @@ public sealed class ShellViewModel : Observable
     private ConnectionViewModel? _selectedConnection;
     private StationViewModel? _selectedStation;
     private NextStep _nextStep = NextSteps.Unknown;
-    private int _selectedTab = TrayTabs.Pairing;
+    private int _selectedTab = TrayTabs.Stations;
 
     /// <summary>
     /// The stations as ADL last sent them, whatever the rows below are
@@ -118,6 +118,26 @@ public sealed class ShellViewModel : Observable
     private bool _connectionClicked;
 
     /// <summary>
+    /// True once somebody has asked for the code box back on a machine that
+    /// is already paired.
+    /// </summary>
+    /// <remarks>
+    /// Window state rather than machine state, and so here rather than in the
+    /// service: the machine is paired and working either way, and what has
+    /// changed is only that somebody standing at it has a code in their hand.
+    /// <para>
+    /// It exists because a rotation never revokes anything. ADL issues a
+    /// fresh code with the old token deliberately left working -- so that a
+    /// machine still shipping data does not stop between an administrator's
+    /// click and a technician getting round to typing the code in -- which
+    /// means a machine being rotated stays <c>Paired</c> and never asks for
+    /// anything. Without this, whoever is holding that code has nowhere on
+    /// screen to put it.
+    /// </para>
+    /// </remarks>
+    private bool _pairAgain;
+
+    /// <summary>
     /// The moment the sync this window asked for was started, while its answer
     /// is still owed.
     /// </summary>
@@ -135,7 +155,6 @@ public sealed class ShellViewModel : Observable
         _agent = agent;
 
         PairCommand = new AsyncCommand(PairAsync, Failed, () => PairingCode.Trim().Length > 0);
-        RefreshCommand = new AsyncCommand(() => RefreshAsync(), Failed);
         SyncCommand = new AsyncCommand(SyncAsync, Failed, () => _awaitedSync is null);
     }
 
@@ -155,10 +174,8 @@ public sealed class ShellViewModel : Observable
 
     public AsyncCommand PairCommand { get; }
 
-    public AsyncCommand RefreshCommand { get; }
-
     /// <summary>
-    /// Ask ADL for this device's configuration now: the Refresh above the
+    /// Ask ADL for this device's configuration now: Sync with ADL, above the
     /// connection list.
     /// </summary>
     /// <remarks>
@@ -205,13 +222,225 @@ public sealed class ShellViewModel : Observable
 
     public string DeviceId => _status?.DeviceId?.ToString(CultureInfo.CurrentCulture) ?? "-";
 
-    public string PairingState => _status?.PairingState ?? "Unknown";
+    /// <summary>What this machine's pairing is, in words a technician reads.</summary>
+    /// <remarks>
+    /// A rendering, and named as one -- <see cref="AgentStatusSnapshot"/>
+    /// carries a <c>PairingState</c> of its own, which is the raw state and
+    /// is what <see cref="IsPaired"/> and <see cref="NeedsRePairing"/> below
+    /// read. Two properties of one name holding different strings, three
+    /// lines apart, is a mistake somebody makes exactly once and then cannot
+    /// find.
+    /// <para>
+    /// The words themselves are the ones the rest of the window already uses:
+    /// <see cref="Headline"/> says ADL has "revoked" this machine, and a row
+    /// beneath it reading <c>RePairNeeded</c> would be the same fact in a
+    /// vocabulary nobody outside this repository speaks.
+    /// </para>
+    /// </remarks>
+    public string PairingLine
+    {
+        get
+        {
+            if (_status is null)
+            {
+                return "Unknown";
+            }
+
+            if (NeedsRePairing)
+            {
+                return "Revoked by ADL";
+            }
+
+            return IsPaired ? "Paired" : "Not paired yet";
+        }
+    }
 
     public bool IsPaired => _status?.PairingState == nameof(CorePairingState.Paired);
 
     public bool NeedsRePairing => _status?.RePairNeeded == true;
 
-    public string FleetStatus => _status?.FleetStatus ?? "-";
+    /// <summary>True once ADL has ever admitted this machine.</summary>
+    /// <remarks>
+    /// The question every fact ADL supplies is gated on, and deliberately not
+    /// <see cref="IsPaired"/>. That one is false during a revocation as well
+    /// as before a first pairing, and the two want opposite things: a machine
+    /// that has never paired has nothing to show, while a machine ADL revoked
+    /// this morning wants its last heartbeat, its last sync and its last
+    /// problem on screen more than at any other time in its life.
+    /// <para>
+    /// <c>PairedAt</c> survives a revocation -- <c>MarkRevoked</c> flips a
+    /// flag and keeps the rest -- which is what makes it the right thing to
+    /// ask.
+    /// </para>
+    /// </remarks>
+    public bool HasEverPaired => _status?.PairedAt is not null;
+
+    /// <summary>
+    /// When this machine last paired, in the tense the line above it needs.
+    /// </summary>
+    /// <remarks>
+    /// Two readings of one moment, because the state it sits under is in two
+    /// different tenses. On a paired machine the moment is when what is on
+    /// screen started being true; on a revoked one it is when it stopped, and
+    /// "since" there would quietly claim the machine is still paired.
+    /// </remarks>
+    public string PairedSince
+    {
+        get
+        {
+            if (_status?.PairedAt is not { } paired)
+            {
+                return "";
+            }
+
+            var moment = Display.Moment(paired);
+
+            return NeedsRePairing
+                ? string.Create(CultureInfo.CurrentCulture, $"paired {moment} until then")
+                : string.Create(CultureInfo.CurrentCulture, $"since {moment}");
+        }
+    }
+
+    /// <summary>True when there is somewhere on screen to type a pairing code.</summary>
+    /// <remarks>
+    /// Three machines want one, and only two of them are asking. A machine
+    /// that has never paired and a machine ADL has revoked both say so;
+    /// a machine being rotated says nothing at all, because its old token is
+    /// still working on purpose -- so the third is
+    /// <see cref="_pairAgain"/>, which is somebody saying it for it.
+    /// <para>
+    /// Nothing at all until the service has answered. A code box drawn beside
+    /// a line reading "Checking what this machine is doing" would be offering
+    /// a remedy for a state nobody has established yet.
+    /// </para>
+    /// </remarks>
+    public bool ShowsPairingBox =>
+        _status is not null && (!IsPaired || NeedsRePairing || _pairAgain);
+
+    /// <summary>True when a working machine should offer to pair again.</summary>
+    /// <remarks>
+    /// A line rather than a box, because on all but a handful of days in a
+    /// machine's life there is no code to type -- and a code box standing
+    /// open on a machine that must not use one is the screen this tab was
+    /// folded in to delete.
+    /// </remarks>
+    public bool ShowsPairAgain => _status is not null && IsPaired && !_pairAgain;
+
+    /// <summary>
+    /// True when the box on screen was asked for rather than needed.
+    /// </summary>
+    /// <remarks>
+    /// The way back out, and only where there is one to take. A machine that
+    /// has never paired, or one ADL has revoked, has nothing to cancel to:
+    /// the box is what that machine is for until a code goes into it, and a
+    /// Cancel there would offer to hide the only thing on the page worth
+    /// pressing.
+    /// <para>
+    /// It follows that this can only be true on a paired machine -- which is
+    /// also the machine where leaving the box open costs something, because
+    /// the tray's window hides rather than closes, so a box opened by mistake
+    /// would still be standing there tomorrow.
+    /// </para>
+    /// </remarks>
+    public bool ShowsCancelPairing => _pairAgain && IsPaired;
+
+    /// <summary>Ask for the code box on a machine that is already paired.</summary>
+    /// <remarks>
+    /// Local, and so not a command: it goes nowhere near the service. What it
+    /// undoes is <see cref="ShowsPairAgain"/> in the same movement, so the
+    /// line and the box it opens are never both on screen.
+    /// </remarks>
+    public void PairAgain()
+    {
+        if (_pairAgain)
+        {
+            return;
+        }
+
+        _pairAgain = true;
+
+        Message = "";
+
+        Raise(nameof(ShowsPairingBox));
+        Raise(nameof(ShowsPairAgain));
+        Raise(nameof(ShowsCancelPairing));
+    }
+
+    /// <summary>Put the code box away again, unused.</summary>
+    /// <remarks>
+    /// The code goes with it. What is in that box is one specific credential
+    /// somebody has decided not to redeem, and a half-typed one reappearing
+    /// the next time a technician opens this window is at best confusing and
+    /// at worst the wrong device's.
+    /// </remarks>
+    public void CancelPairAgain()
+    {
+        if (!_pairAgain)
+        {
+            return;
+        }
+
+        _pairAgain = false;
+
+        PairingCode = "";
+        Message = "";
+
+        Raise(nameof(ShowsPairingBox));
+        Raise(nameof(ShowsPairAgain));
+        Raise(nameof(ShowsCancelPairing));
+    }
+
+    /// <summary>What ADL last made of this machine, in words.</summary>
+    /// <remarks>
+    /// ADL sends the state it stores -- <c>cycle_stuck</c> -- and has the
+    /// words for it (<c>Liveness.LABELS</c> in the agent plugin) but keeps
+    /// them on its own side of the wire, so this row and the header sentence
+    /// above it were printing an identifier at a technician.
+    /// <para>
+    /// Rendered here rather than asked for, because an agent meets whichever
+    /// plugin version its country is running: 26 instances do not upgrade
+    /// together, and a phrase that only arrived from a new enough ADL would
+    /// leave the old ones showing exactly what this fixes. If ADL ever does
+    /// send the words, they win and this becomes the fallback.
+    /// </para>
+    /// <para>
+    /// The consequence rather than the mechanism, and short enough to sit in
+    /// a sentence. The pair worth separating is <c>offline</c> from
+    /// <c>cycle_stuck</c>: both mean nothing is arriving, and the difference
+    /// is whether somebody has to walk to the machine.
+    /// </para>
+    /// </remarks>
+    public string FleetStatus
+    {
+        get
+        {
+            var state = _status?.FleetStatus;
+
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                return "-";
+            }
+
+            return FleetStates.TryGetValue(state, out var said) ? said : Humanised(state);
+        }
+    }
+
+    /// <summary>
+    /// A state this build has never heard of, made readable anyway.
+    /// </summary>
+    /// <remarks>
+    /// ADL owns this vocabulary and can add to it, and an agent in the field
+    /// is months behind whatever HQ deploys. The words will be wrong -- they
+    /// are ADL's identifier with its underscores taken out -- but "Clock
+    /// skewed" is a thing a technician can read down a telephone and
+    /// <c>clock_skewed</c> is not.
+    /// </remarks>
+    private static string Humanised(string state)
+    {
+        var words = state.Replace('_', ' ').Trim();
+
+        return words.Length == 0 ? "-" : char.ToUpperInvariant(words[0]) + words[1..];
+    }
 
     public string LastHeartbeat => Display.Moment(_status?.LastHeartbeatAt);
 
@@ -227,9 +456,39 @@ public sealed class ShellViewModel : Observable
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"{_status.ClockSkewSeconds} seconds");
 
-    public string PairedAt => Display.Moment(_status?.PairedAt);
+    /// <summary>What the agent last saw go wrong, or that nothing has.</summary>
+    /// <remarks>
+    /// A word rather than an empty row. A blank beside a label reads as a
+    /// value the service failed to send, which is the opposite of what it
+    /// means here -- the same mistake <see cref="AdlUrl"/> two dozen lines
+    /// above was fixed for.
+    /// </remarks>
+    public string LastError => string.IsNullOrWhiteSpace(_status?.LastError)
+        ? "None"
+        : _status!.LastError!;
 
-    public string LastError => _status?.LastError ?? "";
+    /// <summary>
+    /// The three facts ADL supplies that the header strip carries, or nothing
+    /// at all before ADL has supplied any.
+    /// </summary>
+    /// <remarks>
+    /// Assembled here rather than as runs in the window because a
+    /// <c>Run</c> cannot be hidden -- it is not an element -- and the
+    /// alternatives were a second line in the strip, which makes the header
+    /// permanently taller, or a strip that goes on saying "scans every 10
+    /// minutes" about a machine ADL has never told anything to scan.
+    /// <para>
+    /// Gated with the rows on the Status tab and by the same question, so the
+    /// page and the strip three inches above it cannot disagree about whether
+    /// there is anything to say yet.
+    /// </para>
+    /// </remarks>
+    public string HeaderFacts => HasEverPaired
+        ? string.Create(
+            CultureInfo.CurrentCulture,
+            $"  ·  last heartbeat {LastHeartbeat}  ·  last synced {LastSynced}"
+            + $"  ·  scans {CheckInterval}")
+        : "";
 
     /// <summary>
     /// What this machine is doing about updating itself, in one sentence.
@@ -296,7 +555,7 @@ public sealed class ShellViewModel : Observable
 
             return string.Create(
                 CultureInfo.CurrentCulture,
-                $"Paired to {AdlUrl} as {DeviceName} — ADL says {FleetStatus}.");
+                $"Paired to {AdlUrl} as {DeviceName} — ADL says: {FleetStatus}.");
         }
     }
 
@@ -430,10 +689,9 @@ public sealed class ShellViewModel : Observable
     /// <remarks>
     /// Changing it moves to that connection's first station rather than
     /// leaving nothing selected. Without that, every click on the left lands
-    /// on an empty grid selection with "Edit settings…" greyed out, and a
-    /// technician has to click twice to do anything -- which is the same
-    /// reason <see cref="Show"/> falls back to the first station when it
-    /// rebuilds.
+    /// on a grid with no row selected, and a technician has to click twice to
+    /// do anything -- which is the same reason <see cref="Show"/> falls back
+    /// to the first station when it rebuilds.
     /// </remarks>
     public ConnectionViewModel? SelectedConnection
     {
@@ -563,8 +821,8 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// Ask ADL for this device's configuration now (the Refresh above the
-    /// connection list).
+    /// Ask ADL for this device's configuration now (Sync with ADL, above
+    /// the connection list).
     /// </summary>
     /// <remarks>
     /// The agent starts the call and answers at once, so this method returns
@@ -657,6 +915,7 @@ public sealed class ShellViewModel : Observable
         }
 
         PairingCode = "";
+        _pairAgain = false;
         Message = string.Create(
             CultureInfo.CurrentCulture,
             $"Paired. ADL knows this machine as {paired.Value!.DeviceName}.");
@@ -1076,6 +1335,25 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
+    /// ADL's liveness states, in the words the window says them in.
+    /// </summary>
+    /// <remarks>
+    /// Kept beside nothing: this is a copy of a vocabulary ADL owns, and it
+    /// is a copy on purpose -- see <see cref="FleetStatus"/>. A state added
+    /// in ADL and not here falls through to <see cref="Humanised"/> rather
+    /// than to the identifier.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> FleetStates =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["online"] = "Collecting and sending",
+            ["degraded"] = "Heartbeats are late",
+            ["offline"] = "No heartbeats arriving",
+            ["cycle_stuck"] = "Alive but not scanning",
+            ["unknown"] = "Nothing reported yet",
+        };
+
+    /// <summary>
     /// Everything derived from the status answer.
     /// </summary>
     /// <remarks>
@@ -1089,9 +1367,12 @@ public sealed class ShellViewModel : Observable
         nameof(ServiceRunning), nameof(AdlUrl), nameof(IsConfigured), nameof(NeedsConfiguring),
         nameof(ConfigurationHint),
         nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
-        nameof(PairingState), nameof(IsPaired), nameof(NeedsRePairing), nameof(FleetStatus),
+        nameof(PairingLine), nameof(IsPaired), nameof(NeedsRePairing), nameof(HasEverPaired),
+        nameof(PairedSince), nameof(ShowsPairingBox), nameof(ShowsPairAgain),
+        nameof(ShowsCancelPairing),
+        nameof(FleetStatus),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
-        nameof(ClockSkew), nameof(PairedAt), nameof(LastError), nameof(UpdateStatus),
+        nameof(ClockSkew), nameof(LastError), nameof(UpdateStatus), nameof(HeaderFacts),
         nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
     ];
