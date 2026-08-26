@@ -94,6 +94,47 @@ lets the cheap path be cheap.
   is a companion change in
   [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin).
 
+Date-structured folders
+([wmo-raf/adl#289](https://github.com/wmo-raf/adl/issues/289)) — the vendor
+that files by date does not write into the folder an administrator typed. It
+writes into `2026\08\21` below it, and ADL has let a station say so
+(`dir_structured_by_date`, a granularity, a month format) for as long as the
+FTP plugin has existed.
+
+- **the tree is expanded, not guessed at** — a station filed by date becomes
+  one walking target per dated directory, and each of those joins the same
+  grouping as any other folder. Two stations sharing a tree still walk it
+  once between them, and everything downstream — the candidate window, the
+  size cap, the readiness check, the lazy hashing, the newest-first order —
+  is the flat path unchanged.
+- **carved in the station's timezone** — the folder names come off the
+  station's own `timezone`, which is HQ's tier, and never off this machine's
+  clock. A country server set to UTC serving Nairobi stations would otherwise
+  spend the first three hours of every local day looking in yesterday's
+  folder and reporting that nothing was wrong.
+- **all four granularities and all six month formats** — `year`, `month`,
+  `day`, `hour`; `m`, `n`, `M`, `b`, `F`, `f` (`08`, `8`, `Aug`, `aug`,
+  `August`, `august`), spelled in English whatever the machine's locale, and
+  `m` when ADL says nothing. These have to agree with what ADL and the FTP
+  plugin write or a file lands somewhere nobody looks.
+- **a routine cycle walks a bounded recent window** — 48 hours by default,
+  which is 49 directories at hour granularity and three at day. Expanding
+  from the collection start date to now would be 8 760 enumerations every ten
+  minutes for a station whose files are all in the newest one or two. The
+  agent reads `dated_folder_window_hours` from the device block of the sync
+  response when ADL sends it (`0` is the current folder alone); the plugin
+  does not serve that field yet, so today every install walks 48 hours.
+- **the sweep walks the rest** — once a day the station expands the tree back
+  to the deepest date ADL has given it (its watermark or its collection start
+  date), up to 10 000 directories. That is thirteen months of hourly folders
+  and twenty-seven years of daily ones; a station that wants more is told its
+  oldest are out of reach rather than left to find out.
+- **a folder that is not there yet is a non-event** — the newest directory in
+  a live tree does not exist until the vendor writes the day's first file, so
+  nothing is said about an empty one. What is worth a sentence is a station
+  that found nothing anywhere, and that is said once for the station rather
+  than once per folder.
+
 The tray and configuration app ([wmo-raf/adl#281](https://github.com/wmo-raf/adl/issues/281))
 — everything a station technician does on the machine itself, without an ADL
 login.
@@ -1144,16 +1185,13 @@ there.
   underneath — the pipe, the protocol, the five commands, the typed answers
   the window binds to, and every decision the view models make about them —
   is under test.
-- **Date-structured folders are not walked.** ADL lets a station link say its
-  files sit under dated sub-folders (`dir_structured_by_date`, with a
-  granularity and a month format); the cycle walks only the folder itself. No
-  ticket covers this — #279 specified flat enumeration and #280 is
-  `DIRECT_FETCH` plus the reconciliation sweep — and the range machinery it
-  needs (every dated directory from the link's start date to now) is not
-  what #280 brought — the sweep only lowers the floor of the one folder that
-  is already walked, and `DIRECT_FETCH` builds names rather than directory
-  trees. Until a ticket covers it, such a station reports the reason on every
-  cycle, under either strategy, rather than quietly collecting nothing.
+- **A `DIRECT_FETCH` station ignores dated sub-folders.** The tree is
+  expanded for `ENUMERATE` only. A station that both files by date and builds
+  its filenames would need the date in the folder *and* in the name, which no
+  vendor this has been built against does — so such a station looks for its
+  constructed names in the folder ADL named, and says on every cycle that the
+  two settings do not go together. It is a warning rather than a refusal: the
+  station still collects from the folder it was pointed at.
 
 ## Testing approach
 

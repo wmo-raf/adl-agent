@@ -84,6 +84,9 @@ public static class SyncConfigs
         bool enabled = true,
         string listingStrategy = ListingStrategies.Enumerate,
         bool dirStructuredByDate = false,
+        string? dateGranularity = null,
+        string? monthDirFormat = null,
+        string timezone = "Africa/Nairobi",
         DateTimeOffset? startDate = null,
         DateTimeOffset? lastReceivedAt = null,
         bool everReceived = true) =>
@@ -104,11 +107,13 @@ public static class SyncConfigs
                 StabilityWindowSeconds = stabilityWindowSeconds,
                 ListingStrategy = listingStrategy,
                 DirStructuredByDate = dirStructuredByDate,
+                DateGranularity = dateGranularity,
+                MonthDirFormat = monthDirFormat,
             },
             Admin = new StationLinkAdminConfig
             {
                 Enabled = enabled,
-                Timezone = "Africa/Nairobi",
+                Timezone = timezone,
                 // The watermark unless a test says otherwise, because that
                 // is what a real instance sends: ADL derives the watermark
                 // from the collection start date and only ever pulls it
@@ -172,4 +177,11 @@ public static class SyncConfigs
     /// <summary>The same device, told how often to reconcile.</summary>
     public static SyncResponse ReconcilingEvery(this SyncResponse config, int? hours) =>
         config with { Device = config.Device with { ReconciliationIntervalHours = hours } };
+
+    /// <summary>
+    /// The same device, told how far back an ordinary cycle walks a dated
+    /// folder tree.
+    /// </summary>
+    public static SyncResponse WalkingDatedFoldersBack(this SyncResponse config, int? hours) =>
+        config with { Device = config.Device with { DatedFolderWindowHours = hours } };
 }

@@ -70,6 +70,30 @@ public sealed record DeviceConfig
     /// turned it off" are opposite instructions.
     /// </remarks>
     public int? ReconciliationIntervalHours { get; init; }
+
+    /// <summary>
+    /// How far back an ordinary cycle walks the dated sub-folders of a
+    /// station filed by date. Zero or less is the current folder alone.
+    /// </summary>
+    /// <remarks>
+    /// The bound on the one thing about a dated tree that is not free.
+    /// Expanding from a station's collection start date to now is 8,760
+    /// directories for a year at hour granularity, and an ordinary cycle
+    /// would enumerate every one of them every ten minutes for a station
+    /// whose files are all in the newest one or two -- so a routine cycle
+    /// takes this window and the reconciliation sweep takes the rest, once a
+    /// day.
+    /// <para>
+    /// Nullable for the same reason
+    /// <see cref="ReconciliationIntervalHours"/> is: an ADL that predates the
+    /// setting sends nothing, and <see cref="Cycle.DatedFolders.DefaultRecentWindow"/>
+    /// is the right reading of silence. A zero would be indistinguishable
+    /// from that if this were an <see cref="int"/>, and "the field is absent"
+    /// and "the administrator asked for today's folder only" are different
+    /// instructions.
+    /// </para>
+    /// </remarks>
+    public int? DatedFolderWindowHours { get; init; }
 }
 
 public sealed record ConnectionConfig

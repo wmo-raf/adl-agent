@@ -124,6 +124,23 @@ public sealed class WindowsFileMetadataSource : IFileMetadataSource
         }
     }
 
+    public string Descend(string folderPath, IReadOnlyList<string> segments)
+    {
+        var path = folderPath;
+
+        foreach (var segment in segments)
+        {
+            // One at a time rather than Path.Combine over the lot, because
+            // Combine throws the whole prefix away the moment a segment looks
+            // rooted -- and a station whose month format an administrator
+            // typed as "\\01" would then have the agent walk the drive root
+            // instead of the folder it was given.
+            path = Path.Combine(path, segment.Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+
+        return path;
+    }
+
     private static DateTimeOffset Window(DateTimeOffset lastWrite, DateTimeOffset creation) =>
         lastWrite > creation ? lastWrite : creation;
 

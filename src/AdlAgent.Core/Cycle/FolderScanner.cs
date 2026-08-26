@@ -30,6 +30,14 @@ namespace AdlAgent.Core.Cycle;
 /// hashing, same newest-first order.
 /// </para>
 /// <para>
+/// <b>A station's folder is not always one folder.</b> A vendor that files by
+/// date writes into <c>2026\08\21</c> below the folder an administrator
+/// typed, so such a station expands to the dated directories it actually
+/// holds files in (see <see cref="DatedFolders"/>) and every one of them
+/// joins the same grouping as any other folder -- two stations sharing a
+/// dated tree still walk it once between them.
+/// </para>
+/// <para>
 /// <b>Cheapest question first.</b> An entry is filtered against the
 /// watermark, then the size cap, then asked whether it is finished being
 /// written, and only then read. The walk hands over name, size and time for
@@ -75,13 +83,21 @@ public sealed class FolderScanner
         var folders = new Dictionary<string, List<Walked>>(StringComparer.Ordinal);
         var fetching = new List<Fetched>();
 
+        // What each walking station was actually offered, across however many
+        // directories it turned out to be spread over. Kept per station and
+        // not per folder because the sentence at the end of the scan is the
+        // station's, and a station filed by date whose vendor has not written
+        // today's folder yet must not be told about that directory -- only
+        // about having found nothing anywhere.
+        var walking = new List<Sought>();
+
         // What was reconciled, as opposed to what the plan asked for. A
         // station the scan turns away -- no folder, no pattern, Direct Fetch
         // settings that do not add up -- did not offer anything, let alone
         // everything, and must not have its day's reconciliation spent on it.
         var reconciled = new HashSet<long>();
 
-        foreach (var target in Targets(configuration, sweep, now, tallies))
+        foreach (var target in Targets(configuration, sweep, now, tallies, walking))
         {
             if (target.Reconciling)
             {
@@ -115,10 +131,13 @@ public sealed class FolderScanner
         foreach (var targets in folders.Values)
         {
             // The folder as ADL spells it, not the key it was grouped under.
-            // What goes to the seam is always a path an administrator typed;
-            // the key is this method's private business.
+            // What goes to the seam is always a path an administrator typed,
+            // or one dated directory below it; the key is this method's
+            // private business.
             Walk(targets[0].Folder, targets, now, matched);
         }
+
+        Diagnose(walking);
 
         foreach (var target in fetching)
         {
@@ -204,11 +223,12 @@ public sealed class FolderScanner
     /// this whole product exists to stop shipping to countries: it has to
     /// arrive at HQ as a sentence, not as an absence.
     /// </remarks>
-    private static IEnumerable<Target> Targets(
+    private IEnumerable<Target> Targets(
         AgentConfiguration configuration,
         SweepPlan sweep,
         DateTimeOffset now,
-        Dictionary<long, LinkTally> tallies)
+        Dictionary<long, LinkTally> tallies,
+        List<Sought> walking)
     {
         // One compiled glob per distinct pattern, for the length of this
         // scan. Several stations sharing a naming convention is the norm,
@@ -239,28 +259,59 @@ public sealed class FolderScanner
                     continue;
                 }
 
-                if (link.Config.DirStructuredByDate)
+                if (ListingStrategies.IsDirectFetch(link.Config.ListingStrategy))
                 {
-                    // ADL lets a station say its files live under dated
-                    // sub-folders, and this version walks only the folder
-                    // itself. Said out loud rather than walked anyway and
-                    // found empty: a station that scans zero files for a
-                    // reason nobody is told is the silence this whole product
-                    // exists to remove.
-                    tally.Note(
-                        "This station's files are in dated sub-folders, which this version of the agent does not walk. "
-                        + "Point it at the folder the files are actually in, or wait for support to land.");
+                    if (link.Config.DirStructuredByDate)
+                    {
+                        // A station that both files by date and builds its
+                        // filenames would need the date in the folder and in
+                        // the name, which no vendor this has been built
+                        // against does. Said out loud, because the alternative
+                        // is a station asking after names in a folder its
+                        // vendor stopped writing to and reporting only that
+                        // it found none of them -- which reads as a mistyped
+                        // prefix and sends somebody changing the wrong thing.
+                        tally.Note(
+                            "This station builds its filenames and also says they are in dated sub-folders. "
+                            + "The agent looks for them in the folder itself. Clear one of the two settings in "
+                            + "ADL.");
+                    }
+
+                    if (Fetching(link, tally, configuration.Sync.Limits, sweep, now) is { } fetched)
+                    {
+                        yield return fetched;
+                    }
 
                     continue;
                 }
 
-                Target? target = ListingStrategies.IsDirectFetch(link.Config.ListingStrategy)
-                    ? Fetching(link, tally, configuration.Sync.Limits, sweep, now)
-                    : ListingStrategies.IsEnumerate(link.Config.ListingStrategy)
-                        ? Walking(link, tally, configuration.Sync.Limits, patterns, sweep)
-                        : Unknown(link, tally);
+                if (!ListingStrategies.IsEnumerate(link.Config.ListingStrategy))
+                {
+                    // Said rather than guessed at. A newer ADL naming a
+                    // strategy this version does not implement is the one
+                    // case where doing the familiar thing anyway would be
+                    // worst: the folder it names may be enormous, and walking
+                    // it is exactly what the unknown strategy was chosen to
+                    // avoid.
+                    tally.Note(
+                        $"This station is set to {link.Config.ListingStrategy}, which this version of the agent "
+                        + "does not know. Update the agent, or set it back to enumerate in ADL.");
 
-                if (target is not null)
+                    continue;
+                }
+
+                var sought = Walking(
+                    link, tally, configuration.Sync.Limits, patterns, sweep, now,
+                    DatedFolders.RecentWindow(configuration.Sync.Device.DatedFolderWindowHours));
+
+                if (sought is null)
+                {
+                    continue;
+                }
+
+                walking.Add(sought);
+
+                foreach (var target in sought.Targets)
                 {
                     yield return target;
                 }
@@ -268,13 +319,25 @@ public sealed class FolderScanner
         }
     }
 
-    /// <summary>One station whose files are found by walking its folder.</summary>
-    private static Walked? Walking(
+    /// <summary>
+    /// One station whose files are found by walking, and every folder that
+    /// means.
+    /// </summary>
+    /// <remarks>
+    /// One folder for almost every station. A station filed by date is the
+    /// exception, and it is one folder per dated directory in the window --
+    /// each of them an ordinary walking target from that point on, grouped
+    /// and walked exactly like any other folder, so a second station sharing
+    /// the tree costs nothing.
+    /// </remarks>
+    private Sought? Walking(
         StationLinkConfig link,
         LinkTally tally,
         AgentLimits limits,
         Dictionary<string, FilePattern> patterns,
-        SweepPlan sweep)
+        SweepPlan sweep,
+        DateTimeOffset now,
+        TimeSpan recentWindow)
     {
         var glob = link.Config.FilePattern ?? "";
 
@@ -301,8 +364,57 @@ public sealed class FolderScanner
         // about it here.
         var reconciling = sweep.Includes(link.Id);
         var floor = reconciling ? Lower(link.Watermark, link.Admin.StartDate) : link.Watermark;
+        var root = link.Config.LocalFolderPath.Trim();
 
-        return new Walked(link, tally, limits, reconciling, pattern, floor);
+        if (!link.Config.DirStructuredByDate)
+        {
+            return new Sought(link, tally, pattern, root, Dated: false,
+                [new Walked(link, tally, limits, reconciling, root, pattern, floor)]);
+        }
+
+        // How far back the directories go, which is not the same question as
+        // how old a file may be. An ordinary cycle takes the recent window and
+        // a sweep takes ADL's floor, and neither is the other: a folder named
+        // for yesterday can hold a file written this morning -- a logger
+        // filling yesterday's file past midnight, a backfill copied in -- so
+        // raising the directory floor to the watermark would skip exactly the
+        // directory that file is in. What the watermark filters is files, and
+        // it still does, inside every folder walked.
+        //
+        // A station ADL has put no floor under at all cannot be swept deeper
+        // than it is walked: nothing says how far back its files were ever
+        // wanted, and picking a number would be this agent guessing at an
+        // administrator's decision.
+        var from = reconciling
+            ? Deepest(link.Watermark, link.Admin.StartDate) ?? now - recentWindow
+            : now - recentWindow;
+        var expanded = DatedFolders.For(
+            link.Config, link.Admin.Timezone, from, now,
+            reconciling ? DatedFolders.MostPerSweep : DatedFolders.MostPerCycle);
+
+        if (expanded.Problem is not null)
+        {
+            tally.Note(expanded.Problem);
+
+            return null;
+        }
+
+        if (expanded.Truncated && reconciling)
+        {
+            // Even the deep pass stopped short, which no station filed at a
+            // sensible granularity can manage. This is the only case where
+            // backlog really is out of reach, so it is the only one worth
+            // telling an operator to act on.
+            tally.Note(
+                $"This station's dated folders go back further than the {DatedFolders.MostPerSweep} even a "
+                + "full reconciliation walks, so its oldest are out of reach. Move its collection start date "
+                + "forward in ADL, or file it at a coarser granularity.");
+        }
+
+        return new Sought(link, tally, pattern, root, Dated: true, expanded.Segments
+            .Select(segments => new Walked(
+                link, tally, limits, reconciling, _files.Descend(root, segments), pattern, floor))
+            .ToList());
     }
 
     /// <summary>
@@ -325,6 +437,29 @@ public sealed class FolderScanner
 
         return left < right ? left : right;
     }
+
+    /// <summary>
+    /// The older of two dates, where absent means "the other one" rather than
+    /// "no floor".
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Lower"/>, and the difference matters only to the
+    /// directories a sweep expands to. As a floor on a file's timestamp,
+    /// absent means offer everything, and <see cref="Lower"/> is right to
+    /// answer null the moment either side is missing. As a depth to walk a
+    /// tree to, absent means ADL did not say -- and a station sent a
+    /// collection start date and no watermark, which is every station ADL has
+    /// not yet received anything for, would otherwise have its sweep stop at
+    /// the recent window and never reach its own backlog.
+    /// </remarks>
+    private static DateTimeOffset? Deepest(DateTimeOffset? left, DateTimeOffset? right) =>
+        (left, right) switch
+        {
+            (null, null) => null,
+            (null, _) => right,
+            (_, null) => left,
+            _ => left < right ? left : right,
+        };
 
     /// <summary>One station whose filenames are built rather than found.</summary>
     private static Fetched? Fetching(
@@ -371,25 +506,14 @@ public sealed class FolderScanner
         return new Fetched(link, tally, limits, reconciling, expected.Names);
     }
 
-    /// <summary>
-    /// A station set to something this agent has never heard of.
-    /// </summary>
-    /// <remarks>
-    /// Said rather than guessed at. A newer ADL naming a strategy this
-    /// version does not implement is the one case where doing the familiar
-    /// thing anyway would be worst: the folder it names may be enormous, and
-    /// walking it is exactly what the unknown strategy was chosen to avoid.
-    /// </remarks>
-    private static Walked? Unknown(StationLinkConfig link, LinkTally tally)
-    {
-        tally.Note(
-            $"This station is set to {link.Config.ListingStrategy}, which this version of the agent does not know. "
-            + "Update the agent, or set it back to enumerate in ADL.");
-
-        return null;
-    }
-
     /// <summary>One folder, walked once, offered to everything that shares it.</summary>
+    /// <remarks>
+    /// Nothing is said about this folder here, however empty it was. A
+    /// station filed by date is spread over as many folders as the window
+    /// holds and the newest of them does not exist until the vendor writes
+    /// the day's first file -- so what a station has to say is said once it
+    /// has been offered all of them, in <see cref="Diagnose"/>.
+    /// </remarks>
     private void Walk(
         string folder, List<Walked> targets, DateTimeOffset now, List<Match> matched)
     {
@@ -408,14 +532,42 @@ public sealed class FolderScanner
             }
         }
 
-        foreach (var target in targets.Where(target => target.Tally.Scanned == 0))
+        foreach (var target in targets)
         {
-            // Said out loud, because the two ways a station goes silent look
-            // identical from HQ and are fixed differently: the folder is not
-            // there, or the pattern is not the vendor's naming.
-            target.Tally.Note(entries == 0
-                ? $"Nothing is in {folder}, or this machine cannot see it."
-                : $"None of the {entries} files in {folder} match '{target.Pattern.Text}'.");
+            target.Entries = entries;
+        }
+    }
+
+    /// <summary>
+    /// What each walking station has to say for itself, once every folder of
+    /// its own has been walked.
+    /// </summary>
+    /// <remarks>
+    /// Said out loud, because the two ways a station goes silent look
+    /// identical from HQ and are fixed differently: the folder is not there,
+    /// or the pattern is not the vendor's naming.
+    /// <para>
+    /// Per station rather than per folder, which is the difference a dated
+    /// tree makes. A directory the vendor has not created yet is a
+    /// non-event -- every station filed by day passes through one every
+    /// midnight -- and a station spread over forty-nine hourly folders would
+    /// otherwise report the first empty one as though something were wrong
+    /// with it. What is worth a sentence is a station that found nothing
+    /// anywhere.
+    /// </para>
+    /// </remarks>
+    private static void Diagnose(List<Sought> walking)
+    {
+        foreach (var sought in walking.Where(sought => sought.Tally.Scanned == 0))
+        {
+            var entries = sought.Targets.Sum(target => target.Entries);
+            var where = sought.Dated
+                ? $"the {sought.Targets.Count} dated folder(s) below {sought.Root} this cycle looked in"
+                : sought.Root;
+
+            sought.Tally.Note(entries == 0
+                ? $"Nothing is in {where}, or this machine cannot see it."
+                : $"None of the {entries} files in {where} match '{sought.Pattern.Text}'.");
         }
     }
 
@@ -531,12 +683,13 @@ public sealed class FolderScanner
     /// what the candidate window admits. What that means differs by strategy;
     /// what it means to the cycle is the same, which is why it is here.
     /// </param>
+    /// <param name="Folder">
+    /// The folder this target's files are in: the one ADL spells, or -- for a
+    /// station filed by date -- one dated directory below it. Carried rather
+    /// than derived, because a station is only sometimes one folder.
+    /// </param>
     private abstract record Target(
-        StationLinkConfig Link, LinkTally Tally, AgentLimits Limits, bool Reconciling)
-    {
-        /// <summary>The folder this station's files are in, as ADL spells it.</summary>
-        public string Folder => Link.Config.LocalFolderPath.Trim();
-    }
+        StationLinkConfig Link, LinkTally Tally, AgentLimits Limits, bool Reconciling, string Folder);
 
     /// <summary>A station whose files are found by walking its folder.</summary>
     /// <param name="Floor">
@@ -548,9 +701,19 @@ public sealed class FolderScanner
         LinkTally Tally,
         AgentLimits Limits,
         bool Reconciling,
+        string Folder,
         FilePattern Pattern,
         DateTimeOffset? Floor)
-        : Target(Link, Tally, Limits, Reconciling);
+        : Target(Link, Tally, Limits, Reconciling, Folder)
+    {
+        /// <summary>How many entries the walk of this folder went past.</summary>
+        /// <remarks>
+        /// Written by the walk and read by <see cref="Diagnose"/>, which is
+        /// the one number that tells "this folder is not there" apart from
+        /// "your pattern does not match what is in it".
+        /// </remarks>
+        public int Entries { get; set; }
+    }
 
     /// <summary>A station whose filenames are built rather than found.</summary>
     /// <param name="Names">The filenames to ask the filesystem about, newest first.</param>
@@ -560,5 +723,24 @@ public sealed class FolderScanner
         AgentLimits Limits,
         bool Reconciling,
         IReadOnlyList<string> Names)
-        : Target(Link, Tally, Limits, Reconciling);
+        : Target(Link, Tally, Limits, Reconciling, Link.Config.LocalFolderPath.Trim());
+
+    /// <summary>
+    /// One walking station and every folder it turned out to be.
+    /// </summary>
+    /// <remarks>
+    /// The scan's own bookkeeping, and the reason a station filed by date can
+    /// be diagnosed as one station rather than as forty-nine folders. Not a
+    /// <see cref="Target"/>: nothing walks a Sought, the walk is of the
+    /// folders inside it.
+    /// </remarks>
+    /// <param name="Root">The folder ADL named, which is what a sentence names.</param>
+    /// <param name="Dated">True when <paramref name="Root"/> is a tree rather than a folder.</param>
+    private sealed record Sought(
+        StationLinkConfig Link,
+        LinkTally Tally,
+        FilePattern Pattern,
+        string Root,
+        bool Dated,
+        IReadOnlyList<Walked> Targets);
 }

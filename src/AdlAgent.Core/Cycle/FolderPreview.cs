@@ -60,6 +60,21 @@ public sealed class FolderPreview
     /// </remarks>
     public const int MostNamesTried = 500;
 
+    /// <summary>
+    /// The most dated sub-folders one preview of a station filed by date will
+    /// walk.
+    /// </summary>
+    /// <remarks>
+    /// Well below what a cycle expands to, and for the same reason
+    /// <see cref="MostNamesTried"/> is below
+    /// <see cref="ExpectedFiles.MostPerCycle"/>: a cycle runs every ten
+    /// minutes and may spend a second on it, while this runs between two
+    /// keystrokes. Fifty folders is two days of hourly ones and seven weeks
+    /// of daily ones, which is enough to tell a tree the vendor writes into
+    /// from one nobody does -- the only question a preview is asked.
+    /// </remarks>
+    public const int MostFoldersWalked = 50;
+
     /// <summary>How many matched names the answer carries back.</summary>
     private const int SampleSize = 10;
 
@@ -77,21 +92,12 @@ public sealed class FolderPreview
     /// The clock the DIRECT_FETCH names are built from. Ignored under
     /// ENUMERATE, which has no clock in it.
     /// </param>
-    public FolderPreviewResult Preview(StationLinkAppConfig config, DateTimeOffset now)
+    public FolderPreviewResult Preview(
+        StationLinkAppConfig config, string? timezoneId, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(config.LocalFolderPath))
         {
             return Problem(config, "Type the folder this station's files are written into.");
-        }
-
-        if (config.DirStructuredByDate)
-        {
-            // The same sentence the cycle would report, said before the
-            // setting is saved rather than a check interval later.
-            return Problem(
-                config,
-                "This station's files are in dated sub-folders, which this version of the agent does not walk. "
-                + "Point it at the folder the files are actually in.");
         }
 
         if (ListingStrategies.IsDirectFetch(config.ListingStrategy))
@@ -106,11 +112,21 @@ public sealed class FolderPreview
                 $"This station is set to {config.ListingStrategy}, which this version of the agent does not know.");
         }
 
-        return Walking(config);
+        return Walking(config, timezoneId, now);
     }
 
     /// <summary>The enumerate strategy's answer: one walk, counted.</summary>
-    private FolderPreviewResult Walking(StationLinkAppConfig config)
+    /// <remarks>
+    /// Or as many walks as a dated tree turns out to be, which is the one
+    /// place a preview and a cycle look at different folders: a cycle walks
+    /// the whole recent window and this walks the newest
+    /// <see cref="MostFoldersWalked"/> of it. The question is the same one
+    /// either way -- do these settings pick out this station's files -- and
+    /// the folders it is asked of are the newest, which are the ones the
+    /// technician can check against what the vendor just wrote.
+    /// </remarks>
+    private FolderPreviewResult Walking(
+        StationLinkAppConfig config, string? timezoneId, DateTimeOffset now)
     {
         var pattern = FilePattern.For(config.FilePattern);
 
@@ -122,29 +138,56 @@ public sealed class FolderPreview
                 + "Without one no file in this folder can be said to be this station's.");
         }
 
+        var root = config.LocalFolderPath;
+        var folders = new List<string> { root };
+        var dated = config.DirStructuredByDate;
+
+        if (dated)
+        {
+            // No floor. The newest few folders are the question, not the
+            // backlog: a preview that expanded a year of a tree would take
+            // longer than the technician's patience and answer nothing extra.
+            var expanded = DatedFolders.For(config, timezoneId, from: null, now, MostFoldersWalked);
+
+            if (expanded.Problem is not null)
+            {
+                return Problem(config, expanded.Problem);
+            }
+
+            folders = expanded.Segments.Select(segments => _files.Descend(root, segments)).ToList();
+        }
+
         var examined = 0;
         var matches = 0;
         var truncated = false;
         var sample = new List<FileFacts>();
 
-        foreach (var facts in _files.Enumerate(config.LocalFolderPath))
+        foreach (var folder in folders)
         {
-            if (examined >= MostEntriesExamined)
+            foreach (var facts in _files.Enumerate(folder))
             {
-                truncated = true;
+                if (examined >= MostEntriesExamined)
+                {
+                    truncated = true;
 
+                    break;
+                }
+
+                examined++;
+
+                if (!pattern.Matches(facts.Name))
+                {
+                    continue;
+                }
+
+                matches++;
+                Remember(sample, facts);
+            }
+
+            if (truncated)
+            {
                 break;
             }
-
-            examined++;
-
-            if (!pattern.Matches(facts.Name))
-            {
-                continue;
-            }
-
-            matches++;
-            Remember(sample, facts);
         }
 
         return new FolderPreviewResult
@@ -161,8 +204,12 @@ public sealed class FolderPreview
             // seam answers a folder that is not there and a folder that is
             // empty the same way, so this says both.
             Problem = examined == 0
-                ? "Nothing was found in this folder. Check that the path is right and that this "
-                    + "machine can read it."
+                ? dated
+                    ? $"Nothing was found in the {folders.Count} dated sub-folders below this folder that were "
+                        + "looked in. Check that the path, the granularity and the month format match what the "
+                        + "vendor writes, and that this machine can read them."
+                    : "Nothing was found in this folder. Check that the path is right and that this "
+                        + "machine can read it."
                 : null,
         };
     }
