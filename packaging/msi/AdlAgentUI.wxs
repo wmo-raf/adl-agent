@@ -37,6 +37,15 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
   <!--
+    Where the pictures below are. The same fallback AdlAgent.wxs carries and
+    for the same reason: build-msi.ps1 always passes -d AssetsDir, and a WiX
+    <?define?> is file-scoped, so a file that names a path needs its own.
+  -->
+  <?ifndef AssetsDir?>
+  <?define AssetsDir = "assets" ?>
+  <?endif?>
+
+  <!--
     What the agent itself will accept, said again in the only language a
     Windows Installer control condition speaks.
 
@@ -117,25 +126,87 @@
           because the honest answer is reassuring: nothing is being checked
           now, and nothing here can tell them whether it will work.
         -->
-        <Control Id="NotChecked" Type="Text" X="20" Y="180" Width="320" Height="40" NoPrefix="yes" Text="The address is not contacted now: a site is often installed before its firewall rule or its certificate exists. Whether ADL answers is shown in the ADL Agent window, on the Status tab." />
+        <Control Id="NotChecked" Type="Text" X="20" Y="176" Width="320" Height="32" NoPrefix="yes" Text="The address is not contacted now: a site is often installed before its firewall rule or its certificate exists. Whether ADL answers is shown in the ADL Agent window, on the Status tab." />
+
+        <!--
+          Here rather than on the finish screen, where an installer that
+          offered this would usually put it, because Windows Installer makes
+          shortcuts inside the install transaction: by the time anybody sees
+          the last screen this one has already been made or not. Offering it
+          there would mean a custom action creating a file after the fact —
+          which this package has none of, and which would leave an icon that
+          an uninstall does not take away.
+
+          Ticked by default. The property behind it is defaulted in
+          AdlAgent.wxs as well, which is what keeps a silent self-update — a
+          run with no properties and no screen — doing what it did before this
+          existed.
+        -->
+        <Control Id="DesktopShortcut" Type="CheckBox" X="20" Y="212" Width="320" Height="17"
+                 Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1"
+                 Text="Create a shortcut on the desktop" />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
 
         <!--
-          Unavailable until the field holds something the service would
-          accept. The alternative — accept anything, complain later — is an
-          Event Log entry hours later on a machine nobody can reach, instead
-          of a sentence while the person who typed it is still standing there.
+          Always available, and checked when it is pressed rather than as the
+          address is typed.
+
+          It was the other way round first, and the other way round is what
+          anybody would author: Disabled, with an EnableCondition carrying the
+          rule. It does not work, for a reason that is Windows Installer's
+          rather than this package's. An Edit control writes its property when
+          it loses the focus — not as a key is struck — and a control
+          condition is re-evaluated only when a property changes. So ADLURL
+          does not exist while somebody is typing into the field that sets it,
+          nothing re-evaluates, and the button stays grey until the technician
+          happens to press Tab. Which is a thing a technician who has finished
+          typing has no reason to do, so what the screen actually did was
+          refuse every address, including the correct ones. There is no
+          per-keystroke hook to fix that with, and a custom action to add one
+          would ride along on every silent upgrade in the fleet.
+
+          Pressing the button is itself a focus change, though, and it happens
+          before the button's own events fire: by the time the conditions
+          below are evaluated, ADLURL holds what was typed. So the rule moves
+          off the button and onto what the button does — one publish forward,
+          one publish into an explanation, conditioned as exact opposites so
+          that every press does exactly one of them.
+
+          Being the default button, this is also what Enter presses, which
+          before this could only be a keystroke that did nothing.
         -->
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Disabled="yes"
-                 Text="!(loc.WixUINext)"
-                 EnableCondition="$(var.AdlUrlValid)"
-                 DisableCondition="NOT ($(var.AdlUrlValid))" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
+                 Text="!(loc.WixUINext)" />
 
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
           <Publish Event="SpawnDialog" Value="CancelDlg" />
         </Control>
 
+      </Dialog>
+
+      <!--
+        What a refused address gets instead of a screen that will not move.
+
+        The sentence is the one the Problem text on the screen behind carries,
+        and they are shown by the same rule at the same moment. Both, on
+        purpose: the text is where somebody looking at the field sees the
+        problem, and this is what somebody looking at the button sees, because
+        an installer that does nothing when Next is pressed is one a
+        technician concludes is broken and closes.
+
+        A dialog rather than an error record: the Error table is Windows
+        Installer's own, its rows are matched by number, and nothing in this
+        package would be able to say what any of the numbers meant.
+      -->
+      <Dialog Id="AdlUrlBadDlg" Width="270" Height="105" Title="[ProductName] Setup" NoMinimize="yes">
+        <Control Id="Text" Type="Text" X="20" Y="15" Width="230" Height="60" NoPrefix="yes"
+                 Text="That is not an address the agent can use. It must start with https:// (a device token travels on every call), it must be the whole address, and it cannot contain a space. Plain http:// is accepted only for localhost." />
+
+        <Control Id="Return" Type="PushButton" X="102" Y="80" Width="56" Height="17" Default="yes" Cancel="yes"
+                 Text="!(loc.WixUIOK)">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
       </Dialog>
     </UI>
   </Fragment>
@@ -164,6 +235,26 @@
     cleared. An empty field asks a question; a stale one gives a wrong answer.
   -->
   <Fragment>
+    <!--
+      The installer's own two pictures, in place of the toolset's.
+
+      WixUI draws both at exactly one size and Windows Installer stretches or
+      clips anything else without saying so, which is why the sizes are
+      asserted rather than trusted: 493x58 for the strip across the top of
+      every screen, 493x312 for the panel down the left of the first and the
+      last. Both are BMP because a Windows Installer Bitmap control renders
+      BMP out of the Binary table and nothing else — not a WiX limitation and
+      not one a newer toolset lifts.
+
+      Overridden by name rather than by redefining the Binary rows, so the
+      control on the address screen still asks for WixUI_Bmp_Banner and gets
+      whatever these point at. Made by assets/render-icons.sh from the same
+      adl-logo.svg the two program icons come from, and committed, so that
+      nothing in the build has a rasteriser in it.
+    -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(AssetsDir)\installer-banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(AssetsDir)\installer-panel.bmp" />
+
     <UI Id="WixUI_AdlAgent">
       <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
       <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
@@ -221,7 +312,23 @@
         the first window is not always the one that matters, and the Startup
         shortcut remains what puts the tray in front of the right person.
       -->
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="Wix4ShellExec_X64" Order="1" Condition="NOT Installed" />
+      <!--
+        The tick box the window is opened from.
+
+        The Exit dialog's own optional checkbox, which the stock dialog draws
+        as soon as it is given text for it. Ticked by default, so that an
+        install a person watched still ends with the window open and the
+        pairing code box in front of them; unticking it is for somebody
+        installing a room full of machines who does not want a window on each.
+
+        Nothing here reaches an unattended run. `/qn` draws no Exit dialog, so
+        the button that presses the action is never pressed, whatever these
+        properties say.
+      -->
+      <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open ADL Agent now" />
+      <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="Wix4ShellExec_X64" Order="1" Condition="NOT Installed AND WIXUI_EXITDIALOGOPTIONALCHECKBOX" />
 
       <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
 
@@ -248,7 +355,14 @@
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="3" Condition="Installed AND PATCH" />
 
       <Publish Dialog="AdlUrlDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
-      <Publish Dialog="AdlUrlDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+
+      <!--
+        Exact opposites, and tested as such. A press that matched neither
+        would be a button that does nothing; one that matched both would spawn
+        the explanation and then walk past it.
+      -->
+      <Publish Dialog="AdlUrlDlg" Control="Next" Event="SpawnDialog" Value="AdlUrlBadDlg" Order="1" Condition="NOT ($(var.AdlUrlValid))" />
+      <Publish Dialog="AdlUrlDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="2" Condition="$(var.AdlUrlValid)" />
 
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="AdlUrlDlg" Order="1" Condition="NOT Installed" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />

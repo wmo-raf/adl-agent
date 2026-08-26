@@ -104,6 +104,42 @@ Write-Host "==> Verifying $Msi" -ForegroundColor Cyan
 # shows a progress bar.
 # ---------------------------------------------------------------------------
 
+function Get-MsiStreamSize {
+    param([string] $Path, [string] $Name)
+
+    # DataSize on the record, which is the length of the stream the linker
+    # embedded. Reading the stream itself would mean choosing a text encoding
+    # for a bitmap, which is a way to get a wrong answer confidently.
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+
+    $database = $installer.GetType().InvokeMember(
+        "OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
+
+    try {
+        $view = $database.GetType().InvokeMember(
+            "OpenView", "InvokeMethod", $null, $database,
+            @("SELECT Data FROM Binary WHERE Name='$Name'"))
+
+        $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+
+        $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+
+        if (-not $record) {
+            throw "The package has no Binary stream called $Name."
+        }
+
+        $size = $record.GetType().InvokeMember(
+            "DataSize", "GetProperty", $null, $record, 1)
+
+        $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+
+        return $size
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null
+    }
+}
+
 function Get-MsiRows {
     param([string] $Path, [string] $Query, [int] $Columns)
 
@@ -161,17 +197,52 @@ if ($field.Count -ne 1 -or $field[0][1] -ne "ADLURL") {
     throw "AdlUrlDlg has no edit field bound to ADLURL, so nothing anybody types would be installed."
 }
 
-$conditions = Get-MsiRows $Msi "SELECT Control_, Action FROM ControlCondition WHERE Dialog_='AdlUrlDlg'" 2
-$next = @()
+# The rule the screen enforces, in the table it has to be in.
+#
+# On the button's events, not on the button. A Disabled Next with an
+# EnableCondition is the obvious authoring and it cannot work: an Edit control
+# writes its property when it loses focus, a control condition fires when a
+# property changes, so the button stays grey through everything typed into the
+# field beside it and lights up only if the technician presses Tab. Pressing
+# the button is itself a focus change, and it lands before the button's events,
+# so a condition on what the press does sees the address.
+#
+# Both halves, because exactly one of them must match every press: without the
+# refusal a bad address walks through, and without the other the button does
+# nothing at all.
+$press = Get-MsiRows $Msi "SELECT Control_, Event, Condition FROM ControlEvent WHERE Dialog_='AdlUrlDlg'" 3
+$forward = @()
+$refusal = @()
 
-foreach ($condition in $conditions) {
-    if ($condition[0] -eq "Next") {
-        $next += $condition[1]
+foreach ($event in $press) {
+    if ($event[0] -ne "Next") {
+        continue
+    }
+
+    if ($event[1] -eq "NewDialog") {
+        $forward += $event[2]
+    }
+    elseif ($event[1] -eq "SpawnDialog") {
+        $refusal += $event[2]
     }
 }
 
-if (($next -notcontains "Enable") -or ($next -notcontains "Disable")) {
-    throw "AdlUrlDlg's Next button is not conditioned both ways, so it would not follow what is typed."
+if ($forward.Count -ne 1 -or $refusal.Count -ne 1) {
+    throw "AdlUrlDlg's Next button does not publish exactly one way forward and one refusal, so a press would do nothing or do both."
+}
+
+if ($forward[0] -notlike "*ADLURL*" -or $refusal[0] -notlike "*ADLURL*") {
+    throw "AdlUrlDlg's Next button is not conditioned on ADLURL, so it would not follow what is typed."
+}
+
+# And that the refusal leads somewhere. A spawned dialog is modal: one with no
+# way out takes the installer with it.
+$spawnedDialog = (Get-MsiRows $Msi "SELECT Control_, Event, Argument FROM ControlEvent WHERE Dialog_='AdlUrlDlg' AND Event='SpawnDialog'" 3)[0][2]
+
+$wayOut = Get-MsiRows $Msi "SELECT Control_, Event FROM ControlEvent WHERE Dialog_='$spawnedDialog' AND Event='EndDialog'" 2
+
+if ($wayOut.Count -eq 0) {
+    throw "$spawnedDialog is spawned by AdlUrlDlg's Next button and has no way out, so a mistyped address would strand the installer."
 }
 
 # And that somebody double-clicking it is taken there. The screen is reached
@@ -262,6 +333,95 @@ if ($target.Count -ne 1 -or -not $target[0][0]) {
 }
 
 Write-Host "    $($pressed[0][1]) does $launch on $($target[0][0])"
+
+# And only when the tick box on that screen is ticked -- which it opens
+# ticked, because an install a person watched should still end with the window
+# in front of them. The text is what makes the stock Exit dialog draw the box
+# at all, so a package that conditioned the action without setting it would
+# have an action nobody could reach.
+if ($pressed[0][3] -notmatch '(?i)WIXUI_EXITDIALOGOPTIONALCHECKBOX') {
+    throw "The Exit dialog presses $launch without reading its tick box, so unticking it would open the window anyway."
+}
+
+foreach ($property in @("WIXUI_EXITDIALOGOPTIONALCHECKBOX", "WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT")) {
+    $value = Get-MsiRows $Msi "SELECT Value FROM Property WHERE Property='$property'" 1
+
+    if ($value.Count -ne 1 -or -not $value[0][0]) {
+        throw "$property is not in the package, so the last screen would draw no tick box or open with it clear."
+    }
+}
+
+# ---------------------------------------------------------------------------
+# And the pictures are this product's rather than the toolset's
+#
+# Overriding them is a linker variable, which means the way this reverts is
+# silent: drop the variable and the package builds, links, installs and shows
+# the WiX artwork, with nothing broken and nobody told. InstallerArtworkTests
+# checks the sources and the files' own dimensions; this checks that what came
+# out the other end of the linker is not what the toolset ships.
+# ---------------------------------------------------------------------------
+
+Write-Host "==> The screens carry the ADL mark" -ForegroundColor Cyan
+
+foreach ($picture in @("WixUI_Bmp_Banner", "WixUI_Bmp_Dialog")) {
+    $rows = Get-MsiRows $Msi "SELECT Name FROM Binary WHERE Name='$picture'" 1
+
+    if ($rows.Count -ne 1) {
+        throw "The package has no $picture, so a screen would draw nothing where a picture goes."
+    }
+}
+
+# And that what the linker embedded is the file this repository holds, by its
+# length. The Binary table is where the linker put whatever it was pointed at,
+# so a package whose WixVariable was dropped -- and which therefore fell back
+# to the toolset's own artwork, silently, still building and still installing
+# -- differs here and nowhere else anybody would look.
+#
+# Length rather than a hash: MSI hands a stream back through a COM interface
+# that reads it as text, and the encoding gymnastics needed to get bytes out
+# of it are a larger thing to get wrong than the check is worth. Two different
+# pictures at these sizes do not share a byte count.
+$expected = @{
+    "WixUI_Bmp_Banner" = Join-Path $assets "installer-banner.bmp"
+    "WixUI_Bmp_Dialog" = Join-Path $assets "installer-panel.bmp"
+}
+
+foreach ($picture in $expected.Keys) {
+    $embedded = Get-MsiStreamSize $Msi $picture
+    $ours = (Get-Item $expected[$picture]).Length
+
+    if ($embedded -ne $ours) {
+        throw "$picture in the package is $embedded bytes and $($expected[$picture]) is $ours. The installer is showing somebody else's artwork."
+    }
+}
+
+Write-Host "    both screens carry the mark from $(Split-Path -Leaf $assets)/"
+
+# ---------------------------------------------------------------------------
+# The desktop icon is a choice, and the default is what protects the fleet
+#
+# A self-update is `msiexec /i ... /qn`: no properties, no screen, nobody
+# watching. The component is conditioned on the tick box, and a major upgrade
+# removes the old product before installing the new one -- so without a
+# default in the property table every machine in every fleet would lose its
+# desktop icon the night it updated itself, and nobody would connect the two.
+# ---------------------------------------------------------------------------
+
+Write-Host "==> The desktop icon survives an install that asks nobody" -ForegroundColor Cyan
+
+$desktop = Get-MsiRows $Msi "SELECT Value FROM Property WHERE Property='INSTALLDESKTOPSHORTCUT'" 1
+
+if ($desktop.Count -ne 1 -or -not $desktop[0][0]) {
+    throw "INSTALLDESKTOPSHORTCUT has no default in the package. A silent upgrade would take the desktop icon off every machine in the fleet."
+}
+
+$conditioned = Get-MsiRows $Msi "SELECT Component, Condition FROM Component WHERE Component='AgentDesktopShortcut'" 2
+
+if ($conditioned.Count -ne 1 -or $conditioned[0][1] -notmatch '(?i)INSTALLDESKTOPSHORTCUT') {
+    throw "AgentDesktopShortcut is not conditioned on INSTALLDESKTOPSHORTCUT, so the tick box on the address screen would do nothing."
+}
+
+Write-Host "    INSTALLDESKTOPSHORTCUT defaults to $($desktop[0][0]); the component reads it"
 
 # ---------------------------------------------------------------------------
 # And leaves the window somewhere to be found again
