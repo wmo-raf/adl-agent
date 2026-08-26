@@ -621,6 +621,77 @@ public class GuidedWindowTests
         Assert.NotEqual("-", window.CheckInterval);
     }
 
+    // ---------- the cadence nothing else on the screen would reveal ----------
+    //
+    // A deployment-wide setting moves no config_version, so a machine whose
+    // sweeps were switched off centrally looks exactly like one sweeping
+    // nightly. The row exists so that the difference is readable in the
+    // building rather than only from HQ.
+
+    [Fact]
+    public async Task The_window_says_how_often_this_machine_reconciles()
+    {
+        await using var agent = new AgentHarness();
+        agent.Server.Config = agent.Server.Config.ReconcilingEvery(168);
+
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // Days, not 168 hours: a week is the reading, and the arithmetic
+        // between the two is work a technician should not be doing.
+        Assert.Equal("every 7 days", window.Reconciles);
+    }
+
+    [Fact]
+    public async Task A_deployment_that_switched_sweeps_off_says_so_on_the_machine()
+    {
+        await using var agent = new AgentHarness();
+        agent.Server.Config = agent.Server.Config.ReconcilingEvery(0);
+
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // Not a fault and not a dash. Switching sweeps off is a choice a
+        // deployment on a thin link is entitled to make, and the person
+        // standing here should see that it was made rather than wonder why a
+        // file backfilled last week never went.
+        Assert.Equal("never", window.Reconciles);
+    }
+
+    [Fact]
+    public async Task An_ADL_that_never_said_reads_as_the_daily_default()
+    {
+        await using var agent = new AgentHarness();
+        agent.Server.Config = agent.Server.Config.ReconcilingEvery(null);
+
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // What the machine will actually do, which is the question the row
+        // answers. An instance that predates the setting says nothing, and
+        // the sweep's own default is daily -- so the window says daily rather
+        // than a dash that would read as "nobody knows".
+        Assert.Equal("every 24 hours", window.Reconciles);
+    }
+
     [Fact]
     public async Task The_header_says_how_long_ago_as_well_as_when()
     {

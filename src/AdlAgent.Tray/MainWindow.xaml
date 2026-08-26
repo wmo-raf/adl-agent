@@ -988,6 +988,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
@@ -1001,6 +1002,16 @@
                         <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
                         <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
                         <!--
+                            The cadence nothing else on this screen would
+                            reveal. A deployment-wide setting moves no
+                            configuration version, so a machine whose sweeps
+                            were switched off centrally looks identical to one
+                            sweeping nightly — until a technician wonders why
+                            a file backfilled last week never went.
+                        -->
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Reconciles" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding Reconciles}" />
+                        <!--
                             What this machine is doing about its version. The
                             number itself is in the block above; this is the half
                             that changes, and the alternative, when HQ says a
@@ -1009,11 +1020,11 @@
                             is pinned, unable to reach the feed, or simply already
                             current.
                         -->
-                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
                                    TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
+                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
                     </Grid>
                 </StackPanel>
             </TabItem>

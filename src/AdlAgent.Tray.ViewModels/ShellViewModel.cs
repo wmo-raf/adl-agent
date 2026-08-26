@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AdlAgent.Core;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 using AdlAgent.Windows.Platform;
@@ -553,6 +554,38 @@ public sealed class ShellViewModel : Observable
     public string ClockSkew => _status?.ClockSkewSeconds is null
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"{_status.ClockSkewSeconds} seconds");
+
+    /// <summary>
+    /// How often a station offers its whole folder, in the words the sweep
+    /// itself would use.
+    /// </summary>
+    /// <remarks>
+    /// Read through <see cref="ReconciliationSweep.Interval"/> rather than
+    /// off the number, so the window cannot say "every 24 hours" about a
+    /// machine whose sweep has been switched off, or disagree with the clamp
+    /// on a cadence ADL typed as a decade.
+    /// <para>
+    /// "Never" is not a fault and is not shown as one. A deployment whose
+    /// link cannot carry a full folder's manifest is entitled to switch
+    /// sweeps off, and the technician standing here should be able to see
+    /// that it was switched off on purpose rather than wonder why an old file
+    /// never went.
+    /// </para>
+    /// </remarks>
+    public string Reconciles
+    {
+        get
+        {
+            if (_status is null)
+            {
+                return "-";
+            }
+
+            var interval = ReconciliationSweep.Interval(_status.ReconciliationIntervalHours);
+
+            return interval is null ? "never" : Display.Every(interval.Value);
+        }
+    }
 
     /// <summary>What the agent last saw go wrong, or that nothing has.</summary>
     /// <remarks>
@@ -1805,7 +1838,7 @@ public sealed class ShellViewModel : Observable
         nameof(FleetStatus), nameof(FleetTone),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(LastHeartbeatAgo), nameof(LastSyncedAgo),
-        nameof(ClockSkew), nameof(LastError), nameof(UpdateStatus),
+        nameof(ClockSkew), nameof(Reconciles), nameof(LastError), nameof(UpdateStatus),
         nameof(ShowsAdlFacts), nameof(ShowsPairedTo), nameof(ShowsHeadline),
         nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
