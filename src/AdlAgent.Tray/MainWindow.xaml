@@ -123,7 +123,22 @@
                     SelectedIndex="{Binding SelectedTab, Mode=TwoWay}">
 
             <!-- ============ Stations (stories 6, 7, 9) ============ -->
-            <TabItem Header="Stations">
+            <!--
+                Greyed out until this machine has paired, because until then
+                what is behind it is one sentence and a tab that looks like a
+                working one is a tab somebody clicks during the five minutes
+                when the only thing to do is on the other one. Which states,
+                and why RePairNeeded is not one of them, is TrayTabs.Available.
+
+                ShowOnDisabled, or the tooltip is the one thing here that
+                silently does nothing: a disabled TabItem does not raise the
+                mouse events a tooltip is shown from, so the explanation for
+                why a control cannot be used would be readable only on the
+                control when it can.
+            -->
+            <TabItem Header="Stations" IsEnabled="{Binding StationsAvailable}"
+                     ToolTipService.ShowOnDisabled="True"
+                     ToolTip="Available once this machine is paired with ADL.">
                 <!--
                     Two panes: the connections ADL has given this machine, and
                     the stations under the one selected. Split because a

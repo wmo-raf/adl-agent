@@ -114,6 +114,26 @@
     <Property Id="ADLURL" Secure="yes" />
 
     <!--
+      Whether the desktop icon is made, from the tick box on the address
+      screen.
+
+      It defaults to on, and that default is the load-bearing half. A silent
+      self-update is passed no properties at all, and a component conditioned
+      on a property nobody set would be a component not installed — so every
+      machine in the fleet would quietly lose its desktop icon the night it
+      updated itself. Defaulted, an install that shows nobody anything does
+      exactly what it did before this tick box existed.
+
+      The cost of that default is stated rather than hidden: a technician who
+      unticks it gets the icon back at the next upgrade. Remembering the
+      choice would mean a registry search into this property, and AppSearch
+      runs in the execute sequence too — the same trap the address itself is
+      kept out of, on the same grounds. An icon that comes back is a smaller
+      surprise than an address that does.
+    -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+
+    <!--
       The screens. One of them asks for the address above; the rest are the
       stock WiX ones. None of it is reachable from `msiexec /qn`, which is how
       the agent installs a new version over itself.
@@ -231,38 +251,48 @@
             Target="[INSTALLFOLDER]adl-agent-tray.exe"
             WorkingDirectory="INSTALLFOLDER" />
 
-        <!--
-          And on the desktop, which is what the technician who has just
-          watched the install finish is actually looking at. The Start menu
-          entry is for somebody who already knows this is installed, and the
-          Startup one does not appear until the next logon; between them they
-          left a successful install with no visible outcome at all, which is
-          the moment a phone call starts.
-
-          Unconditionally, and not behind a checkbox. Every choice on an
-          installer screen is a question somebody has to have an opinion about
-          and then explain over a phone, and this one has a single right
-          answer for this audience.
-
-          In this component rather than one of its own, so that all three
-          shortcuts share a lifetime: they point at the same program, and a
-          desktop icon that outlived it would be a broken shortcut on a server
-          for the rest of the machine's life.
-        -->
-        <Shortcut
-            Id="AgentTrayDesktopShortcut"
-            Directory="DesktopFolder"
-            Name="ADL Agent"
-            Description="$(TrayShortcutDescription)"
-            Target="[INSTALLFOLDER]adl-agent-tray.exe"
-            WorkingDirectory="INSTALLFOLDER" />
-
         <RemoveFolder Id="RemoveAgentMenuFolder" On="uninstall" />
 
         <RegistryValue
             Root="HKLM"
             Key="Software\WMO RAF\ADL Agent"
             Name="TrayShortcuts"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+
+      <!--
+        And on the desktop, which is what the technician who has just watched
+        the install finish is actually looking at. The Start menu entry is for
+        somebody who already knows this is installed, and the Startup one does
+        not appear until the next logon; between them they left a successful
+        install with no visible outcome at all, which is the moment a phone
+        call starts.
+
+        A component of its own so that the tick box on the address screen can
+        turn it off, and only it: the Start menu and Startup shortcuts are not
+        a preference — the Startup one is the whole of what "the window comes
+        back at the next logon" means, and the machine this runs on is often
+        one nobody logs into on purpose.
+
+        Not Permanent, like the component above and for the same reason: an
+        icon that outlived the program it points at would be a broken shortcut
+        on a server for the rest of the machine's life.
+      -->
+      <Component Id="AgentDesktopShortcut" Directory="DesktopFolder" Bitness="always64"
+                 Condition="INSTALLDESKTOPSHORTCUT">
+        <Shortcut
+            Id="AgentTrayDesktopShortcut"
+            Name="ADL Agent"
+            Description="$(TrayShortcutDescription)"
+            Target="[INSTALLFOLDER]adl-agent-tray.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\WMO RAF\ADL Agent"
+            Name="DesktopShortcut"
             Type="integer"
             Value="1"
             KeyPath="yes" />

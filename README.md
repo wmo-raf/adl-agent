@@ -129,11 +129,13 @@ Installers and auto-update ([wmo-raf/adl#282](https://github.com/wmo-raf/adl/iss
 — how the agent gets onto a machine, and how it stays current on one nobody
 can reach.
 
-- **two installers** — an MSI that installs a Windows Service (delayed
-  auto-start, restarting itself on failure, its state directory locked to
-  SYSTEM and Administrators) and a Velopack per-user install for a technician
-  without administrator rights. Both self-contained: nothing to install first.
-  See [`packaging/`](packaging/README.md).
+- **two installers, one of them built** — an MSI that installs a Windows
+  Service (delayed auto-start, restarting itself on failure, its state
+  directory locked to SYSTEM and Administrators) and a Velopack per-user
+  install for a technician without administrator rights. Self-contained:
+  nothing to install first. Only the MSI is produced today — the per-user tier
+  is behind `pack.ps1 -WithPerUserTier` and nothing passes it, for the reason
+  under *the per-user tier* below. See [`packaging/`](packaging/README.md).
 - **the feed is ADL** — these machines have one network path, so the update
   feed is served by the instance they already talk to. The agent asks on every
   cycle, as the tier it was installed as, and ADL picks the package that tier
@@ -168,6 +170,16 @@ one whose sync was failing.
   every poll would take somebody off the tab they had just opened, five
   seconds after they opened it. (It opened on a Pairing tab then; that tab has
   since been folded into Status — see below.)
+- **the station list is shut until the machine is paired** — greyed rather
+  than empty, because a tab that looks like a working one is a tab somebody
+  clicks, reads and clicks back out of during the five minutes when the only
+  thing to do is on the other one. It opens on a redeemed code and nothing
+  more: a machine that paired ten seconds ago and has heard nothing back can
+  open it, because anything stricter would tie a tab to the network and leave
+  a correctly-paired machine behind an unwritten firewall rule shut for ever.
+  A machine whose token ADL revoked keeps its list throughout — it has been
+  collecting for months, and the list is what whoever is looking at it came to
+  read.
 - **one line, always right, on every tab** — what to do now and who has to do
   it. Paste the code your administrator gave you; wait while ADL links
   stations to this device; bind a folder to *Kisumu*; nothing, this machine is
@@ -282,11 +294,14 @@ double-click it.
   that is not the address is one they click through.
 - **it refuses what the agent would refuse, and says why** — the same rule
   `AgentOptions.ResolveApiBaseAddress` enforces, said again in Windows
-  Installer's condition syntax, with *Next* unavailable until the field holds
-  an address the service would accept. The two copies are checked against each
-  other over a table of addresses (`InstallerDialogTests`), because nothing
-  else could: WiX stores a control condition as an opaque string and never
-  parses it.
+  Installer's condition syntax. *Next* is always available and pressing it on
+  an address the service would refuse explains why rather than moving on —
+  which is not a preference: an `Edit` control writes its property on focus
+  loss and a control condition fires on property change, so a button gated on
+  the address never sees one being typed and greys out the correct ones too.
+  The two copies of the rule are checked against each other over a table of
+  addresses (`InstallerDialogTests`), because nothing else could: WiX stores a
+  control condition as an opaque string and never parses it.
 - **it does not contact the address** — that would be a network call inside a
   Windows Installer transaction, and it would strand every site that installs
   before its firewall rule, its DNS entry or its certificate exists. Whether
@@ -482,11 +497,13 @@ msiexec /i AdlAgent-0.2.0-x64.msi ADLURL=https://adl.example.org
 Given it, the installer does not ask; given `/qn`, it shows nothing at all,
 which is how the agent installs a new version over itself.
 
-That is the service tier. A technician without administrator rights runs
-`AdlAgent-0.2.0-Setup.exe` instead, which installs under `%LocalAppData%` and
-starts the agent at logon rather than at boot. Both are built by
-[`packaging/pack.ps1`](packaging/README.md), and both keep themselves current
-from the ADL instance they are paired with.
+That is the service tier, and it is the only one built today. A technician
+without administrator rights would run `AdlAgent-0.2.0-Setup.exe` instead,
+which installs under `%LocalAppData%` and starts the agent at logon rather
+than at boot — but no release carries one, because no site has asked and it
+has never been installed on a Windows machine. Both are built by
+[`packaging/pack.ps1`](packaging/README.md), the second only when asked, and
+both keep themselves current from the ADL instance they are paired with.
 
 ### The tray
 
@@ -503,7 +520,8 @@ is what says whether the next move is the technician's or somebody else's;
 the colour only says whether this machine is working.
 
 It opens on the tab that matches the machine — Status while there is something
-to do to the machine itself, Stations once there is not — and every tab carries
+to do to the machine itself, Stations once there is not, and Stations is greyed
+out entirely until the machine has paired — and every tab carries
 one line at the top saying what to do now and who has to do it, including when
 the answer is that there is nothing to do. The line follows the machine on the window's own
 poll, so nobody has to press anything to find out that an administrator has
@@ -513,7 +531,14 @@ It is a per-user program and asks for no administrator rights. Either
 installer puts it in the Start menu and starts it at logon; the service
 tier's MSI also leaves it on the all-users desktop and opens it once as it
 finishes — on the tab with the pairing code box, which is the next thing to do
-anyway. That last one is off the installer's finish screen, so a self-update,
+anyway. Both of those are tick boxes, ticked when the screen opens: the desktop
+icon on the address screen, because Windows Installer makes shortcuts inside
+the install transaction and by the last screen it has been made or not; opening
+the window on the finish screen, which is the one thing that really does happen
+afterwards. The Start menu and Startup shortcuts are not offered, because the
+Startup one is the whole of what "the window comes back at the next logon"
+means on a machine nobody logs into on purpose. That last one is off the
+installer's finish screen, so a self-update,
 which runs silently and shows nobody anything, opens no window: the shortcut
 at logon is what puts the tray in front of whoever uses the machine. It can be
 closed at any time; the service goes on collecting and sending with nobody
@@ -1053,15 +1078,18 @@ there.
   package carries it, that the rule it enforces is the agent's rule, and that
   nothing it needs runs when there is no screen. Whether the text fits its
   controls, at 96 DPI and at 150, is unproven until somebody double-clicks it.
-- **The per-user installer has still not been run on a Windows VM.** The
-  Velopack packaging and the update path it applies were written and reviewed
-  on machines that cannot execute either: `vpk` packs Windows releases only
-  there. Everything above that line — the feed, the pin, the hash check, what
-  is fetched and what is refused — is under test on every push; everything
-  below it is CI-built and unproven until somebody installs it on a clean
-  Server 2016 box, which is what
+- **The per-user tier is not built.** It was, until nobody asked for it. It
+  has never been run on a Windows machine — the Velopack packaging and the
+  update path it applies were written and reviewed on a Mac, which can execute
+  neither — and packaging a tier nobody installs proves nothing about it, so
+  every release built it and no release was made better by it. `pack.ps1
+  -WithPerUserTier` revives it in one flag; every line behind it is still here
+  and still under test on every push. Decision #262 is deferred, not reversed:
+  what it needs first is a clean Server 2016 box to be installed on, which is
   [#282](https://github.com/wmo-raf/adl/issues/282)'s first two acceptance
-  criteria ask for.
+  criteria. Until then `UpdateService` would tell any per-user install that
+  ADL "served no user-tier package" — which costs nothing only because there
+  are none.
 - **`set-url`'s stop and start are the one part of it a test cannot reach.**
   What it writes, what it clears, the order it does them in and what a refused
   address left behind are all driven at their seams; the stop and start
@@ -1164,8 +1192,8 @@ The installer is tested at the same distance, and it is the one part of this
 product nothing else could check. WiX stores a control condition as an opaque
 string and never parses it, so a malformed one compiles, links, ships, and is
 first evaluated on a country server. `InstallerDialogTests` reads the
-condition off the dialog's *Next* button, expands it the way the WiX
-preprocessor would, and runs it — in a small reader of Windows Installer's own
+condition off what the dialog's *Next* button publishes, expands it the way
+the WiX preprocessor would, and runs it — in a small reader of Windows Installer's own
 condition syntax — against the same addresses `AgentOptions` is run against,
 so the rule the screen enforces and the rule the service enforces are checked
 against each other rather than against a comment. Where they cannot be made to

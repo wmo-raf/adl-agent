@@ -113,7 +113,11 @@ public class InstallerDialogTests
         // And the other direction of each pair, because a Windows Installer
         // control condition only ever fires the action it names: a control
         // that nothing hides again stays as the first keystroke left it.
-        Assert.Equal(!available, Evaluate(dialog["Next"].Condition("DisableCondition"), url));
+        //
+        // For Next that is the second thing it publishes. Exactly one of the
+        // two must match every press: neither is a button that does nothing,
+        // both is an explanation walked straight past.
+        Assert.Equal(!available, Evaluate(NextRefuses(), url));
         Assert.Equal(!explained, Evaluate(dialog["Problem"].Condition("HideCondition"), url));
     }
 
@@ -164,6 +168,60 @@ public class InstallerDialogTests
     {
         Assert.True(new AgentOptions { AdlBaseUrl = url }.IsConfigured);
         Assert.False(Evaluate(NextIsAvailable(), url));
+    }
+
+    /// <summary>
+    /// Nothing gates the button itself.
+    /// </summary>
+    /// <remarks>
+    /// This is the regression. A Disabled Next with an EnableCondition is
+    /// what anybody would author and what this screen shipped with, and it
+    /// refuses every address including the correct ones: the property behind
+    /// the field is not written until the field loses focus, and nothing
+    /// re-evaluates the condition until it is, so the button stays grey until
+    /// the technician presses Tab for reasons they would have to already know.
+    /// A source file cannot show that, and no installed package can be asked
+    /// about it -- what the screen does with a keystroke is not in the
+    /// database. So what is asserted is the shape that cannot have the bug.
+    /// </remarks>
+    [Fact]
+    public void The_button_is_not_gated_on_a_property_typing_does_not_write()
+    {
+        var next = DialogControls()["Next"];
+
+        Assert.Null(next.Attribute("Disabled"));
+        Assert.Null(next.Attribute("EnableCondition"));
+        Assert.Null(next.Attribute("DisableCondition"));
+    }
+
+    /// <summary>
+    /// A refused address is not a dead end.
+    /// </summary>
+    /// <remarks>
+    /// A spawned dialog with no way out is worse than the screen it came
+    /// from: it is modal, so it takes the installer with it.
+    /// </remarks>
+    [Fact]
+    public void The_explanation_leads_back_to_the_screen()
+    {
+        var spawned = (string?)NextPublish("SpawnDialog").Attribute("Value");
+
+        var dialog = Load("AdlAgentUI.wxs").Descendants(Wxs + "Dialog")
+            .Single(d => (string?)d.Attribute("Id") == spawned);
+
+        var ends = dialog.Descendants(Wxs + "Publish")
+            .Single(publish => (string?)publish.Attribute("Event") == "EndDialog");
+
+        // Return rather than Exit: the technician is going back to the field
+        // to fix what they typed, not out of the installer.
+        Assert.Equal("Return", (string?)ends.Attribute("Value"));
+
+        // And it says the same thing the screen behind it says.
+        Assert.Equal(
+            (string?)DialogControls()["Problem"].Attribute("Text"),
+            (string?)dialog.Elements(Wxs + "Control")
+                .Single(control => (string?)control.Attribute("Type") == "Text")
+                .Attribute("Text"));
     }
 
     /// <summary>
@@ -300,9 +358,29 @@ public class InstallerDialogTests
         Assert.NotEmpty(DialogControls()["Cancel"].Elements(Wxs + "Publish"));
     }
 
-    /// <summary>When the Next button on the address screen is available.</summary>
-    private static string NextIsAvailable() =>
-        DialogControls()["Next"].Condition("EnableCondition");
+    /// <summary>When pressing Next on the address screen goes forward.</summary>
+    /// <remarks>
+    /// Off the publish rather than off the button, because that is where the
+    /// rule has to live. An Edit control writes its property on focus loss
+    /// and a control condition fires on property change, so a button gated by
+    /// EnableCondition stays grey through everything typed into the field
+    /// beside it and lights up only on Tab. Pressing the button is a focus
+    /// change of its own, and it lands before the button's events, so a
+    /// condition on what the press does sees the address; one on whether the
+    /// press is possible at all does not.
+    /// </remarks>
+    private static string NextIsAvailable() => NextPublish("NewDialog").Condition("Condition");
+
+    /// <summary>What Next does about an address the screen will not take.</summary>
+    private static string NextRefuses() => NextPublish("SpawnDialog").Condition("Condition");
+
+    /// <summary>One of the two things the Next button publishes.</summary>
+    private static XElement NextPublish(string @event) =>
+        Load("AdlAgentUI.wxs").Descendants(Wxs + "Publish")
+            .Single(publish =>
+                (string?)publish.Attribute("Dialog") == "AdlUrlDlg" &&
+                (string?)publish.Attribute("Control") == "Next" &&
+                (string?)publish.Attribute("Event") == @event);
 
     private static bool Evaluate(string condition, string url) =>
         MsiCondition.Evaluate(condition, "ADLURL", url);

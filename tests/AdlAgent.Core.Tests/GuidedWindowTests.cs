@@ -72,6 +72,120 @@ public class GuidedWindowTests
         Assert.Equal(TrayTabs.Status, window.SelectedTab);
     }
 
+    // ---------- the tab a machine is not allowed on yet ----------
+
+    /// <summary>
+    /// Every state, and whether the station list can be opened in it.
+    /// </summary>
+    /// <remarks>
+    /// Exhaustive on purpose. The rule itself ends in a catch-all, so a state
+    /// added later is available until somebody decides otherwise -- which is
+    /// the right default and a silent one. This is what stops it being silent:
+    /// a new <see cref="NextStepKind"/> fails here until it is written down.
+    /// </remarks>
+    [Fact]
+    public void Every_state_says_whether_the_station_list_can_be_opened()
+    {
+        // The two a machine has never paired in. Behind the tab in both is one
+        // sentence saying so, and a tab that looks like a working one is a tab
+        // somebody clicks during the five minutes when the only thing to do is
+        // on the other one.
+        var shut = new[] { NextStepKind.NotConfigured, NextStepKind.NotPaired };
+
+        foreach (var kind in Enum.GetValues<NextStepKind>())
+        {
+            Assert.Equal(!shut.Contains(kind), TrayTabs.Available(Step(kind)));
+        }
+    }
+
+    /// <summary>
+    /// The state that looks like it belongs with those two and must not.
+    /// </summary>
+    /// <remarks>
+    /// A revoked machine has been collecting for months and its station list
+    /// is still on disk. Somebody is looking at it because it broke, and the
+    /// list is what they came to read.
+    /// </remarks>
+    [Fact]
+    public void A_machine_whose_token_was_revoked_keeps_its_station_list()
+    {
+        Assert.True(TrayTabs.Available(Step(NextStepKind.RePairNeeded)));
+    }
+
+    /// <summary>
+    /// A step of one kind, carrying nothing else.
+    /// </summary>
+    /// <remarks>
+    /// The rule under test reads the kind and nothing else, and the words a
+    /// real step carries are what the states themselves are tested through
+    /// elsewhere in this file.
+    /// </remarks>
+    private static NextStep Step(NextStepKind kind) =>
+        new() { Kind = kind, Text = string.Empty, Attention = TrayState.Unknown };
+
+    [Fact]
+    public async Task An_unpaired_machine_cannot_open_the_station_list()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.False(window.StationsAvailable);
+    }
+
+    [Fact]
+    public async Task A_redeemed_code_is_the_whole_bar_for_the_station_list()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.False(window.StationsAvailable);
+
+        // Paired, and ADL has not answered yet: nothing is in the list and the
+        // tab opens anyway. Anything stricter would tie a tab to the network,
+        // and a machine that pairs correctly behind a firewall rule nobody has
+        // written yet would stay shut for ever.
+        await agent.PairAsync();
+        await window.RefreshAsync();
+
+        Assert.True(window.StationsAvailable);
+    }
+
+    /// <summary>
+    /// It comes alive where the technician is, rather than moving them.
+    /// </summary>
+    /// <remarks>
+    /// Pairing succeeds on the Status tab, which is where the code box is and
+    /// where the result of pressing it is read. The tab lighting up is the
+    /// feedback; jumping to it would take somebody who has just been told
+    /// pairing worked to a second sentence saying ADL has not answered yet.
+    /// </remarks>
+    [Fact]
+    public async Task Pairing_opens_the_station_list_without_moving_anybody_to_it()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        Assert.Equal(TrayTabs.Status, window.SelectedTab);
+
+        await agent.PairAsync();
+        await window.RefreshAsync();
+
+        Assert.True(window.StationsAvailable);
+        Assert.Equal(TrayTabs.Status, window.SelectedTab);
+    }
+
     [Fact]
     public async Task The_poll_does_not_take_a_technician_off_the_tab_they_moved_to()
     {

@@ -113,13 +113,93 @@ whose path is wrong neither throws nor draws — the label is simply empty,
 which looks exactly like one the agent did not fill in. Empty past its
 header means every binding resolved.
 
+## Trying an installer
+
+The loop above is for tier-A work and deliberately never installs anything.
+When the MSI itself is the thing being changed, there is a second loop:
+
+    edit on the Mac  ->  dev/sync-source.sh  ->  double-click pack.cmd
+
+The build has to happen on Windows. The WiX toolset says so itself the
+moment it starts anywhere else — *"The WiX Toolset only supports Windows
+... all behavior after this point is undefined"* — and then fails on the
+path separators; `vpk` packs Windows releases only there too. So this loop
+inverts the other one: the Mac sends **source** rather than a build, and
+the Windows machine compiles.
+
+What travels is small. The repository is 439 MB and all but 1.7 MB of that
+is `bin/`, `obj/` and `.git`; the sources, the two `.wxs` files and the
+icons are what an installer is built from. A sync is ~15 s, nearly all of
+it SMB round-trips over a hundred and fifty files rather than bytes — a
+sync that copies nothing costs the same. Sending the built packages instead
+would be forty megabytes every time, and they cannot be built here to
+send.
+
+**One-time, on the Windows machine:** the .NET **SDK**, not just the
+Desktop Runtime. Publishing the two programs and installing the WiX toolset
+both need it.
+
+```powershell
+winget install Microsoft.DotNet.SDK.10
+```
+
+Then:
+
+```bash
+dev/sync-source.sh     # ~15 s, mirrors the source into src-mirror\
+```
+
+and on the Windows machine double-click `pack.cmd`. It runs
+`packaging/pack.ps1` — the same script CI runs, and the same one a release
+is reproduced with — writing into `pkg\` next to `bin\`. The first build
+installs the WiX toolset and takes a few minutes; after that it is the two
+publishes, which are the slow part.
+
+```bat
+pack.cmd                 the MSI, at the default version
+pack.cmd 0.3.1           at that one
+pack.cmd 0.3.1 --both    the per-user tier as well
+```
+
+`--both` is `pack.ps1 -WithPerUserTier`, which nothing else passes: CI, a
+release and this loop all run the script bare, and bare builds the MSI. The
+per-user tier is not shipped — see *the per-user tier is not built* in the
+[README](../README.md) — so `--both` is for working on that tier rather than
+for testing an install.
+
+Then, from `C:\adl-agent-dev\pkg`:
+
+```powershell
+.\AdlAgent-0.3.0-x64.msi                                     # the screen nothing else tests
+msiexec /i AdlAgent-0.3.0-x64.msi ADLURL=https://adl.example.org
+msiexec /i AdlAgent-0.3.0-x64.msi /qn                        # what a self-update is
+msiexec /x AdlAgent-0.3.0-x64.msi                            # when you want the loop back
+```
+
+Bump the version between two builds to perform a real major upgrade — the
+operation that has to leave a machine's address alone, and the one that
+would break a whole fleet at once if it did not. `packaging/verify-msi-install.ps1`
+does all of this unattended and checks what it wrote; run it elevated for
+the full check, and `pack.cmd` for the half of it that has a screen.
+
+Close `run.cmd`'s windows first. An installed agent is a service that runs
+on its own, and two agents against one ADL is two of everything — they
+contend for the same named pipe, so `adl-agent status` answers from
+whichever got there first. They do not share state: the service keeps its
+own in `%ProgramData%\ADL Agent`, which is why the console loop uses
+`C:\adl-agent-dev\state`.
+
+CI still builds what a country installs. This is for finding out in two
+minutes what would otherwise take a push and a wait.
+
 ## What this loop does not test
 
 Worth knowing, because none of it fails loudly:
 
 - **The installers.** MSI service registration, the `%ProgramData%` ACLs,
   the `ADLURL` property, whether the token survives a major upgrade, the
-  per-user Velopack tier. Run `packaging/pack.ps1` on Windows for those.
+  per-user Velopack tier. *Trying an installer* above is the loop for
+  those.
 - **Self-update.** `WindowsUpdateInstaller` reads
   `AppContext.BaseDirectory`, which is the one piece of production code that
   behaves differently outside a single-file bundle.

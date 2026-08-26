@@ -18,7 +18,7 @@ trimming, padding and tiling are done by the script, not by editing the file.
 
 | Tile | Hex | Worn by |
 |---|---|---|
-| Teal | `#1F7D8C` | `adl-agent-tray.exe`, the window and its titlebar, the desktop, Start-menu and Startup shortcuts, Add/Remove Programs, `AdlAgent-<version>-Setup.exe` |
+| Teal | `#1F7D8C` | `adl-agent-tray.exe`, the window and its titlebar, the desktop, Start-menu and Startup shortcuts, Add/Remove Programs, both installers' own screens, `AdlAgent-<version>-Setup.exe` |
 | Slate | `#2E3B4E` | `adl-agent.exe`, the Windows Service |
 
 Teal is the product a technician meets. Slate exists for one reason: the two
@@ -37,6 +37,9 @@ that happened to be green would be a permanent claim that it is working.
 | `adl-agent.ico` | Slate tile, same sizes. `<ApplicationIcon>` for the service. |
 | `adl-tile.png` | The teal tile at 256, for the two places the window draws the mark itself. |
 | `adl-mark.png` | The mark alone, for the notification area. Recoloured at run time, so only its shape and alpha are used. |
+| `installer-banner.bmp` | 493×58. The strip across the top of every MSI screen: white, teal mark at the right, left kept clear for the title the dialog paints over it. |
+| `installer-panel.bmp` | 493×312. The MSI's Welcome and Exit screens: a 164px teal band down the left carrying a framed mark, white for the rest. The control is the full width of the dialog and the wizard's text is painted over it, so only the band may be coloured. |
+| `installer-splash.png` | 493×312, solid teal with the mark centred. Velopack draws this on its own with nothing over it, so it is a picture rather than a backdrop. |
 
 ## Regenerating
 
@@ -47,6 +50,12 @@ assets/render-icons.sh
 Needs ImageMagick 7. Commit whatever changes — the outputs are in git on
 purpose, so that `dotnet build` keeps having no dependencies on either CI leg
 and on any machine somebody reproduces a release from.
+
+Running it twice writes the same bytes twice. That is not automatic: a PNG
+carries a `tIME` chunk holding the moment it was rendered, so until the script
+excluded it, every run dirtied four files that had not changed by a pixel — and
+a record of how something was made is worth less if running it always shows a
+diff.
 
 ## The lettering
 

@@ -8,6 +8,26 @@ Two installers, from one script, for the two tiers decision
 | Service | `AdlAgent-<version>-x64.msi` | A Windows Service, delayed auto-start, restarting itself on failure | A technician with administrator rights |
 | Per-user | `AdlAgent-<version>-Setup.exe` | A per-user install under `%LocalAppData%`, started at logon | A technician without them (story 3) |
 
+**Only the first is built.** `pack.ps1` produces the MSI and nothing else
+unless it is passed `-WithPerUserTier`, and nothing passes it — not CI, not a
+release, not `dev/pack.cmd`. No site has asked for the per-user tier, it has
+never been run on a Windows machine, and a tier nobody installs is one whose
+packaging is proven by nothing.
+
+Deferred rather than dropped: every line behind it is still here and still
+under test on every push — `UpdateTiers.User`, `IUpdateInstaller.Tier`,
+`WindowsUpdateInstaller`'s Velopack branch, the `velopack_*` kinds in
+`release-index.py`, and the packaging step itself. Reviving it is that one
+switch. What it would need first is a clean Windows machine to install it on,
+which is [#282](https://github.com/wmo-raf/adl/issues/282)'s first two
+acceptance criteria.
+
+One live consequence, stated rather than discovered: `UpdateService` reports
+*"ADL offers 0.3.1 but served no user-tier package for it"* when a per-user
+install finds no artifact of its kind. That is what every per-user install
+would now hit on every update check — and it costs nothing only because the
+set of them is empty.
+
 Both carry the .NET runtime inside them. Nothing needs installing on the
 target machine first, which is the point: a country server is not a machine
 anyone can ask to install a framework over a phone call.
@@ -21,15 +41,21 @@ Windows, with the .NET SDK from `global.json`:
 ```
 
 It publishes both programs self-contained, builds the MSI with the WiX
-toolset, packs the per-user tier with Velopack's `vpk`, and prints the
-SHA-256 of everything it produced. Both tools are installed as .NET tools if
-they are not already there, at the versions pinned in the script — a
-packaging tool that moved under a release would change what a fleet installs
-without anything in this repository having changed.
+toolset, and prints the SHA-256 of everything it produced. With
+`-WithPerUserTier` it also packs that tier with Velopack's `vpk`. The tools
+are installed as .NET tools if they are not already there, at the versions
+pinned in the script — a packaging tool that moved under a release would
+change what a fleet installs without anything in this repository having
+changed.
 
 CI runs exactly this (`.github/workflows/ci.yml`), so a package can be
 reproduced by hand, which is the only way to work out what went wrong with an
 install nobody can reach.
+
+A bare run is what ships, and that is the point of there being one script:
+CI calls it bare, `dev/pack.cmd` calls it bare, and a person reproducing a
+release calls it bare. A default nothing ever takes is the one that breaks
+unnoticed, which is why the switch points the way it does.
 
 ## Installing
 
@@ -39,8 +65,19 @@ the middle of the installer wants the address of the ADL instance this machine
 reports to — the address the country's ADL operator opens ADL at.
 
 The screen refuses an address the agent would refuse, and says why, while
-somebody is standing there: `https`, or `localhost`, and no spaces. *Next*
-stays unavailable until the field holds one. What it does **not** do is
+somebody is standing there: `https`, or `localhost`, and no spaces. Pressing
+*Next* on an address it will not take explains why and stays on the screen.
+
+The check is on the press rather than on the button, and that is Windows
+Installer's doing rather than a preference. An `Edit` control writes its
+property when it loses the focus — not as a key is struck — and a control
+condition is re-evaluated only when a property changes. A greyed-out *Next*
+with an `EnableCondition` therefore never sees what is being typed into the
+field beside it, and lights up only if the technician happens to press Tab:
+which is to say it refuses every address, correct ones included. Pressing the
+button is itself a focus change and it lands before the button's own events,
+so a condition on what the press *does* has the address in hand. What it does
+**not** do is
 contact the address — that would be a network call inside a Windows Installer
 transaction, and it would strand every site that installs before its firewall
 rule, its DNS entry or its certificate exists. Whether the instance answers is
@@ -70,6 +107,31 @@ Startup folder, so it comes back at the next logon; an uninstall takes all
 three away. The window is opened from the installer's finish screen rather
 than from the install itself, so a `/qn` install and a self-update open
 nothing.
+
+Two of those are tick boxes, both ticked when the screen opens: **Create a
+shortcut on the desktop**, and **Open ADL Agent now** on the finish screen.
+The Start menu and Startup shortcuts are not offered as choices — the Startup
+one is the whole of what "the window comes back at the next logon" means, on a
+machine nobody logs into on purpose.
+
+They are on different screens, and not by preference. Windows Installer makes
+shortcuts inside the install transaction, so the desktop one has to be asked
+about before the install runs — on the address screen. By the time the finish
+screen is drawn the icon has been made or not, and offering it there would
+mean a custom action creating a file outside the transaction, which an
+uninstall would then leave behind. Only the second belongs on the last screen,
+because opening a window is the one thing that genuinely happens after the
+install.
+
+`INSTALLDESKTOPSHORTCUT` defaults to `1` in the property table, and that
+default is load-bearing rather than a courtesy: a self-update is passed no
+properties and shows no screen, so a component conditioned on a tick box
+nobody ticked would be a component not installed — and a major upgrade removes
+the old product first. Without the default, every machine in every fleet would
+lose its desktop icon the night it updated itself. The cost, stated rather than
+hidden, is that a technician who unticks it gets the icon back at the next
+upgrade: remembering the choice would need a registry search into the property,
+and `AppSearch` runs in the execute sequence too.
 
 Either way the URL is written to `%ProgramData%\ADL Agent\agent.ini`, which
 the service reads when it starts:
@@ -113,6 +175,38 @@ department deploys software itself. Holding one machine back from the
 operator's chair is a different thing and is done in the ADL admin, by
 pinning its version.
 
+## The screens' own artwork
+
+The two pictures WixUI draws — the strip across the top of every screen and
+the panel down the left of the first and the last — are this product's rather
+than the toolset's, pointed at by `WixUIBannerBmp` and `WixUIDialogBmp` in
+`msi/AdlAgentUI.wxs`. Nothing else changes: the control on the address screen
+still asks for `WixUI_Bmp_Banner` and gets whatever those name.
+
+Both are BMP, and that is Windows Installer's rule rather than WiX's — a
+`Bitmap` control renders BMP out of the `Binary` table and nothing else, at
+24-bit with no compression. Both are exactly the size WixUI draws them at,
+493×58 and 493×312, because anything else is stretched or clipped with no
+warning at link time or at run time.
+
+Neither is a panel with a screen beside it. WixUI puts both in controls that
+span the whole dialog — the banner at `X=0 Width=370`, the Welcome and Exit
+bitmap likewise — and paints the wizard's own text on top, from `X=15` on the
+banner and `X=135` on the panel. So each is mostly white, with the colour kept
+to the part no text crosses: the right edge of the banner, and a 164px band
+down the left of the panel, which is 180px in image pixels less a margin. Fill
+either of them edge to edge and the wizard's words end up on a coloured field
+— which is what the toolset's own artwork avoids, and the reason it looks the
+way it does. `InstallerArtworkTests` reads those
+dimensions out of the files' own headers, and `verify-msi-install.ps1` checks
+that what the linker embedded is the same length as what this repository
+holds — the way a dropped `WixVariable` would otherwise revert to the
+toolset's artwork silently, still building and still installing.
+
+They are made by `assets/render-icons.sh` from the same `adl-logo.svg` the two
+program icons come from, and committed, so no leg of the build needs a
+rasteriser. See [`assets/README.md`](../assets/README.md).
+
 ## What the MSI is careful about
 
 The agent installs a new MSI over itself, unattended, on a machine nobody can
@@ -125,6 +219,11 @@ reach. Three details in `msi/AdlAgent.wxs` carry that:
 - **The ADL URL component is permanent *and* conditioned on `ADLURL`.** An
   upgrade passes no properties, so the component is not installed and the
   existing setting is left alone.
+- **The desktop shortcut's component is conditioned, and its property is
+  defaulted.** The same mechanism pointed the other way: a tick box has to be
+  able to turn the icon off, and an upgrade passed no properties must not.
+  `INSTALLDESKTOPSHORTCUT` defaults to `1`, so a silent self-update installs
+  the component exactly as it did before the tick box existed.
 - **Same-version upgrades are allowed.** Every build that is not a tag calls
   itself the version in `Directory.Build.props`, and without this two of them
   would install side by side and fight over one service name.

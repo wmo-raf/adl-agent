@@ -23,6 +23,12 @@
     compares only three fields of a product version, which is why the update
     feed refuses anything else.
 
+.PARAMETER WithPerUserTier
+    Build the per-user tier as well. Nothing does, by default and on purpose:
+    no site has asked for it, it has never been run on a Windows machine, and
+    a tier nobody installs is one whose packaging is proven by nothing. The
+    code behind it is untouched — see "the per-user tier" in the README.
+
 .EXAMPLE
     ./packaging/pack.ps1 -Version 0.2.0
 #>
@@ -34,14 +40,35 @@ param(
 
     [string] $OutputDirectory = "artifacts",
 
-    [string] $Runtime = "win-x64"
+    [string] $Runtime = "win-x64",
+
+    # The per-user tier, which nothing asks for.
+    #
+    # It was the other way round for a week -- both tiers by default, with a
+    # -MsiOnly for the dev loop -- and the default nothing ever took is the
+    # one that rots. What ships is the MSI, so what this script does when it
+    # is given no opinion is build the MSI: CI calls it bare, dev/pack.cmd
+    # calls it bare, and a person reproducing a release calls it bare. That
+    # is the whole premise of there being one script.
+    [switch] $WithPerUserTier
 )
 
 $ErrorActionPreference = "Stop"
 
 $repository = Split-Path -Parent $PSScriptRoot
 $publish = Join-Path $repository "publish"
-$output = Join-Path $repository $OutputDirectory
+# Relative to the repository, as CI passes it, or absolute, as a caller
+# writing somewhere else does -- dev/pack.cmd builds out of a mirror of the
+# source and puts the packages next to it rather than inside it. Join-Path
+# does not notice a rooted second argument and would compose the two into a
+# path with a colon in the middle of it, which Windows rejects only once
+# something tries to create it.
+$output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory
+}
+else {
+    Join-Path $repository $OutputDirectory
+}
 
 # The icons. Committed rather than generated here: `dotnet build` has no
 # dependencies on either CI leg or on the Windows machine somebody reproduces
@@ -50,6 +77,13 @@ $output = Join-Path $repository $OutputDirectory
 # changes -- see assets/README.md.
 $assets = Join-Path $repository "assets"
 $productIcon = Join-Path $assets "adl-agent-tray.ico"
+
+# What Velopack shows while it installs. The same picture the MSI puts down
+# the left of its first and last screens, as a PNG rather than a BMP: this is
+# not a Windows Installer bitmap and none of that format's rules apply to it.
+# The two tiers are one product, and a technician who has seen one installer
+# should recognise the other.
+$splashImage = Join-Path $assets "installer-splash.png"
 
 # The tool versions are pinned. A packaging tool that moved under a release
 # would change what a fleet installs without anything in this repository
@@ -159,25 +193,31 @@ Invoke-Step "Building $msi" {
 # distinguishable from the tray at sixteen pixels in Task Manager.
 # ---------------------------------------------------------------------------
 
-Install-DotnetTool -Package "vpk" -ToolVersion $velopackVersion -Command "vpk"
+if (-not $WithPerUserTier) {
+    Write-Host "==> Not building the per-user tier (-WithPerUserTier builds it)" -ForegroundColor DarkGray
+}
+else {
+    Install-DotnetTool -Package "vpk" -ToolVersion $velopackVersion -Command "vpk"
 
-$userTierDir = Join-Path $publish "user"
+    $userTierDir = Join-Path $publish "user"
 
-New-Item -ItemType Directory -Force -Path $userTierDir | Out-Null
-Copy-Item (Join-Path $serviceDir "adl-agent.exe") $userTierDir
-Copy-Item (Join-Path $trayDir "adl-agent-tray.exe") $userTierDir
+    New-Item -ItemType Directory -Force -Path $userTierDir | Out-Null
+    Copy-Item (Join-Path $serviceDir "adl-agent.exe") $userTierDir
+    Copy-Item (Join-Path $trayDir "adl-agent-tray.exe") $userTierDir
 
-Invoke-Step "Packing the per-user tier" {
-    vpk pack `
-        --packId AdlAgent `
-        --packTitle "ADL Agent" `
-        --packAuthors "WMO RAF" `
-        --packVersion $Version `
-        --packDir $userTierDir `
-        --mainExe adl-agent.exe `
-        --icon $productIcon `
-        --shortcuts StartMenu,Startup `
-        --outputDir $output
+    Invoke-Step "Packing the per-user tier" {
+        vpk pack `
+            --packId AdlAgent `
+            --packTitle "ADL Agent" `
+            --packAuthors "WMO RAF" `
+            --packVersion $Version `
+            --packDir $userTierDir `
+            --mainExe adl-agent.exe `
+            --icon $productIcon `
+            --splashImage $splashImage `
+            --shortcuts StartMenu,Startup `
+            --outputDir $output
+    }
 }
 
 Write-Host ""
