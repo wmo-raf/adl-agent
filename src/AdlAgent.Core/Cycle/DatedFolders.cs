@@ -171,7 +171,10 @@ public sealed class DatedFolders
                     + "agent knows. Set it to year, month, day or hour in ADL.");
         }
 
-        if (MonthDirectory(1, config.MonthDirFormat) is null)
+        // Only where a month is actually named. A station filed by year has
+        // no month folder, and refusing it for a format it will never write
+        // would stop a station collecting over a setting that does nothing.
+        if (granularity != DateGranularity.Year && !IsKnownMonthFormat(config.MonthDirFormat))
         {
             return Problematic(
                 $"'{config.MonthDirFormat}' is not a month folder format this agent can write. "
@@ -198,7 +201,7 @@ public sealed class DatedFolders
 
         while (true)
         {
-            segments.Add(Directory(local, granularity, config.MonthDirFormat));
+            segments.Add(FolderNames(local, granularity, config.MonthDirFormat));
 
             // The period holding the floor counts as above it: a folder named
             // for the 21st holds the whole of the 21st, so a floor at nine in
@@ -223,8 +226,12 @@ public sealed class DatedFolders
 
     private static DatedFolders Problematic(string problem) => new([], truncated: false, problem: problem);
 
+    /// <summary>True when the month can be spelled the way ADL asked for.</summary>
+    private static bool IsKnownMonthFormat(string? monthDirFormat) =>
+        MonthDirectory(month: 1, monthDirFormat) is not null;
+
     /// <summary>The folder names one period is filed under, outermost first.</summary>
-    private static IReadOnlyList<string> Directory(
+    private static IReadOnlyList<string> FolderNames(
         DateTime local, DateGranularity granularity, string? monthDirFormat)
     {
         var segments = new List<string>(4) { local.Year.ToString(CultureInfo.InvariantCulture) };

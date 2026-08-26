@@ -81,15 +81,13 @@ public sealed class FolderScanner
     {
         var tallies = new Dictionary<long, LinkTally>();
         var folders = new Dictionary<string, List<Walked>>(StringComparer.Ordinal);
-        var fetching = new List<Fetched>();
 
-        // What each walking station was actually offered, across however many
-        // directories it turned out to be spread over. Kept per station and
-        // not per folder because the sentence at the end of the scan is the
-        // station's, and a station filed by date whose vendor has not written
-        // today's folder yet must not be told about that directory -- only
-        // about having found nothing anywhere.
-        var walking = new List<Sought>();
+        // What each station is: one or more folders to walk, or a list of
+        // names to ask after. Both are worked out in full before anything is
+        // read, because the grouping below is the whole point -- a folder
+        // cannot be walked once for everything that shares it until
+        // everything that shares it is known.
+        var plan = Plan(configuration, sweep, now, tallies);
 
         // What was reconciled, as opposed to what the plan asked for. A
         // station the scan turns away -- no folder, no pattern, Direct Fetch
@@ -97,33 +95,27 @@ public sealed class FolderScanner
         // everything, and must not have its day's reconciliation spent on it.
         var reconciled = new HashSet<long>();
 
-        foreach (var target in Targets(configuration, sweep, now, tallies, walking))
+        foreach (var target in plan.Walking.SelectMany(sought => sought.Targets).Concat<Target>(plan.Fetching))
         {
             if (target.Reconciling)
             {
                 reconciled.Add(target.Link.Id);
             }
 
-            switch (target)
+            if (target is not Walked walked)
             {
-                case Fetched fetched:
-                    fetching.Add(fetched);
-
-                    break;
-
-                case Walked walked:
-                    var key = GroupingKey(walked.Folder);
-
-                    if (!folders.TryGetValue(key, out var sharing))
-                    {
-                        sharing = [];
-                        folders[key] = sharing;
-                    }
-
-                    sharing.Add(walked);
-
-                    break;
+                continue;
             }
+
+            var key = GroupingKey(walked.Folder);
+
+            if (!folders.TryGetValue(key, out var sharing))
+            {
+                sharing = [];
+                folders[key] = sharing;
+            }
+
+            sharing.Add(walked);
         }
 
         var matched = new List<Match>();
@@ -137,9 +129,9 @@ public sealed class FolderScanner
             Walk(targets[0].Folder, targets, now, matched);
         }
 
-        Diagnose(walking);
+        Diagnose(plan.Walking);
 
-        foreach (var target in fetching)
+        foreach (var target in plan.Fetching)
         {
             Fetch(target, now, matched);
         }
@@ -214,22 +206,31 @@ public sealed class FolderScanner
     }
 
     /// <summary>
-    /// The station links worth scanning, with a tally opened for every link
-    /// the device has -- including the ones that will not be scanned.
+    /// What this cycle will look at, with a tally opened for every link the
+    /// device has -- including the ones that will not be scanned.
     /// </summary>
     /// <remarks>
     /// A link that cannot be scanned still gets a tally, carrying the reason.
     /// A station that quietly does nothing, cycle after cycle, is the failure
     /// this whole product exists to stop shipping to countries: it has to
     /// arrive at HQ as a sentence, not as an absence.
+    /// <para>
+    /// Worked out in full rather than yielded lazily. Everything after this
+    /// depends on the whole fleet having been planned -- the grouping that
+    /// makes two stations share one walk, and the per-station sentence that
+    /// cannot be written until every folder of that station has been walked
+    /// -- so a caller that stopped part-way would silently lose both.
+    /// </para>
     /// </remarks>
-    private IEnumerable<Target> Targets(
+    private ScanPlan Plan(
         AgentConfiguration configuration,
         SweepPlan sweep,
         DateTimeOffset now,
-        Dictionary<long, LinkTally> tallies,
-        List<Sought> walking)
+        Dictionary<long, LinkTally> tallies)
     {
+        var walking = new List<Sought>();
+        var fetching = new List<Fetched>();
+
         // One compiled glob per distinct pattern, for the length of this
         // scan. Several stations sharing a naming convention is the norm,
         // and this is also what keeps the compiled regex from outliving the
@@ -279,7 +280,7 @@ public sealed class FolderScanner
 
                     if (Fetching(link, tally, configuration.Sync.Limits, sweep, now) is { } fetched)
                     {
-                        yield return fetched;
+                        fetching.Add(fetched);
                     }
 
                     continue;
@@ -310,13 +311,10 @@ public sealed class FolderScanner
                 }
 
                 walking.Add(sought);
-
-                foreach (var target in sought.Targets)
-                {
-                    yield return target;
-                }
             }
         }
+
+        return new ScanPlan(walking, fetching);
     }
 
     /// <summary>
@@ -368,7 +366,7 @@ public sealed class FolderScanner
 
         if (!link.Config.DirStructuredByDate)
         {
-            return new Sought(link, tally, pattern, root, Dated: false,
+            return new Sought(tally, pattern, root, false,
                 [new Walked(link, tally, limits, reconciling, root, pattern, floor)]);
         }
 
@@ -399,19 +397,22 @@ public sealed class FolderScanner
             return null;
         }
 
-        if (expanded.Truncated && reconciling)
+        if (expanded.Truncated)
         {
-            // Even the deep pass stopped short, which no station filed at a
-            // sensible granularity can manage. This is the only case where
-            // backlog really is out of reach, so it is the only one worth
-            // telling an operator to act on.
-            tally.Note(
-                $"This station's dated folders go back further than the {DatedFolders.MostPerSweep} even a "
-                + "full reconciliation walks, so its oldest are out of reach. Move its collection start date "
-                + "forward in ADL, or file it at a coarser granularity.");
+            // The bound stopped the expansion before ADL's floor did, so this
+            // station is looking at less than it was configured for -- and
+            // said out loud either way, because a bound that silently
+            // overrides a setting is the setting not working.
+            tally.Note(reconciling
+                ? $"This station's dated folders go back further than the {DatedFolders.MostPerSweep} even a "
+                    + "full reconciliation walks, so its oldest are out of reach. Move its collection start "
+                    + "date forward in ADL, or file it at a coarser granularity."
+                : $"This station's window asks for more dated folders than the {DatedFolders.MostPerCycle} a "
+                    + "cycle walks, so it is walking the newest of them. Shorten the device's dated folder "
+                    + "window in ADL, or file this station at a coarser granularity.");
         }
 
-        return new Sought(link, tally, pattern, root, Dated: true, expanded.Segments
+        return new Sought(tally, pattern, root, true, expanded.Segments
             .Select(segments => new Walked(
                 link, tally, limits, reconciling, _files.Descend(root, segments), pattern, floor))
             .ToList());
@@ -556,13 +557,15 @@ public sealed class FolderScanner
     /// anywhere.
     /// </para>
     /// </remarks>
-    private static void Diagnose(List<Sought> walking)
+    private static void Diagnose(IReadOnlyList<Sought> walking)
     {
         foreach (var sought in walking.Where(sought => sought.Tally.Scanned == 0))
         {
             var entries = sought.Targets.Sum(target => target.Entries);
             var where = sought.Dated
-                ? $"the {sought.Targets.Count} dated folder(s) below {sought.Root} this cycle looked in"
+                ? sought.Targets.Count == 1
+                    ? $"the dated folder below {sought.Root} this cycle looked in"
+                    : $"the {sought.Targets.Count} dated folders below {sought.Root} this cycle looked in"
                 : sought.Root;
 
             sought.Tally.Note(entries == 0
@@ -737,10 +740,12 @@ public sealed class FolderScanner
     /// <param name="Root">The folder ADL named, which is what a sentence names.</param>
     /// <param name="Dated">True when <paramref name="Root"/> is a tree rather than a folder.</param>
     private sealed record Sought(
-        StationLinkConfig Link,
         LinkTally Tally,
         FilePattern Pattern,
         string Root,
         bool Dated,
         IReadOnlyList<Walked> Targets);
+
+    /// <summary>Everything this cycle intends to look at, before it looks.</summary>
+    private sealed record ScanPlan(IReadOnlyList<Sought> Walking, IReadOnlyList<Fetched> Fetching);
 }

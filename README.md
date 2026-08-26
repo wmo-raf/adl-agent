@@ -124,6 +124,15 @@ FTP plugin has existed.
   agent reads `dated_folder_window_hours` from the device block of the sync
   response when ADL sends it (`0` is the current folder alone); the plugin
   does not serve that field yet, so today every install walks 48 hours.
+  Adding it server-side is a companion change in
+  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin), the same
+  shape as `reconciliation_interval_hours` above.
+- **and a cap under the window** — at most 2 000 directories a cycle,
+  whatever the window asks for, because a window typed as a year against an
+  hourly station is not a request anybody meant to make. A station the cap
+  bites says so on every cycle: a bound that silently overrode the setting
+  would be the setting not working, with no way to tell which number was in
+  force.
 - **the sweep walks the rest** — once a day the station expands the tree back
   to the deepest date ADL has given it (its watermark or its collection start
   date), up to 10 000 directories. That is thirteen months of hourly folders
@@ -134,6 +143,11 @@ FTP plugin has existed.
   nothing is said about an empty one. What is worth a sentence is a station
   that found nothing anywhere, and that is said once for the station rather
   than once per folder.
+- **the tray's preview walks the tree too** — the same recent window, capped
+  at fifty folders, so the count a technician sees while typing is of the
+  folders the vendor actually writes into rather than of the empty parent
+  they pointed at. It reads the timezone off the station being previewed,
+  because that tier is HQ's and the window cannot type it.
 
 The tray and configuration app ([wmo-raf/adl#281](https://github.com/wmo-raf/adl/issues/281))
 — everything a station technician does on the machine itself, without an ADL

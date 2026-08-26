@@ -230,6 +230,30 @@ public class TrayControlTests
     }
 
     [Fact]
+    public async Task A_dated_preview_reaches_by_time_and_not_by_a_count_of_folders()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Files.Add($"{Folder}\\2026", "GARISSA_20260821.dat", Settled(agent));
+
+        var preview = await Preview(agent, new JsonObject
+        {
+            ["local_folder_path"] = Folder,
+            ["file_pattern"] = "GARISSA_*.dat",
+            ["dir_structured_by_date"] = true,
+            ["date_granularity"] = "year",
+        });
+
+        // One year folder, not fifty. A preview bounded only by a count of
+        // folders would walk this station's tree back to 1977 while somebody
+        // was still typing, and then report having looked in fifty folders
+        // for a station that has one.
+        Assert.Equal(1, Int(preview, "matches"));
+        Assert.Equal(1, Int(preview, "examined"));
+        Assert.False(preview["truncated"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task A_dated_preview_of_a_station_uses_that_stations_timezone()
     {
         await using var agent = new AgentHarness();

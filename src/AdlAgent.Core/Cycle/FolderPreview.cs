@@ -65,13 +65,20 @@ public sealed class FolderPreview
     /// walk.
     /// </summary>
     /// <remarks>
-    /// Well below what a cycle expands to, and for the same reason
-    /// <see cref="MostNamesTried"/> is below
-    /// <see cref="ExpectedFiles.MostPerCycle"/>: a cycle runs every ten
-    /// minutes and may spend a second on it, while this runs between two
-    /// keystrokes. Fifty folders is two days of hourly ones and seven weeks
-    /// of daily ones, which is enough to tell a tree the vendor writes into
-    /// from one nobody does -- the only question a preview is asked.
+    /// A backstop rather than the reach. What a preview looks at is the same
+    /// recent window a routine cycle does
+    /// (<see cref="DatedFolders.DefaultRecentWindow"/>), which is two days --
+    /// 49 folders at hour granularity, three at day, one or two at month and
+    /// year. That is enough to tell a tree the vendor writes into from one
+    /// nobody does, which is the only question a preview is asked, and it is
+    /// the answer for the folders the technician can check against what the
+    /// vendor just wrote.
+    /// <para>
+    /// The count is here because a reach measured in time is not a reach
+    /// measured in folders: without it, a granularity nobody expected would
+    /// have the tray walking directories between two keystrokes. Fifty
+    /// clears the window at every one of the four granularities.
+    /// </para>
     /// </remarks>
     public const int MostFoldersWalked = 50;
 
@@ -142,12 +149,18 @@ public sealed class FolderPreview
         var folders = new List<string> { root };
         var dated = config.DirStructuredByDate;
 
+        var truncated = false;
+
         if (dated)
         {
-            // No floor. The newest few folders are the question, not the
-            // backlog: a preview that expanded a year of a tree would take
-            // longer than the technician's patience and answer nothing extra.
-            var expanded = DatedFolders.For(config, timezoneId, from: null, now, MostFoldersWalked);
+            // The recent window and not the backlog. A floor rather than a
+            // bare count, because a count means a different span at each
+            // granularity: fifty folders is two days of hourly ones and half
+            // a century of yearly ones, and a preview that walked back to
+            // 1977 would take longer than the technician's patience to say
+            // nothing extra.
+            var expanded = DatedFolders.For(
+                config, timezoneId, now - DatedFolders.DefaultRecentWindow, now, MostFoldersWalked);
 
             if (expanded.Problem is not null)
             {
@@ -155,11 +168,11 @@ public sealed class FolderPreview
             }
 
             folders = expanded.Segments.Select(segments => _files.Descend(root, segments)).ToList();
+            truncated = expanded.Truncated;
         }
 
         var examined = 0;
         var matches = 0;
-        var truncated = false;
         var sample = new List<FileFacts>();
 
         foreach (var folder in folders)

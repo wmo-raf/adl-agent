@@ -296,6 +296,51 @@ public class DatedFolderTests
     }
 
     [Fact]
+    public async Task A_month_format_is_only_judged_where_a_month_folder_is_written()
+    {
+        await using var agent = new AgentHarness();
+
+        // Filed by year, so there is no month folder and the format is a
+        // setting that does nothing. Refusing the station over it would stop
+        // it collecting for a value it will never write.
+        agent.Server.Config = SyncConfigs.With(Dated("year", monthDirFormat: "MMMM"));
+
+        agent.Files.Add($"{Root}\\2026", "GARISSA_20260821.dat", Settled(agent), "g\n");
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
+
+        Assert.Null(link.Error);
+        Assert.Equal("g\n", agent.Server.Held(11, "GARISSA_20260821.dat")!.Text);
+    }
+
+    [Fact]
+    public async Task A_window_wider_than_a_cycle_walks_is_said_out_loud_rather_than_quietly_cut()
+    {
+        await using var agent = new AgentHarness();
+
+        // Filed by hour and asked for three months of window, which is more
+        // folders than a cycle walks. The cap is the right thing to do -- but
+        // a cap that silently overrode the setting would be the setting not
+        // working, and nobody would know which of the two numbers was in
+        // force.
+        agent.Server.Config = SyncConfigs
+            .With(Dated("hour"))
+            .ReconcilingEvery(0)
+            .WalkingDatedFoldersBack(24 * 90);
+
+        await agent.PairAsync();
+        await agent.Cycle.RunAsync();
+
+        var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
+
+        Assert.Contains(DatedFolders.MostPerCycle.ToString(), link.Error!);
+        Assert.Equal(DatedFolders.MostPerCycle, WalkedFolders(agent));
+    }
+
+    [Fact]
     public async Task A_timezone_this_machine_does_not_know_is_said_rather_than_guessed_at()
     {
         await using var agent = new AgentHarness();

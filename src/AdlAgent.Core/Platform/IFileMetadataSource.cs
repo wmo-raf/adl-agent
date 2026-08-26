@@ -61,8 +61,11 @@ public interface IFileMetadataSource
     /// ends in a separator already.
     /// <para>
     /// The answer is also the key two station links sharing a dated tree are
-    /// grouped under, so two spellings of one folder must join to one string
-    /// or the tree is walked twice.
+    /// grouped under, so where <paramref name="segments"/> is non-empty, two
+    /// spellings of one folder must descend to one string or the tree is
+    /// walked twice. Nothing to descend through is the folder itself,
+    /// unchanged: normalising a path nobody asked about would be the core
+    /// reaching for the path grammar this seam exists to keep out of it.
     /// </para>
     /// </remarks>
     string Descend(string folderPath, IReadOnlyList<string> segments);
