@@ -48,7 +48,12 @@
 
     <DockPanel LastChildFill="True" Margin="12">
 
-        <!-- The header: what this machine is, in one line, always visible. -->
+        <!--
+            The header: what this machine is, always visible. Three rows on a
+            working machine — where it reports, the facts about it, and ADL's
+            verdict — and fewer on every machine that has less to say, because
+            each row is gated on there being something true to put in it.
+        -->
         <Border DockPanel.Dock="Top" Background="White" BorderBrush="#DCE0E6" BorderThickness="1"
                 Padding="14,10" CornerRadius="4">
             <DockPanel LastChildFill="True">
@@ -64,19 +69,245 @@
                        Margin="0,1,10,0"
                        RenderOptions.BitmapScalingMode="HighQuality" />
                 <StackPanel>
-                    <TextBlock Text="{Binding Headline}" FontSize="14" TextWrapping="Wrap" />
                     <!--
-                        The version is this machine's own and always true. The
-                        rest is ADL's, and is one string from the view model
-                        rather than four runs here, because a Run cannot be
-                        hidden — see ShellViewModel.HeaderFacts. Before ADL has
-                        ever answered it is empty, so this strip does not
-                        announce a scan interval the machine is not keeping.
+                        Three rows, and exactly one of them is ever the thing
+                        the eye lands on. On a paired machine that is the
+                        tinted chip at the bottom — ADL's verdict is what a
+                        technician came to read — and this first row drops to
+                        meta weight because an address is a reference, not
+                        news. In every other state there is no verdict to draw
+                        and so no chip, and the sentence here is the headline
+                        and keeps the size.
+
+                        Which is why the two are sized the way they are. This
+                        row is 16px only when it is the headline; the chip is
+                        13px like the facts and earns its prominence from
+                        colour instead. A paired machine has no 16px row at
+                        all, and that is the arrangement working rather than a
+                        size somebody forgot.
                     -->
-                    <TextBlock Margin="0,4,0,0" Foreground="#5A6472" TextWrapping="Wrap">
-                        <Run Text="Agent" /><Run Text=" " /><Run Text="{Binding AgentVersion, Mode=OneWay}" /><Run
-                            Text="{Binding HeaderFacts, Mode=OneWay}" />
-                    </TextBlock>
+                    <TextBlock Text="{Binding Headline}" FontSize="16" TextWrapping="Wrap"
+                               Visibility="{Binding ShowsHeadline,
+                                                    Converter={StaticResource Visible}}" />
+
+                    <!--
+                        The address, clickable. A Hyperlink rather than a
+                        TextBlock with a click handler, because that is what
+                        gives it a caret-browsable, keyboard-reachable,
+                        screen-reader-announced link — and the technician who
+                        needs this row most is the one on somebody else's
+                        machine with somebody else's settings.
+
+                        Slate and not the #1B6AC9 the Quiet button uses, which
+                        is the one other clickable-looking text in this
+                        program. The two differ on purpose: that one is an
+                        action inside the window and wants to be found, this
+                        one is a reference that leaves it, sitting in a row of
+                        meta text that nothing else in should draw an eye. The
+                        permanent underline is what says "clickable" here, not
+                        the colour.
+                    -->
+                    <TextBlock Foreground="#5A6472" TextWrapping="Wrap" FontSize="13"
+                               Visibility="{Binding ShowsPairedTo,
+                                                    Converter={StaticResource Visible}}"><!--
+                        --><Run Text="Paired to" /><Run Text=" " /><Hyperlink
+                            NavigateUri="{Binding AdlLink, Mode=OneWay}"
+                            RequestNavigate="OpenAdl"
+                            Foreground="#33475B"
+                            TextDecorations="Underline"
+                            ToolTip="Open this ADL in a browser"><Run
+                                Text="{Binding AdlUrl, Mode=OneWay}" /></Hyperlink></TextBlock>
+
+                    <!--
+                        The facts, one line each and laid side by side so the
+                        strip reads as a single line whenever it fits: glyph,
+                        label, value, and for the two moments how long ago it
+                        was.
+
+                        A WrapPanel and not a fixed row: at the window's 900px
+                        minimum the five do not fit, and the choice was between
+                        wrapping and silently clipping the last one off the
+                        right edge. Because each fact is a TextBlock of its own
+                        and none of them sets TextWrapping, the break lands
+                        between two facts and never inside one — which is what
+                        the single wrapping sentence this replaced got wrong.
+
+                        The glyph is a run in that text rather than an element
+                        beside it, and aligns by BaselineAlignment Center —
+                        see the Glyph style, which is where the reasoning for
+                        that lives.
+
+                        Version is not gated. It is this machine's own fact,
+                        true from the moment the service answers, and it is the
+                        first thing HQ asks for down a telephone. The other
+                        four are ADL's and appear only once ADL has said
+                        something — see ShellViewModel.ShowsAdlFacts.
+
+                        The parentheses around the relative are inside the
+                        string the view model serves, not runs here: a Run
+                        cannot be hidden — it is not an element — so a machine
+                        ADL has never beaten for would be left showing an empty
+                        pair of them.
+                    -->
+                    <WrapPanel Margin="0,6,0,0" Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Fact}"
+                                   Visibility="{Binding ShowsAdlFacts,
+                                                        Converter={StaticResource Visible}}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE977;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Device: " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding DeviceName, Mode=OneWay}" /></TextBlock>
+
+                        <TextBlock Style="{StaticResource Fact}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE946;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Version: " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding AgentVersion, Mode=OneWay}" /></TextBlock>
+
+                        <TextBlock Style="{StaticResource Fact}"
+                                   Visibility="{Binding ShowsAdlFacts,
+                                                        Converter={StaticResource Visible}}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE95E;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Last heartbeat: " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding LastHeartbeat, Mode=OneWay}" /><Run Text=" " /><Run
+                            Style="{StaticResource FactAgo}"
+                            Text="{Binding LastHeartbeatAgo, Mode=OneWay}" /></TextBlock>
+
+                        <TextBlock Style="{StaticResource Fact}"
+                                   Visibility="{Binding ShowsAdlFacts,
+                                                        Converter={StaticResource Visible}}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE895;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Last synced: " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding LastSynced, Mode=OneWay}" /><Run Text=" " /><Run
+                            Style="{StaticResource FactAgo}"
+                            Text="{Binding LastSyncedAgo, Mode=OneWay}" /></TextBlock>
+
+                        <!--
+                            No colon on this one. The other four read as
+                            "label: value"; this one's value is already a
+                            phrase, and "Scans: every 2 minutes" is a colon
+                            followed by "every".
+                        -->
+                        <TextBlock Style="{StaticResource Fact}"
+                                   Visibility="{Binding ShowsAdlFacts,
+                                                        Converter={StaticResource Visible}}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE823;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Scans " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding CheckInterval, Mode=OneWay}" /></TextBlock>
+                    </WrapPanel>
+
+                    <!--
+                        ADL's verdict, as a chip: shaped like the facts above
+                        it — same glyph, same label, same sizes — but on a
+                        tinted ground, which is what makes it the one thing in
+                        this header a technician's eye lands on. Font weight
+                        used to do that job and does not any more; the header
+                        has no 16px row at all on a paired machine.
+
+                        Sized to its own text rather than the width of the
+                        card, so that it reads as a badge about one fact
+                        instead of a third band across the window.
+
+                        The same four colours as the connection list, the tray
+                        icon and the next-step band, from the same TrayState —
+                        see ShellViewModel.FleetTone.
+
+                        Which means this chip and that band can show different
+                        colours ten pixels apart, and that is the truth rather
+                        than a mistake: this one is ADL's opinion of whether
+                        the machine is reporting in, and the band below is
+                        whether anything wants a person. A green chip over an
+                        amber band is a machine ADL can hear perfectly well
+                        that still has a station needing a folder.
+
+                        Paired machines only. A revoked machine's last verdict
+                        is from before ADL cut it off, and a green chip reading
+                        "Collecting and sending" under a sentence saying
+                        nothing is being sent is a contradiction the screen
+                        should not be able to draw. Its heartbeat and sync
+                        times stay above, which is what that machine actually
+                        needs.
+                    -->
+                    <Border Margin="0,8,0,0" HorizontalAlignment="Left"
+                            BorderThickness="1" CornerRadius="4" Padding="8,4"
+                            Visibility="{Binding ShowsPairedTo,
+                                                 Converter={StaticResource Visible}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <!-- Amber by default, matching the dot inside
+                                     it and the band below: the states that are
+                                     not asking for somebody say so. -->
+                                <Setter Property="Background" Value="#FFF4D6" />
+                                <Setter Property="BorderBrush" Value="#E4C877" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding FleetTone}" Value="Working">
+                                        <Setter Property="Background" Value="#E9F5EC" />
+                                        <Setter Property="BorderBrush" Value="#A9CDB4" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding FleetTone}" Value="Stopped">
+                                        <Setter Property="Background" Value="#FBE9E9" />
+                                        <Setter Property="BorderBrush" Value="#DFAFAF" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding FleetTone}" Value="Unknown">
+                                        <Setter Property="Background" Value="#EFF1F3" />
+                                        <Setter Property="BorderBrush" Value="#CFD5DB" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+
+                        <!--
+                            One line of text holding all four things, so that
+                            the glyph, the words and the dot are placed by one
+                            layout rather than three aligned to each other by
+                            hand. Both symbols take BaselineAlignment Center —
+                            the middle of the text, which WPF measures from the
+                            font itself.
+
+                            The dot rides in the flow as an InlineUIContainer
+                            rather than sitting beside the text as a sibling,
+                            which is what it did while it looked low: as a
+                            sibling it could only centre on the line box, and a
+                            line box carries descender space the eye does not
+                            see. An Ellipse and not a bullet character, because
+                            9px is 9px whatever font a machine falls back to.
+
+                            The dot is inside the value rather than on the
+                            label, because the colour is part of the answer.
+                            It stays even though the chip behind it is the same
+                            hue — a pale wash reads as decoration and a
+                            saturated dot reads as a state, which is why status
+                            badges are drawn this way.
+                        -->
+                        <TextBlock Style="{StaticResource FactText}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xEC05;" /><Run
+                            Style="{StaticResource FactLabel}"
+                            Text="  Status: " /><InlineUIContainer
+                                BaselineAlignment="Center"><Ellipse
+                                    Width="9" Height="9" Margin="0,0,5,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#E4B93C" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding FleetTone}" Value="Working">
+                                                <Setter Property="Fill" Value="#5FA773" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FleetTone}" Value="Stopped">
+                                                <Setter Property="Fill" Value="#C46B6B" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FleetTone}" Value="Unknown">
+                                                <Setter Property="Fill" Value="#B4BCC4" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse></InlineUIContainer><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding FleetStatus, Mode=OneWay}" /></TextBlock>
+                    </Border>
                 </StackPanel>
             </DockPanel>
         </Border>
