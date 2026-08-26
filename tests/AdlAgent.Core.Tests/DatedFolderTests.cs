@@ -1,4 +1,7 @@
+using System.Text.Json;
+using AdlAgent.Core.Api;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Serialization;
 using AdlAgent.TestSupport;
 
 namespace AdlAgent.Core.Tests;
@@ -437,6 +440,49 @@ public class DatedFolderTests
         // And it still collects, from the folder it was pointed at: the
         // sentence is a warning about a setting, not a reason to stop.
         Assert.Equal("g\n", agent.Server.Held(11, "GARISSA_202608211200.dat")!.Text);
+    }
+
+    [Fact]
+    public void The_window_ADL_sends_is_the_window_this_agent_reads()
+    {
+        // A literal body rather than a round trip through this agent's own
+        // serializer, which would prove only that it agrees with itself. What
+        // is pinned here is the spelling the plugin emits -- ADL and the agent
+        // are separate repositories on separate release trains, and a field
+        // renamed on one side would otherwise show up as every dated station
+        // in the fleet quietly walking the default window instead.
+        const string body = """
+            {
+              "id": 3,
+              "name": "Songea server",
+              "check_interval_minutes": 5,
+              "heartbeat_interval_minutes": 5,
+              "dated_folder_window_hours": 240
+            }
+            """;
+
+        var device = JsonSerializer.Deserialize<DeviceConfig>(body, AgentJson.Options)!;
+
+        Assert.Equal(240, device.DatedFolderWindowHours);
+        Assert.Equal(TimeSpan.FromHours(240), DatedFolders.RecentWindow(device.DatedFolderWindowHours));
+    }
+
+    [Fact]
+    public void An_ADL_that_predates_the_window_gets_the_default_and_not_a_zero()
+    {
+        // The reason the field is nullable. Absent and zero are opposite
+        // instructions -- "you decide" and "today's folder only" -- and an
+        // int would have made them the same value.
+        var older = JsonSerializer.Deserialize<DeviceConfig>(
+            """{"id": 3, "check_interval_minutes": 5}""", AgentJson.Options)!;
+
+        Assert.Null(older.DatedFolderWindowHours);
+        Assert.Equal(DatedFolders.DefaultRecentWindow, DatedFolders.RecentWindow(older.DatedFolderWindowHours));
+
+        var asked = JsonSerializer.Deserialize<DeviceConfig>(
+            """{"id": 3, "dated_folder_window_hours": 0}""", AgentJson.Options)!;
+
+        Assert.Equal(TimeSpan.Zero, DatedFolders.RecentWindow(asked.DatedFolderWindowHours));
     }
 
     /// <summary>

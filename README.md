@@ -122,11 +122,10 @@ FTP plugin has existed.
   from the collection start date to now would be 8 760 enumerations every ten
   minutes for a station whose files are all in the newest one or two. The
   agent reads `dated_folder_window_hours` from the device block of the sync
-  response when ADL sends it (`0` is the current folder alone); the plugin
-  does not serve that field yet, so today every install walks 48 hours.
-  Adding it server-side is a companion change in
-  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin), the same
-  shape as `reconciliation_interval_hours` above.
+  response (`0` is the current folder alone), and falls back to 48 hours for
+  an ADL that predates the field. The server side of it is
+  `AgentDevice.dated_folder_window_hours` in
+  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin).
 - **and a cap under the window** — at most 2 000 directories a cycle,
   whatever the window asks for, because a window typed as a year against an
   hourly station is not a request anybody meant to make. A station the cap
