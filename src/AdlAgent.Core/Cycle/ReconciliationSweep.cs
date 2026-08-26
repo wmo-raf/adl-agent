@@ -179,8 +179,13 @@ public sealed class ReconciliationSweep
     /// an instance whose links cannot afford them -- and is obeyed rather
     /// than clamped away. An absent field is an older ADL that does not know
     /// about the setting, and gets the daily default.
+    /// <para>
+    /// Public because the tray shows this cadence, and a window that read the
+    /// raw number itself would be a second opinion about what a zero means.
+    /// There is one reading of ADL's number and this is it.
+    /// </para>
     /// </remarks>
-    private static TimeSpan? Interval(int? hours) => hours switch
+    public static TimeSpan? Interval(int? hours) => hours switch
     {
         null => DefaultInterval,
         <= 0 => null,

@@ -79,6 +79,20 @@ public sealed record AgentStatusSnapshot
 
     public int HeartbeatIntervalMinutes { get; init; }
 
+    /// <summary>
+    /// How often ADL last said a station should offer its whole folder back
+    /// to its collection start date, in hours. <c>null</c> when ADL has not
+    /// said -- an instance that predates the setting, or a machine that has
+    /// not had a beat answered yet.
+    /// </summary>
+    /// <remarks>
+    /// The raw number rather than a reading of it, because zero and null are
+    /// opposite instructions and one of them has to survive the trip.
+    /// <see cref="Cycle.ReconciliationSweep.Interval"/> is what turns it into
+    /// a cadence, for the window as much as for the sweep.
+    /// </remarks>
+    public int? ReconciliationIntervalHours { get; init; }
+
     /// <summary>Why the last attempt to reach ADL failed, if it did.</summary>
     public string? LastError { get; init; }
 

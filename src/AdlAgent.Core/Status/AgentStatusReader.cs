@@ -118,6 +118,7 @@ public sealed class AgentStatusReader
             ClockSkewSeconds = heartbeat.ClockSkewSeconds,
             CheckIntervalMinutes = (int)_cadence.CheckInterval.TotalMinutes,
             HeartbeatIntervalMinutes = (int)_cadence.HeartbeatInterval.TotalMinutes,
+            ReconciliationIntervalHours = heartbeat.ReconciliationIntervalHours,
             LastError = heartbeat.LastError,
             UpdateState = update.Outcome.ToString(),
             UpdateVersion = update.OfferedVersion,

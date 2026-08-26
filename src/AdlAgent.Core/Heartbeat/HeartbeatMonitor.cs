@@ -20,6 +20,7 @@ public sealed class HeartbeatMonitor
     private DateTimeOffset? _lastSuccessAt;
     private string? _fleetStatus;
     private int? _clockSkewSeconds;
+    private int? _reconciliationIntervalHours;
     private string? _lastError;
 
     /// <summary>How the last beat went, read at one instant.</summary>
@@ -28,7 +29,8 @@ public sealed class HeartbeatMonitor
         lock (_gate)
         {
             return new HeartbeatSnapshot(
-                _lastAttemptAt, _lastSuccessAt, _fleetStatus, _clockSkewSeconds, _lastError);
+                _lastAttemptAt, _lastSuccessAt, _fleetStatus, _clockSkewSeconds,
+                _reconciliationIntervalHours, _lastError);
         }
     }
 
@@ -49,6 +51,20 @@ public sealed class HeartbeatMonitor
     /// </summary>
     public int? ClockSkewSeconds => Snapshot().ClockSkewSeconds;
 
+    /// <summary>
+    /// How often ADL last said a station should offer its whole folder.
+    /// <c>null</c> when no beat has been answered, or when the ADL answering
+    /// predates the setting.
+    /// </summary>
+    /// <remarks>
+    /// From the beat rather than the sync response, and it is the one number
+    /// here that could have come from either. A deployment-wide setting moves
+    /// no <c>config_version</c>, so nothing in a sync response ever says the
+    /// number is new -- and the beat is the more frequent of the two calls,
+    /// so it is the sooner of the two to notice.
+    /// </remarks>
+    public int? ReconciliationIntervalHours => Snapshot().ReconciliationIntervalHours;
+
     /// <summary>Why the last beat did not arrive, if it did not.</summary>
     public string? LastError => Snapshot().LastError;
 
@@ -60,6 +76,7 @@ public sealed class HeartbeatMonitor
             _lastSuccessAt = at;
             _fleetStatus = response.Status;
             _clockSkewSeconds = response.ClockSkewSeconds;
+            _reconciliationIntervalHours = response.ReconciliationIntervalHours;
             _lastError = null;
         }
     }
@@ -80,4 +97,5 @@ public sealed record HeartbeatSnapshot(
     DateTimeOffset? LastSuccessAt,
     string? FleetStatus,
     int? ClockSkewSeconds,
+    int? ReconciliationIntervalHours,
     string? LastError);

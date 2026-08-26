@@ -87,12 +87,12 @@ lets the cheap path be cheap.
   not recorded as swept, so fixing it does not mean waiting another day. The
   record survives a restart, so a service that restarts hourly does not offer
   its whole folder hourly.
-- **cadence** — daily by default. The agent reads
+- **cadence** — daily by default, and ADL's to set. The agent reads
   `reconciliation_interval_hours` from the device block of the sync response
-  when ADL sends it (`0` switches sweeps off); the plugin does not serve that
-  field yet, so today every install reconciles daily. Adding it server-side
-  is a companion change in
-  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin).
+  (`0` switches sweeps off), which
+  [`adl-agent-plugin`](https://github.com/wmo-raf/adl-agent-plugin) serves
+  deployment-wide from `ADL_AGENT_RECONCILIATION_INTERVAL_HOURS`. An ADL that
+  predates it sends nothing, and the agent reconciles daily.
 
 Date-structured folders
 ([wmo-raf/adl#289](https://github.com/wmo-raf/adl/issues/289)) — the vendor

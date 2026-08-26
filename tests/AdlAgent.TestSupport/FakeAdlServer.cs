@@ -536,6 +536,7 @@ public sealed class FakeAdlServer : IDisposable
             Status = FleetStatus,
             HeartbeatIntervalMinutes = Config.Device.HeartbeatIntervalMinutes,
             CheckIntervalMinutes = Config.Device.CheckIntervalMinutes,
+            ReconciliationIntervalHours = Config.Device.ReconciliationIntervalHours,
             ConfigVersion = Config.ConfigVersion,
         });
     }

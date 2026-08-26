@@ -54,6 +54,18 @@ internal static class Display
         return Counted((int)elapsed.TotalDays, "day");
     }
 
+    /// <summary>A cadence, as this window says one: "every 7 days".</summary>
+    /// <remarks>
+    /// Days once there are whole ones to count, because "every 168 hours" is
+    /// a number a technician has to do arithmetic on before it means a week.
+    /// Hours below that, and for anything that does not divide -- "every 36
+    /// hours" is honest where "every 1.5 days" is a second unit to read.
+    /// </remarks>
+    public static string Every(TimeSpan interval) =>
+        interval < TimeSpan.FromDays(2) || interval.TotalHours % 24 != 0
+            ? $"every {Counted((int)interval.TotalHours, "hour")}"
+            : $"every {Counted((int)interval.TotalDays, "day")}";
+
     /// <summary>The same span as something a sentence can end on.</summary>
     public static string Ago(DateTimeOffset from, DateTimeOffset now) =>
         $"{Span(from, now)} ago";
