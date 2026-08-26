@@ -1,9 +1,11 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Navigation;
 
 namespace AdlAgent.Tray;
 
@@ -38,6 +40,60 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         DataContext = shell;
+    }
+
+    /// <summary>
+    /// Open this machine's ADL in whatever browser Windows opens addresses
+    /// with.
+    /// </summary>
+    /// <remarks>
+    /// <c>UseShellExecute</c> because the target is an address rather than a
+    /// program: it is the shell that knows which browser this logon session
+    /// has, and starting one by name would pick a browser for somebody.
+    /// <para>
+    /// Nothing about this can be allowed to end the process. A machine with
+    /// no browser registered at all is an ordinary country server, and the
+    /// answer to a click on it is a sentence at the bottom of the window
+    /// giving the address to type somewhere else -- not an unhandled
+    /// exception in the program that is supposed to explain what is wrong.
+    /// </para>
+    /// <para>
+    /// The scheme is checked again here, having already been checked by
+    /// <see cref="ShellViewModel.AdlLink"/> — which is what fills the
+    /// <c>NavigateUri</c> this reads, so in this program the second check can
+    /// never fire. It is here because of what is on the other side of it: a
+    /// <c>file:</c> or <c>ms-settings:</c> reaching ShellExecute is a
+    /// different kind of thing to hand the shell than the https link this row
+    /// says it is, and that should not depend on a property three files away
+    /// staying the way it is today.
+    /// </para>
+    /// </remarks>
+    private void OpenAdl(object sender, RequestNavigateEventArgs e)
+    {
+        e.Handled = true;
+
+        var target = e.Uri;
+
+        if (target is null
+            || !target.IsAbsoluteUri
+            || (target.Scheme != Uri.UriSchemeHttps && target.Scheme != Uri.UriSchemeHttp))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // Deliberately every exception. Win32Exception is the one the
+            // shell throws with no browser registered, but a locked-down
+            // machine can refuse this half a dozen other ways and none of
+            // them is worth telling apart: the technician's next move is the
+            // same one, and it is on screen.
+            _shell.BrowserRefused();
+        }
     }
 
     /// <summary>

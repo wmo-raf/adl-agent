@@ -514,6 +514,52 @@ public class AdlAddressTests
 
     // ---------- helpers ----------
 
+    [Fact]
+    public async Task A_machine_with_no_address_offers_no_link_to_open()
+    {
+        await using var agent = Unconfigured();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link, new RecordingAddressChange());
+
+        await window.RefreshAsync();
+
+        // The address this machine shows is a sentence, not an address. The
+        // header's link binds to the Uri rather than to that string, so that
+        // WPF is never asked to convert it: bindings are evaluated on
+        // collapsed elements too, and the conversion would fail once a poll
+        // for as long as the tray ran -- into the binding log that exists to
+        // make a real mistake findable.
+        Assert.False(window.IsConfigured);
+        Assert.Null(window.AdlLink);
+
+        // The row is not drawn here anyway. This is belt to that braces: the
+        // gate is about what is worth showing, and the null is about what
+        // must never reach a browser.
+        Assert.False(window.ShowsPairedTo);
+        Assert.True(window.ShowsHeadline);
+    }
+
+    [Fact]
+    public async Task A_configured_address_is_something_a_browser_can_open()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link, new RecordingAddressChange());
+
+        await window.RefreshAsync();
+
+        // http or https and nothing else. What is on the other side of this
+        // is ShellExecute, and a file: or ms-settings: reaching it is a
+        // different kind of thing to hand the shell than the web address the
+        // header says this row is.
+        Assert.NotNull(window.AdlLink);
+        Assert.True(
+            window.AdlLink!.Scheme is "http" or "https",
+            $"{window.AdlLink} is not something to hand a browser.");
+    }
+
     private static AgentHarness Unconfigured() =>
         new(settings: new Dictionary<string, string?> { ["Agent:AdlBaseUrl"] = "" });
 }

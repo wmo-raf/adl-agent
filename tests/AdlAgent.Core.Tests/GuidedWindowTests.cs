@@ -276,7 +276,19 @@ public class GuidedWindowTests
 
         // Including in the strip above every tab, which would otherwise go on
         // announcing a scan interval this machine is not keeping.
-        Assert.Equal("", window.HeaderFacts);
+        Assert.False(window.ShowsAdlFacts);
+
+        // The version stands alone there, because it is this machine's own
+        // fact rather than ADL's, and it is the first thing HQ asks for down
+        // a telephone -- including about a machine that has never paired.
+        Assert.NotEqual("-", window.AgentVersion);
+
+        // And the header's first line is the sentence saying so, not an
+        // address: there is nothing paired to link to, and the dot that would
+        // carry ADL's verdict has no verdict to carry.
+        Assert.True(window.ShowsHeadline);
+        Assert.False(window.ShowsPairedTo);
+        Assert.NotEqual("", window.Headline);
     }
 
     [Fact]
@@ -353,7 +365,18 @@ public class GuidedWindowTests
         // the one moment in its life somebody needs to read them.
         Assert.True(window.HasEverPaired);
         Assert.NotEqual("-", window.LastHeartbeat);
-        Assert.NotEqual("", window.HeaderFacts);
+        Assert.True(window.ShowsAdlFacts);
+
+        // But not the verdict beside them. ADL's last word about this machine
+        // is from before it cut the machine off, and a green dot reading
+        // "Collecting and sending" under a headline saying nothing is being
+        // sent is a contradiction the header must not be able to draw.
+        Assert.False(window.ShowsPairedTo);
+
+        // So the headline is the sentence about the revocation, and it is the
+        // one line in the header with any weight.
+        Assert.True(window.ShowsHeadline);
+        Assert.Contains("revoked", window.Headline, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -439,12 +462,13 @@ public class GuidedWindowTests
     // ---------- what ADL makes of this machine ----------
 
     [Theory]
-    [InlineData("online", "Collecting and sending")]
-    [InlineData("degraded", "Heartbeats are late")]
-    [InlineData("offline", "No heartbeats arriving")]
-    [InlineData("cycle_stuck", "Alive but not scanning")]
-    [InlineData("unknown", "Nothing reported yet")]
-    public async Task ADLs_verdict_reaches_the_window_in_words(string state, string said)
+    [InlineData("online", "Collecting and sending", TrayState.Working)]
+    [InlineData("degraded", "Heartbeats are late", TrayState.NeedsAttention)]
+    [InlineData("offline", "No heartbeats arriving", TrayState.Stopped)]
+    [InlineData("cycle_stuck", "Alive but not scanning", TrayState.NeedsAttention)]
+    [InlineData("unknown", "Nothing reported yet", TrayState.Unknown)]
+    public async Task ADLs_verdict_reaches_the_window_in_words(
+        string state, string said, TrayState tone)
     {
         await using var agent = new AgentHarness();
         using var serving = await ServedAgent.ServingAsync(agent);
@@ -463,6 +487,41 @@ public class GuidedWindowTests
         // country server reads should not be it.
         Assert.Equal(said, window.FleetStatus);
         Assert.DoesNotContain("_", window.FleetStatus);
+
+        // And the colour beside the words, from the same vocabulary the tray
+        // icon and the connection list use. Green, amber and red already mean
+        // something on this screen; a fourth reading of them would be a
+        // fourth thing to learn.
+        Assert.Equal(tone, window.FleetTone);
+
+        // The dot is drawn at all, because this machine is paired right now.
+        Assert.True(window.ShowsPairedTo);
+    }
+
+    [Fact]
+    public async Task A_state_this_build_has_never_heard_of_gets_no_colour()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        agent.Server.FleetStatus = "clock_skewed";
+
+        await agent.PairAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // Grey is the absence of a verdict rather than a fourth one, which is
+        // the rule the station grid already keeps. A build that does not know
+        // what ADL just said has no verdict to offer, and guessing amber or
+        // red at it would be this program inventing an opinion about a word
+        // it cannot read.
+        Assert.Equal(TrayState.Unknown, window.FleetTone);
+
+        // The words are still there beside it -- see the test below.
+        Assert.Equal("Clock skewed", window.FleetStatus);
     }
 
     [Fact]
@@ -514,6 +573,106 @@ public class GuidedWindowTests
         // an identifier on the screen would be worse.
         Assert.Equal("Clock skewed", window.FleetStatus);
     }
+
+    // ---------- the header strip ----------
+
+    [Fact]
+    public async Task A_paired_machine_puts_the_address_on_the_first_line_and_the_verdict_last()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        agent.Server.FleetStatus = "online";
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // The first line is the address, which the window draws as a link,
+        // and the sentence that used to be there is empty -- because on this
+        // one machine the headline is ADL's verdict at the bottom of the
+        // strip rather than anything at the top of it.
+        Assert.True(window.ShowsPairedTo);
+        Assert.False(window.ShowsHeadline);
+        Assert.Equal("", window.Headline);
+
+        // Exactly one line in the header ever carries weight. These two are
+        // the complement of each other so that it cannot be two, or none.
+        Assert.NotEqual(window.ShowsHeadline, window.ShowsPairedTo);
+
+        // Something to link to, and it goes where the row says it goes. Not
+        // string equality: Uri normalises "http://host:8000" to a trailing
+        // slash, and the row shows the address as the service holds it. A
+        // difference bigger than that slash would be a link whose text and
+        // destination disagree, which is the one thing a link must not do.
+        Assert.NotNull(window.AdlLink);
+        Assert.Equal(
+            window.AdlUrl.TrimEnd('/'),
+            window.AdlLink!.ToString().TrimEnd('/'));
+
+        // And the facts between them, ADL's four and this machine's one.
+        Assert.True(window.ShowsAdlFacts);
+        Assert.NotEqual("-", window.DeviceName);
+        Assert.NotEqual("-", window.AgentVersion);
+        Assert.NotEqual("-", window.CheckInterval);
+    }
+
+    [Fact]
+    public async Task The_header_says_how_long_ago_as_well_as_when()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+        await agent.HeartbeatLoop.BeatAsync();
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // Two readings of one moment, because they answer different
+        // questions: the exact one is what somebody reads down a telephone or
+        // matches against a log, and the span is the reading they do at a
+        // glance. A heartbeat three days old should not need arithmetic.
+        Assert.NotEqual("-", window.LastHeartbeat);
+        Assert.NotEqual("", window.LastHeartbeatAgo);
+        Assert.NotEqual("", window.LastSyncedAgo);
+
+        // Just beaten and just synced, against the service's own clock. If
+        // this ever reads in days, the header is aging one moment against
+        // some other moment's "now".
+        //
+        // Brackets included, because they are part of the string rather than
+        // runs in the window: a Run cannot be hidden, so a machine with no
+        // heartbeat would otherwise show an empty pair of them.
+        Assert.Equal("(moments ago)", window.LastHeartbeatAgo);
+        Assert.Equal("(moments ago)", window.LastSyncedAgo);
+    }
+
+    [Fact]
+    public async Task A_machine_ADL_has_never_beaten_for_says_nothing_about_when()
+    {
+        await using var agent = new AgentHarness();
+        using var serving = await ServedAgent.ServingAsync(agent);
+
+        var window = new ShellViewModel(serving.Link);
+
+        await window.RefreshAsync();
+
+        // Empty rather than "-", "55 years ago", or a bare "()". These follow
+        // a value on the same line, and a span invented for a moment that
+        // never happened is the one thing worse than an absent one -- while
+        // brackets around nothing are how a header comes to read
+        // "Last heartbeat: - ()".
+        Assert.Equal("", window.LastHeartbeatAgo);
+        Assert.Equal("", window.LastSyncedAgo);
+    }
+
 
     // ---------- the line, in each state it has to be right for ----------
 

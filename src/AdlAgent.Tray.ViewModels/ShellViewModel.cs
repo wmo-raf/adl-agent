@@ -53,6 +53,24 @@ public sealed class ShellViewModel : Observable
     private int _selectedTab = TrayTabs.Stations;
 
     /// <summary>
+    /// The moment the header's "3 hours ago" is measured back from.
+    /// </summary>
+    /// <remarks>
+    /// The service's own now, taken from the station list's
+    /// <see cref="AgentStationsSnapshot.AsOf"/> on every refresh -- which is
+    /// the same value the rows in the grid age against. One clock, because a
+    /// header saying a heartbeat arrived three hours ago above a row saying a
+    /// file arrived four hours ago is a comparison a technician makes, and
+    /// two clocks would make it a false one.
+    /// <para>
+    /// This machine's own clock when the service has not answered, so that a
+    /// header left showing the last thing it heard goes on aging it rather
+    /// than freezing at whatever it said when the service went away.
+    /// </para>
+    /// </remarks>
+    private DateTimeOffset _asOf = DateTimeOffset.UtcNow;
+
+    /// <summary>
     /// The stations as ADL last sent them, whatever the rows below are
     /// showing.
     /// </summary>
@@ -214,6 +232,31 @@ public sealed class ShellViewModel : Observable
     public string AdlUrl => _status is { Configured: false }
         ? "No ADL address is configured"
         : _status?.AdlUrl ?? "-";
+
+    /// <summary>
+    /// The same address as something the header can hand to a browser, or
+    /// <c>null</c> when it is not one.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Uri"/> and not the string beside it, because the header
+    /// binds this to a hyperlink and WPF would otherwise convert the string
+    /// itself -- on every machine, including the ones where
+    /// <see cref="AdlUrl"/> is a sentence rather than an address. Bindings are
+    /// evaluated on collapsed elements too, so an unconfigured machine would
+    /// fail that conversion once a poll for as long as the tray ran, into the
+    /// binding log that exists to make a real mistake findable.
+    /// <para>
+    /// Only http and https. Anything else is not something to hand the shell
+    /// on the strength of a row that says it is a web address, and a machine
+    /// that somehow held one should show it as text rather than offer to open
+    /// it.
+    /// </para>
+    /// </remarks>
+    public Uri? AdlLink =>
+        Uri.TryCreate(_status?.AdlUrl, UriKind.Absolute, out var link)
+        && (link.Scheme == Uri.UriSchemeHttps || link.Scheme == Uri.UriSchemeHttp)
+            ? link
+            : null;
 
     /// <summary>True when this machine has an address to send to.</summary>
     public bool IsConfigured => _status is null || _status.Configured;
@@ -426,6 +469,25 @@ public sealed class ShellViewModel : Observable
         Raise(nameof(ShowsCancelPairing));
     }
 
+    /// <summary>
+    /// Say that this machine could not open a browser for the header's link.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the window, even though it is the window that
+    /// asked Windows and the window that was refused. Every other sentence
+    /// this program says to a technician is written in this class, and the
+    /// one exception would be the one no test could reach.
+    /// <para>
+    /// The address is repeated into the sentence on purpose: a click that
+    /// went nowhere leaves somebody needing to type it on another machine,
+    /// and the row it came from is 11px grey three inches above.
+    /// </para>
+    /// </remarks>
+    public void BrowserRefused() =>
+        Message = string.Create(
+            CultureInfo.CurrentCulture,
+            $"This machine could not open a browser. The address is {AdlUrl}.");
+
     /// <summary>What ADL last made of this machine, in words.</summary>
     /// <remarks>
     /// ADL sends the state it stores -- <c>cycle_stuck</c> -- and has the
@@ -504,27 +566,112 @@ public sealed class ShellViewModel : Observable
         : _status!.LastError!;
 
     /// <summary>
-    /// The three facts ADL supplies that the header strip carries, or nothing
-    /// at all before ADL has supplied any.
+    /// True when the header may show the four facts ADL supplies.
     /// </summary>
     /// <remarks>
-    /// Assembled here rather than as runs in the window because a
-    /// <c>Run</c> cannot be hidden -- it is not an element -- and the
-    /// alternatives were a second line in the strip, which makes the header
-    /// permanently taller, or a strip that goes on saying "scans every 10
-    /// minutes" about a machine ADL has never told anything to scan.
+    /// The version beside them is this machine's own and is not gated: it is
+    /// true from the moment the service answers, and it is the first thing HQ
+    /// asks for down a telephone. The other four are ADL's, and a header that
+    /// went on saying "scans every 10 minutes" about a machine ADL has never
+    /// told anything to scan would be inventing one.
     /// <para>
     /// Gated with the rows on the Status tab and by the same question, so the
     /// page and the strip three inches above it cannot disagree about whether
     /// there is anything to say yet.
     /// </para>
     /// </remarks>
-    public string HeaderFacts => HasEverPaired
-        ? string.Create(
-            CultureInfo.CurrentCulture,
-            $"  ·  last heartbeat {LastHeartbeat}  ·  last synced {LastSynced}"
-            + $"  ·  scans {CheckInterval}")
+    public bool ShowsAdlFacts => HasEverPaired;
+
+    /// <summary>
+    /// True when the header's first line is the address rather than a
+    /// sentence about the state.
+    /// </summary>
+    /// <remarks>
+    /// The paired machine is the only one with an address worth clicking, and
+    /// the only one whose headline is somewhere else -- the dot two lines
+    /// below it. In every other state the first line <em>is</em> the headline,
+    /// so the window draws <see cref="Headline"/> there instead and gives it
+    /// the weight this one does not get.
+    /// </remarks>
+    public bool ShowsPairedTo => IsPaired && !NeedsRePairing;
+
+    /// <summary>
+    /// True when the header's first line is <see cref="Headline"/>'s
+    /// sentence rather than the address.
+    /// </summary>
+    /// <remarks>
+    /// The exact complement of <see cref="ShowsPairedTo"/>, and a property
+    /// rather than an inverting converter in the window because every other
+    /// gate on this screen is a bool the view model decided. One of the two
+    /// rows is always drawn and never both.
+    /// </remarks>
+    public bool ShowsHeadline => !ShowsPairedTo;
+
+    /// <summary>
+    /// How long ago the last heartbeat was, parenthesised, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="LastHeartbeat"/> rather than folded into it. The
+    /// exact moment is what somebody reads down a telephone or matches
+    /// against a log; the span is the reading they do at a glance, and a
+    /// machine whose heartbeat is three days old should not need arithmetic
+    /// to say so.
+    /// <para>
+    /// The brackets are in the string rather than around it in the window,
+    /// for the reason the header strip was assembled here before it: a
+    /// <c>Run</c> cannot be hidden -- it is not an element -- so a machine ADL
+    /// has never beaten for would be left showing an empty pair of them.
+    /// </para>
+    /// </remarks>
+    public string LastHeartbeatAgo => Bracketed(_status?.LastHeartbeatAt);
+
+    /// <summary>
+    /// How long ago the last configuration sync was, parenthesised, or
+    /// nothing.
+    /// </summary>
+    public string LastSyncedAgo => Bracketed(_status?.LastSyncedAt);
+
+    /// <summary>A moment as "(3 hours ago)", or nothing at all.</summary>
+    private string Bracketed(DateTimeOffset? moment) => moment is { } value
+        ? string.Create(CultureInfo.CurrentCulture, $"({Display.Ago(value, _asOf)})")
         : "";
+
+    /// <summary>
+    /// Which of the three colours ADL's verdict is worth, as a word the
+    /// window has a trigger for.
+    /// </summary>
+    /// <remarks>
+    /// The same vocabulary as <see cref="TrayState"/> and the connection
+    /// rows' <c>Attention</c>, because green, amber and red already mean
+    /// something on this screen and a fourth reading of them would be a
+    /// fourth thing to learn.
+    /// <para>
+    /// <c>offline</c> is red and <c>cycle_stuck</c> is amber, which is the one
+    /// pair worth arguing about: both mean nothing is arriving, but a machine
+    /// that is still heartbeating is one somebody can still reach, and a
+    /// machine that has gone silent is one somebody has to walk to.
+    /// </para>
+    /// <para>
+    /// Grey for a state this build has never heard of, matching the rule the
+    /// station grid already keeps: grey is the absence of a verdict rather
+    /// than a fourth one, and a build that does not know what ADL just said
+    /// has no verdict to offer.
+    /// </para>
+    /// </remarks>
+    public TrayState FleetTone
+    {
+        get
+        {
+            var state = _status?.FleetStatus;
+
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                return TrayState.Unknown;
+            }
+
+            return FleetTones.TryGetValue(state, out var tone) ? tone : TrayState.Unknown;
+        }
+    }
 
     /// <summary>
     /// What this machine is doing about updating itself, in one sentence.
@@ -556,14 +703,27 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// The one line the tray icon's tooltip and the window header both show:
-    /// what this machine <em>is</em>.
+    /// What this machine <em>is</em>, in one sentence -- for the four states
+    /// that need one, and nothing at all for the one that does not.
     /// </summary>
     /// <remarks>
     /// Only what it is. What to do about it is <see cref="NextStep"/>, which
     /// is on the screen directly beneath this, and a header that also gave
     /// the instruction would be the same sentence twice -- and, worse, two
     /// copies of it to drift apart. This one describes; the one below acts.
+    /// <para>
+    /// Empty on a working machine, and that is the whole of the header's
+    /// arrangement rather than an omission. The four states below are ones a
+    /// technician has to be told about in words; a paired machine's headline
+    /// is ADL's verdict, which the header draws two lines lower with a colour
+    /// beside it, and repeating the address there in a sentence would be the
+    /// same fact twice with only one of them clickable.
+    /// </para>
+    /// <para>
+    /// No longer the tray icon's tooltip. That shows ADL's verdict alone --
+    /// see <c>App.OnStatus</c> -- so the two are free to differ and this one
+    /// is now the window's.
+    /// </para>
     /// </remarks>
     public string Headline
     {
@@ -589,9 +749,7 @@ public sealed class ShellViewModel : Observable
                 return "This machine is not paired with ADL yet.";
             }
 
-            return string.Create(
-                CultureInfo.CurrentCulture,
-                $"Paired to {AdlUrl} as {DeviceName} — ADL says: {FleetStatus}.");
+            return "";
         }
     }
 
@@ -851,6 +1009,12 @@ public sealed class ShellViewModel : Observable
         _serviceReached = status.ServiceReached;
         _status = status.Value ?? _status;
 
+        // This machine's clock until the service supplies its own, below. A
+        // header that kept the previous answer's "now" would stop aging the
+        // moment the service went away -- which is the moment the age of the
+        // last heartbeat starts being the interesting number.
+        _asOf = DateTimeOffset.UtcNow;
+
         if (status.ServiceReached)
         {
             var stations = await _agent.StationsAsync().ConfigureAwait(true);
@@ -858,6 +1022,7 @@ public sealed class ShellViewModel : Observable
             if (stations.Value is not null)
             {
                 _linked = stations.Value.Stations;
+                _asOf = stations.Value.AsOf;
 
                 Show(stations.Value);
             }
@@ -1600,6 +1765,27 @@ public sealed class ShellViewModel : Observable
         };
 
     /// <summary>
+    /// The same states as <see cref="FleetStates"/>, as the colour the header
+    /// draws beside them.
+    /// </summary>
+    /// <remarks>
+    /// A second dictionary rather than a second column of the first, because
+    /// the two are gated differently: the words show on any machine ADL has
+    /// ever spoken about, and the dot only on one that is paired right now.
+    /// Anything missing here is grey by <see cref="FleetTone"/>, which is
+    /// what a state this build has never heard of should be.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, TrayState> FleetTones =
+        new Dictionary<string, TrayState>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["online"] = TrayState.Working,
+            ["degraded"] = TrayState.NeedsAttention,
+            ["offline"] = TrayState.Stopped,
+            ["cycle_stuck"] = TrayState.NeedsAttention,
+            ["unknown"] = TrayState.Unknown,
+        };
+
+    /// <summary>
     /// Everything derived from the status answer.
     /// </summary>
     /// <remarks>
@@ -1610,15 +1796,17 @@ public sealed class ShellViewModel : Observable
     /// </remarks>
     private static readonly IReadOnlyList<string> HeaderProperties =
     [
-        nameof(ServiceRunning), nameof(AdlUrl), nameof(IsConfigured), nameof(NeedsConfiguring),
+        nameof(ServiceRunning), nameof(AdlUrl), nameof(AdlLink), nameof(IsConfigured), nameof(NeedsConfiguring),
         nameof(ConfigurationHint), nameof(ShowsChangeAdl),
         nameof(AgentVersion), nameof(DeviceName), nameof(DeviceId),
         nameof(PairingLine), nameof(IsPaired), nameof(NeedsRePairing), nameof(HasEverPaired),
         nameof(PairedSince), nameof(ShowsPairingBox), nameof(ShowsPairAgain),
         nameof(ShowsCancelPairing),
-        nameof(FleetStatus),
+        nameof(FleetStatus), nameof(FleetTone),
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
-        nameof(ClockSkew), nameof(LastError), nameof(UpdateStatus), nameof(HeaderFacts),
+        nameof(LastHeartbeatAgo), nameof(LastSyncedAgo),
+        nameof(ClockSkew), nameof(LastError), nameof(UpdateStatus),
+        nameof(ShowsAdlFacts), nameof(ShowsPairedTo), nameof(ShowsHeadline),
         nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
         nameof(StationsAvailable),

@@ -181,7 +181,14 @@ public partial class App : Application
             // facts. Deciding it here as well is how a dot comes to sit amber
             // in the corner of a screen above a window saying there is
             // nothing to do.
-            _tray.Show(_shell.NextStep.Attention, _shell.Headline);
+            //
+            // ADL's verdict alone, rather than the window's headline sentence.
+            // A hover is a glance, and the question a glance asks of a tray
+            // icon is whether data is flowing -- which is what this answers,
+            // in ADL's own words. The states ADL has never spoken about read
+            // as "Nothing reported yet" and lean on the colour beside them,
+            // which is the icon itself.
+            _tray.Show(_shell.NextStep.Attention, _shell.FleetStatus);
         }
         catch (Exception exception)
         {

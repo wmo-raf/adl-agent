@@ -66,5 +66,106 @@
             <Setter Property="Margin" Value="0,8,0,0" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+
+        <!--
+            The header's facts: one line each, laid side by side. Styles rather
+            than attributes repeated five times, because the thing that makes
+            the strip read as one row is that the five are identical, and five
+            copies of the same setters is five places for one of them to drift.
+
+            The right margin is the whole of the spacing between facts, and the
+            glyph that starts the next one is what says a new fact has begun.
+            The strip this replaced separated them with " · " as well; with a
+            glyph immediately after it, the dot was a second delimiter doing
+            the first one's job.
+
+            A TextBlock per fact and not one for the whole line, so that the
+            wrap at a narrow window lands between two facts. WPF wraps at word
+            boundaries, and one TextBlock holding all five would be free to
+            leave "Last heartbeat:" at the end of a line and its timestamp at
+            the start of the next. These set no TextWrapping, so each one is
+            NoWrap and cannot break inside itself whatever its width.
+        -->
+        <Style x:Key="Fact" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,28,0" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
+        <!--
+            One fact's worth of text with no margin: the chip on the status
+            row, which is spaced by its own padding rather than by a gap to a
+            neighbour.
+        -->
+        <Style x:Key="FactText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
+        <!--
+            Grey label, dark value: the exact answer is the dark part and
+            everything scaffolding it is grey, so the eye going along the strip
+            lands on the values rather than reading the line.
+
+            Run styles, because these are pieces of one line now rather than
+            lines of their own.
+        -->
+        <Style x:Key="FactLabel" TargetType="Run">
+            <Setter Property="Foreground" Value="#5A6472" />
+        </Style>
+
+        <Style x:Key="FactValue" TargetType="Run">
+            <Setter Property="Foreground" Value="#33475B" />
+        </Style>
+
+        <!--
+            The relative reading, after the exact one and quieter than it. Both
+            are there because they answer different questions: the exact moment
+            is what somebody reads down a telephone or matches against a log,
+            and the span is the reading they do at a glance.
+
+            Grey rather than the 0.75 opacity this used while it was a line of
+            its own. Opacity is a UIElement property and a Run is a
+            TextElement, so the colour is the only dial a run has — which is
+            why this is the same grey as the label rather than a third tone.
+        -->
+        <Style x:Key="FactAgo" TargetType="Run">
+            <Setter Property="Foreground" Value="#5A6472" />
+        </Style>
+
+        <!--
+            Segoe MDL2 Assets, which every Windows 10 and Server 2016 and
+            later carries — so nothing ships with this program and nothing is
+            licensed. The fallback families are what a machine missing it
+            falls back to instead of drawing boxes; the glyph is lost there,
+            but the label beside it carries the meaning on its own, which is
+            why these are decoration rather than the label itself.
+
+            BaselineAlignment is the whole of why this sits right, and it is
+            why the glyph is back in the text flow after a spell as a TextBlock
+            beside it. Microsoft's guidance is that these icons "are not
+            intended for use in-line with text": every glyph has the same fixed
+            width, height and left origin, drawn on an icon grid rather than to
+            a baseline, so an inline glyph left on its default alignment sits
+            on the text baseline and towers up from it.
+
+            Centre is the answer to that, and a better one than lifting the
+            glyph out of the flow was. Out of the flow the two halves were
+            centred on their line boxes, and a line box is not what the eye
+            sees: it carries descender space under the text, so anything
+            centred against it lands visibly low. Centre here means the middle
+            of the text itself, which WPF works out from the font's real
+            metrics at runtime — the measurement this file cannot make for
+            itself and no hand-tuned margin can stand in for.
+
+            The size is the one judgement left: 12 against 13px text, so the
+            glyph reads at about the cap height of the word beside it rather
+            than towering over it. Keep the two a couple of points apart if
+            either is ever retuned.
+        -->
+        <Style x:Key="Glyph" TargetType="Run">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets, Segoe UI Symbol, Segoe UI" />
+            <Setter Property="Foreground" Value="#5A6472" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="BaselineAlignment" Value="Center" />
+        </Style>
     </Application.Resources>
 </Application>
