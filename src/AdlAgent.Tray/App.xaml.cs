@@ -45,7 +45,25 @@ public partial class App : Application
     /// </remarks>
     private const string OnlyInstance = "Local\\adl-agent-tray";
 
+    /// <summary>
+    /// How a second tray asks the first one to show its window.
+    /// </summary>
+    /// <remarks>
+    /// The mutex above stops a second icon appearing, and on its own that is
+    /// all it does: the process that lost exits, nothing else happens, and a
+    /// technician who double-clicked the desktop shortcut watches nothing
+    /// happen at all. Which is the ordinary case, not the odd one -- the
+    /// installer puts a shortcut in Startup, so by the time anybody reaches
+    /// the desktop icon the tray it starts is already running.
+    ///
+    /// <c>Local\</c> for the mutex's reason: one tray per logon session, and
+    /// a request from one session must not raise a window in another.
+    /// </remarks>
+    private const string ShowRequest = "Local\\adl-agent-tray-show";
+
     private Mutex? _theOnlyOne;
+    private EventWaitHandle? _showRequested;
+    private RegisteredWaitHandle? _showRequests;
     private BindingTrace? _bindings;
     private TrayPresence? _tray;
     private ShellViewModel? _shell;
@@ -58,11 +76,21 @@ public partial class App : Application
 
         _theOnlyOne = new Mutex(initiallyOwned: true, OnlyInstance, out var isTheOnlyOne);
 
+        // Created either way, and by both processes: whichever gets there
+        // first makes it, the other opens the same one by name.
+        _showRequested = new EventWaitHandle(
+            initialState: false, EventResetMode.AutoReset, ShowRequest);
+
         if (!isTheOnlyOne)
         {
-            // Quietly: a technician who double-clicked twice wanted one
-            // window, and the one they already have is about to be in front
-            // of them anyway.
+            // Quietly, but not silently: the window this process would have
+            // opened already exists in the instance that owns the mutex, so
+            // ask that one to put it in front of the person who just asked
+            // for it, and go.
+            _showRequested.Set();
+
+            _showRequested.Dispose();
+            _showRequested = null;
             _theOnlyOne.Dispose();
             _theOnlyOne = null;
 
@@ -70,6 +98,16 @@ public partial class App : Application
 
             return;
         }
+
+        // And this is the instance that answers them. The callback arrives on
+        // a thread-pool thread, where touching a window is an exception, so
+        // it does nothing but hand the request to the one thread that may.
+        _showRequests = ThreadPool.RegisterWaitForSingleObject(
+            _showRequested,
+            (_, _) => Dispatcher.BeginInvoke(new Action(ShowWindow)),
+            state: null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
 
         // Before the first window exists, so that the bindings evaluated as
         // it opens -- which is most of them -- are the ones this can report.
@@ -105,6 +143,10 @@ public partial class App : Application
         _timer?.Stop();
         _tray?.Dispose();
         _bindings?.Dispose();
+
+        // Before the handle it is waiting on.
+        _showRequests?.Unregister(waitObject: null);
+        _showRequested?.Dispose();
 
         if (_theOnlyOne is not null)
         {
@@ -162,5 +204,16 @@ public partial class App : Application
         }
 
         _window.Activate();
+
+        // Activate is a request, and Windows refuses it from a process that
+        // is not the foreground one -- which this is not, when what asked was
+        // a second copy of the tray started from a shortcut. Refused, it
+        // flashes the taskbar button instead, which on a machine where the
+        // window was never visible in the first place reads as nothing
+        // happening. Topmost is not refused, and dropping it again in the
+        // same breath leaves the window in front without leaving it stuck
+        // over everything else.
+        _window.Topmost = true;
+        _window.Topmost = false;
     }
 }

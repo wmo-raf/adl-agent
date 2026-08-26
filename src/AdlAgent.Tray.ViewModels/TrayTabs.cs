@@ -72,4 +72,44 @@ public static class TrayTabs
 
         _ => Stations,
     };
+
+    /// <summary>
+    /// Whether <see cref="Stations"/> is a tab a technician can open at all.
+    /// </summary>
+    /// <remarks>
+    /// A machine that has never paired has nothing behind that tab but a
+    /// sentence saying so, and a tab that looks exactly like a working one is
+    /// a tab somebody clicks, reads, and clicks back out of -- during the five
+    /// minutes when the only thing to do is on the other one. So it is greyed
+    /// rather than merely empty, which is a thing the eye skips.
+    /// <para>
+    /// Two states, and deliberately not three. <see
+    /// cref="NextStepKind.RePairNeeded"/> is the one that looks like it
+    /// belongs here and must not be: that machine has been collecting for
+    /// months, its station list is still on disk, and its token was revoked in
+    /// ADL moments ago. Somebody is looking at it precisely because it broke,
+    /// and taking the list away is taking away what they came to read.
+    /// </para>
+    /// <para>
+    /// The bar is a redeemed code and nothing more.
+    /// <see cref="NextStepKind.WaitingForFirstSync"/> is live although there
+    /// is still nothing in it, because anything stricter ties a tab to the
+    /// network: a machine that pairs correctly behind a firewall rule nobody
+    /// has written yet would stay shut for ever, and "not paired" and "cannot
+    /// reach ADL" are two problems wanting two different people.
+    /// </para>
+    /// <para>
+    /// The catch-all is available, so a state added later is live until
+    /// somebody decides otherwise -- a tab that works when it need not is a
+    /// smaller failure than one that is mysteriously dead. What stops that
+    /// being silent is a test over every <see cref="NextStepKind"/>, which
+    /// fails the moment one is added.
+    /// </para>
+    /// </remarks>
+    public static bool Available(NextStep step) => step.Kind switch
+    {
+        NextStepKind.NotConfigured or NextStepKind.NotPaired => false,
+
+        _ => true,
+    };
 }

@@ -664,6 +664,25 @@ public sealed class ShellViewModel : Observable
     public bool ShowsMachineReason => HasNoConnections || NextStep.ListIsStale;
 
     /// <summary>
+    /// True when the station list is a tab a technician can open at all.
+    /// </summary>
+    /// <remarks>
+    /// The rule is <see cref="TrayTabs.Available"/>'s, so that both things
+    /// this window decides about tabs -- which one to open on, and whether
+    /// each can be opened -- are decided in the same file over the same
+    /// facts.
+    /// <para>
+    /// Read off <see cref="NextStep"/> rather than off the connection list,
+    /// although a never-paired machine has neither. They come apart in the
+    /// state that matters: a paired machine whose ADL has linked nothing to
+    /// it yet also has no connections, and that tab must open -- an empty
+    /// list with a sentence saying who to ask is the entire answer for that
+    /// machine.
+    /// </para>
+    /// </remarks>
+    public bool StationsAvailable => TrayTabs.Available(NextStep);
+
+    /// <summary>
     /// True when the selected connection should explain its own empty grid.
     /// </summary>
     /// <remarks>
@@ -1518,6 +1537,17 @@ public sealed class ShellViewModel : Observable
         NextStep = NextSteps.For(_serviceReached, _status, _linked);
 
         // After the line, because the tab is read off it.
+        //
+        // And before the properties are raised, which is what keeps the tab
+        // this window opens on and the tabs it allows from contradicting each
+        // other for a frame. The window binds SelectedIndex two ways and starts
+        // on Stations, so a poll that disabled Stations while it was still the
+        // selected tab would have WPF move the selection itself and write the
+        // move back through that binding. It cannot happen from here: the one
+        // state that both disables Stations and arrives while it is selected
+        // is the first answer from a never-paired machine, and ChooseTab moves
+        // to Status on that same answer, so the two reach the window together.
+        // Raising first would separate them.
         ChooseTab();
 
         foreach (var property in HeaderProperties)
@@ -1591,5 +1621,6 @@ public sealed class ShellViewModel : Observable
         nameof(ClockSkew), nameof(LastError), nameof(UpdateStatus), nameof(HeaderFacts),
         nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),
+        nameof(StationsAvailable),
     ];
 }
