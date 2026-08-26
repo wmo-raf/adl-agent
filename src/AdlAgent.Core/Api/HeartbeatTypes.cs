@@ -78,5 +78,27 @@ public sealed record HeartbeatResponse
 
     public int HeartbeatIntervalMinutes { get; init; }
     public int CheckIntervalMinutes { get; init; }
+
+    /// <summary>
+    /// How often a station offers its whole folder rather than only what the
+    /// candidate window admits. Zero or less switches sweeps off.
+    /// </summary>
+    /// <remarks>
+    /// The same number <see cref="DeviceConfig.ReconciliationIntervalHours"/>
+    /// carries, and nullable for the same reason: an ADL that predates the
+    /// setting sends nothing, and a zero would be indistinguishable from that
+    /// if this were an <see cref="int"/>.
+    /// <para>
+    /// <see cref="Cycle.ReconciliationSweep"/> reads the sync copy, not this
+    /// one -- a cycle re-syncs before it decides anything, so the number it
+    /// plans from is never older than the cycle itself. This one is here
+    /// because the beat is where a deployment-wide setting is most visible:
+    /// changing it moves no <c>config_version</c>, so there is nothing in a
+    /// sync response to say the number is new, and a technician reading a
+    /// beat should be able to see the cadence ADL currently believes in.
+    /// </para>
+    /// </remarks>
+    public int? ReconciliationIntervalHours { get; init; }
+
     public long ConfigVersion { get; init; }
 }

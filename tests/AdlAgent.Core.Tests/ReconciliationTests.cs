@@ -1,3 +1,6 @@
+using System.Text.Json;
+using AdlAgent.Core.Api;
+using AdlAgent.Core.Serialization;
 using AdlAgent.Core.State;
 using AdlAgent.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -384,4 +387,72 @@ public class ReconciliationTests
     /// <summary>A file whose timestamps put it a week back, however it arrived.</summary>
     private static DateTimeOffset Recovered(AgentHarness agent) =>
         agent.Time.GetUtcNow() - TimeSpan.FromDays(7);
+
+    // ---------- the cadence ADL states, in both places it states it ----------
+    //
+    // Literal bodies rather than round trips through this agent's own
+    // serializer, which would prove only that it agrees with itself. ADL and
+    // the agent are separate repositories on separate release trains, and a
+    // field renamed on the plugin side would otherwise surface as a fleet
+    // quietly reconciling daily against an instance that asked it not to.
+
+    [Fact]
+    public void The_interval_ADL_sends_in_a_sync_is_the_one_this_agent_reads()
+    {
+        const string body = """
+            {
+              "id": 3,
+              "name": "Songea server",
+              "check_interval_minutes": 5,
+              "heartbeat_interval_minutes": 5,
+              "reconciliation_interval_hours": 168
+            }
+            """;
+
+        var device = JsonSerializer.Deserialize<DeviceConfig>(body, AgentJson.Options)!;
+
+        Assert.Equal(168, device.ReconciliationIntervalHours);
+    }
+
+    [Fact]
+    public void The_interval_rides_the_heartbeat_under_the_same_name()
+    {
+        const string body = """
+            {
+              "device_id": 3,
+              "status": "online",
+              "heartbeat_interval_minutes": 5,
+              "check_interval_minutes": 5,
+              "reconciliation_interval_hours": 0,
+              "config_version": 6
+            }
+            """;
+
+        var response = JsonSerializer.Deserialize<HeartbeatResponse>(body, AgentJson.Options)!;
+
+        // Zero, and still zero: a deployment that has switched sweeps off is
+        // the one case where the number has to survive being read as itself
+        // rather than as an absent field.
+        Assert.Equal(0, response.ReconciliationIntervalHours);
+    }
+
+    [Fact]
+    public void An_ADL_that_predates_the_setting_leaves_the_beat_silent_about_it()
+    {
+        const string body = """
+            {
+              "device_id": 3,
+              "status": "online",
+              "heartbeat_interval_minutes": 5,
+              "check_interval_minutes": 5,
+              "config_version": 6
+            }
+            """;
+
+        var response = JsonSerializer.Deserialize<HeartbeatResponse>(body, AgentJson.Options)!;
+
+        // Null and not zero. The two are opposite instructions, and an older
+        // ADL saying nothing must not read as one asking for no sweeps.
+        Assert.Null(response.ReconciliationIntervalHours);
+    }
 }
