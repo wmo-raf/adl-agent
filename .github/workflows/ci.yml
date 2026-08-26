@@ -45,10 +45,14 @@ jobs:
           path: "**/TestResults/*.trx"
 
   package:
-    # What actually gets installed on a country server. Two tiers, from one
-    # script: an MSI that installs a Windows Service for a technician with
-    # administrator rights, and a Velopack install for one without (decision
-    # #262, story 3).
+    # What actually gets installed on a country server: the MSI, which
+    # installs a Windows Service for a technician with administrator rights.
+    #
+    # Bare, with no switches, and that is the check rather than an omission --
+    # PackagingScriptTests asserts this line carries no -WithPerUserTier. The
+    # per-user tier of decision #262 is deferred: nothing has asked for it and
+    # nothing has installed it, so no release carries one. See "the per-user
+    # tier is not built" in the README.
     #
     # The script is `packaging/pack.ps1` rather than a list of steps here, so
     # that the packages an NMHS installs can be reproduced by a person on a

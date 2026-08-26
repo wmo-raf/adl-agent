@@ -69,4 +69,64 @@ public class PackagingScriptTests
         Assert.All(versions, version => Assert.Equal("$wixVersion", version));
         Assert.Single(Regex.Matches(script, @"\$wixVersion\s*="));
     }
+
+    /// <summary>
+    /// What a bare run builds is what a country installs.
+    /// </summary>
+    /// <remarks>
+    /// The per-user tier is not built. No site has asked for it, it has never
+    /// been run on a Windows machine, and a tier nobody installs is one whose
+    /// packaging is proven by nothing -- so it is behind a switch, and the
+    /// switch is off. Decision #262 is deferred rather than reversed: every
+    /// line of the tier's code is still here and still under test, and
+    /// <c>-WithPerUserTier</c> is what revives it.
+    /// <para>
+    /// Which way round the switch is matters more than it looks. It was
+    /// <c>-MsiOnly</c> for a week, opt-in, which made the default -- both
+    /// tiers -- a path nothing ever took, and a path nothing takes is the one
+    /// that breaks unnoticed. The whole premise of there being one packaging
+    /// script is that a person on a Windows machine can reproduce what shipped
+    /// exactly as the build produced it, and that only holds while the bare
+    /// command and the released packages are the same thing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_release_is_the_MSI_and_the_per_user_tier_is_opt_in()
+    {
+        var script = File.ReadAllText(Path.Combine(PackagingDirectory, "pack.ps1"));
+
+        Assert.Contains("$WithPerUserTier", script);
+
+        // A [switch] is false unless it is passed, so what is asserted is that
+        // nothing gives it one -- a default would turn the tier back on for
+        // every caller at once, silently.
+        Assert.DoesNotContain("$WithPerUserTier =", script);
+
+        // The declaration, not the word: the parameter it replaced is worth
+        // explaining in a comment, and a test that forbade naming it would be
+        // a test against saying why.
+        Assert.DoesNotContain("[switch] $MsiOnly", script);
+    }
+
+    /// <summary>
+    /// And the workflow that actually decides it does not ask for more.
+    /// </summary>
+    /// <remarks>
+    /// The script's default is only a default. What a fleet installs is what
+    /// the packaging job attaches to a release, so the check that matters is
+    /// on the invocation rather than on the parameter block.
+    /// </remarks>
+    [Fact]
+    public void The_packaging_job_builds_what_a_release_is()
+    {
+        var workflow = File.ReadAllText(
+            Path.Combine(RepositoryRoot.Path, ".github", "workflows", "ci.yml"));
+
+        var invocations = Regex.Matches(workflow, @"\./packaging/pack\.ps1[^\r\n]*")
+            .Select(match => match.Value)
+            .ToList();
+
+        Assert.NotEmpty(invocations);
+        Assert.All(invocations, run => Assert.DoesNotContain("-WithPerUserTier", run));
+    }
 }
