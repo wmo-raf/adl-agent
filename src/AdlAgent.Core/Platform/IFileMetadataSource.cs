@@ -45,4 +45,28 @@ public interface IFileMetadataSource
     /// </para>
     /// </remarks>
     FileFacts? Describe(string folderPath, string fileName);
+
+    /// <summary>
+    /// The folder <paramref name="segments"/> names below
+    /// <paramref name="folderPath"/> -- <c>2026</c>, <c>08</c>, <c>21</c>
+    /// under the folder an administrator typed.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the core for the same reason
+    /// <see cref="Describe"/> takes a folder and a name separately: joining
+    /// is path grammar, and path grammar is the platform's business. The core
+    /// knows which dated directory a station's files are in (a granularity
+    /// and a clock imply it) and never which separator goes between the parts
+    /// of a path, nor what that means when the folder is spelled <c>C:</c> or
+    /// ends in a separator already.
+    /// <para>
+    /// The answer is also the key two station links sharing a dated tree are
+    /// grouped under, so where <paramref name="segments"/> is non-empty, two
+    /// spellings of one folder must descend to one string or the tree is
+    /// walked twice. Nothing to descend through is the folder itself,
+    /// unchanged: normalising a path nobody asked about would be the core
+    /// reaching for the path grammar this seam exists to keep out of it.
+    /// </para>
+    /// </remarks>
+    string Descend(string folderPath, IReadOnlyList<string> segments);
 }

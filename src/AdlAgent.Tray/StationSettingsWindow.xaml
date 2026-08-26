@@ -81,9 +81,10 @@
                           IsChecked="{Binding DirStructuredByDate, Mode=TwoWay}" />
 
                 <StackPanel Visibility="{Binding DirStructuredByDate, Converter={StaticResource Visible}}">
-                    <TextBlock Foreground="#8A5A00" TextWrapping="Wrap" Margin="0,0,0,6">
-                        This version of the agent does not walk dated sub-folders. Until it does,
-                        point the folder above at where the files actually are and clear this box.
+                    <TextBlock Foreground="#6B6B6B" TextWrapping="Wrap" Margin="0,0,0,6">
+                        The folders below the one above, named for the date in this station's own
+                        timezone. Each cycle walks the recent ones; the daily reconciliation walks
+                        the rest.
                     </TextBlock>
 
                     <TextBlock Style="{StaticResource Field}" Text="How far down the tree" />

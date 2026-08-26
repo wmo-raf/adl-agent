@@ -61,6 +61,44 @@ public class PlatformSeamTests : IDisposable
     }
 
     [Fact]
+    public void The_metadata_seam_joins_a_dated_folder_onto_the_one_ADL_named()
+    {
+        var source = new WindowsFileMetadataSource();
+
+        var dated = source.Descend(_folder, ["2026", "08", "21"]);
+
+        Assert.Equal(Path.Combine(_folder, "2026", "08", "21"), dated);
+
+        // The two ways a technician may have typed the folder join to one
+        // string, because that string is also the key two stations sharing a
+        // dated tree are grouped under -- and two spellings would have the
+        // tree walked twice.
+        Assert.Equal(dated, source.Descend(_folder + Path.DirectorySeparatorChar, ["2026", "08", "21"]));
+
+        // A segment that looks rooted stays a segment. Path.Combine would
+        // throw the folder away and answer with the drive root, which is a
+        // station reading a filesystem nobody pointed it at.
+        Assert.Equal(
+            Path.Combine(_folder, "2026"),
+            source.Descend(_folder, [Path.DirectorySeparatorChar + "2026"]));
+
+        Assert.Equal(_folder, source.Descend(_folder, []));
+    }
+
+    [Fact]
+    public void A_dated_folder_that_is_not_there_yet_enumerates_to_nothing()
+    {
+        Write("GARISSA_20260821.dat", "0,1,2\n");
+
+        var source = new WindowsFileMetadataSource();
+
+        // The vendor has not written today's folder. Not an error and not an
+        // exception: every station filed by day is in this state for part of
+        // every day.
+        Assert.Empty(source.Enumerate(source.Descend(_folder, ["2026", "08", "21"])));
+    }
+
+    [Fact]
     public void The_metadata_seam_streams_rather_than_listing()
     {
         Write("one.dat", "1");

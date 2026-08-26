@@ -215,10 +215,15 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
     {
         lock (_gate)
         {
-            if (!_folders.TryGetValue(folderPath, out var files))
-            {
-                return [];
-            }
+            // A folder nothing was ever written to is still counted as
+            // walked. It is what a vendor's dated tree is mostly made of --
+            // the folder for the hour that has not happened yet, the folder
+            // for a day the station was down -- and the cost the bound exists
+            // to hold down is the walk, not what the walk finds. A fake that
+            // counted only folders that exist could not see the difference
+            // between a cycle looking in three of them and one looking in
+            // eight thousand.
+            var files = Known(folderPath);
 
             files.Walks++;
 
@@ -241,6 +246,31 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
         }
     }
 
+    /// <summary>
+    /// The dated sub-folder below a station's folder, spelled the way the
+    /// filesystem this test is describing would spell it.
+    /// </summary>
+    /// <remarks>
+    /// The separator is taken from the folder itself rather than from the
+    /// machine the test is running on, so a test that says a station's files
+    /// are in <c>C:\VendorData\All</c> gets <c>C:\VendorData\All\2026\08</c>
+    /// on a Linux CI runner -- which is the whole point of the fake. One
+    /// trailing separator comes off first, so the two ways a technician may
+    /// have typed the folder join to one string and the tree is walked once.
+    /// </remarks>
+    public string Descend(string folderPath, IReadOnlyList<string> segments)
+    {
+        var separator = folderPath.Contains('\\', StringComparison.Ordinal) ? '\\' : '/';
+        var path = folderPath.TrimEnd('/', '\\');
+
+        foreach (var segment in segments)
+        {
+            path += separator + segment;
+        }
+
+        return path;
+    }
+
     public void Dispose()
     {
         try
@@ -258,17 +288,30 @@ public sealed class FakeFileMetadataSource : IFileMetadataSource, IDisposable
     {
         lock (_gate)
         {
-            if (!_folders.TryGetValue(folder, out var files))
-            {
-                // Named after the folder rather than its path, which may well
-                // be a Windows one on a machine that has no C: drive.
-                files = new Folder(Path.Combine(_root, _folders.Count.ToString()));
-                Directory.CreateDirectory(files.Directory);
-                _folders[folder] = files;
-            }
+            var files = Known(folder);
+
+            // Made on disk only when something is about to be written into
+            // it, so that walking a folder no vendor has created does not
+            // create one.
+            Directory.CreateDirectory(files.Directory);
 
             return files.Directory;
         }
+    }
+
+    /// <summary>This folder, remembered whether or not anything is in it.</summary>
+    private Folder Known(string folder)
+    {
+        if (!_folders.TryGetValue(folder, out var files))
+        {
+            // Named after the order it was first mentioned in rather than
+            // after its path, which may well be a Windows one on a machine
+            // that has no C: drive.
+            files = new Folder(Path.Combine(_root, _folders.Count.ToString()));
+            _folders[folder] = files;
+        }
+
+        return files;
     }
 
     private FakeFileMetadataSource Record(

@@ -329,30 +329,6 @@ public class FolderScanTests
     }
 
     [Fact]
-    public async Task A_station_whose_files_are_in_dated_sub_folders_says_so()
-    {
-        await using var agent = new AgentHarness();
-
-        // ADL lets a station say this, and this version of the agent walks
-        // only the folder itself. The folder is there and readable, so a
-        // walk finds nothing and everything looks fine -- which is why the
-        // station has to be told to say what is wrong with it instead.
-        agent.Server.Config = SyncConfigs.With(
-            SyncConfigs.Link(11, Shared, "*.dat", dirStructuredByDate: true));
-
-        agent.Files.Add(Shared, "GARISSA_20260821.dat", Settled(agent), "g\n");
-
-        await agent.PairAsync();
-        await agent.Cycle.RunAsync();
-
-        var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
-
-        Assert.Contains("dated sub-folders", link.Error!);
-        Assert.Equal(0, agent.Files.EnumerationsOf(Shared));
-        Assert.Empty(agent.Server.ManifestPages);
-    }
-
-    [Fact]
     public async Task The_cycle_says_what_it_did_for_each_station()
     {
         await using var agent = new AgentHarness();

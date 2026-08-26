@@ -235,6 +235,12 @@ public sealed class AgentControlService : BackgroundService
         // one box somebody is editing and gets an answer for the whole
         // configuration as it would then stand, rather than having to hold --
         // and keep in step -- a copy of every other setting ADL sent.
+        // The station's own timezone, which is HQ's tier and so never
+        // something the window can type: a dated folder tree is carved in it,
+        // so a preview that guessed at UTC would count the wrong folder for
+        // every station outside it.
+        string? timezoneId = null;
+
         if (stationLinkId is not null)
         {
             var link = _configuration.Current?.StationLinks
@@ -248,6 +254,7 @@ public sealed class AgentControlService : BackgroundService
             }
 
             settings = ToJson(link.Config);
+            timezoneId = link.Admin.Timezone;
         }
 
         foreach (var typed in payload)
@@ -270,7 +277,7 @@ public sealed class AgentControlService : BackgroundService
             return ControlResponse.Failure("invalid_request", exception.Message);
         }
 
-        return ControlResponse.Success(ToJson(_preview.Preview(config, _time.GetUtcNow())));
+        return ControlResponse.Success(ToJson(_preview.Preview(config, timezoneId, _time.GetUtcNow())));
     }
 
     private async Task<ControlResponse> ConfigureAsync(

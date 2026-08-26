@@ -204,6 +204,85 @@ public class TrayControlTests
     }
 
     [Fact]
+    public async Task A_preview_of_a_dated_tree_counts_the_dated_folders_and_not_the_one_typed()
+    {
+        await using var agent = new AgentHarness();
+
+        // Nothing is in the folder itself -- the vendor writes below it -- so
+        // a preview that looked only where the technician typed would say the
+        // path was wrong and send them changing the setting that was right.
+        agent.Files
+            .Add($"{Folder}\\2026\\08\\21", "GARISSA_20260821.dat", Settled(agent))
+            .Add($"{Folder}\\2026\\08\\20", "GARISSA_20260820.dat", Settled(agent))
+            .Add($"{Folder}\\2026\\08\\21", "MOMBASA_20260821.dat", Settled(agent));
+
+        var preview = await Preview(agent, new JsonObject
+        {
+            ["local_folder_path"] = Folder,
+            ["file_pattern"] = "GARISSA_*.dat",
+            ["dir_structured_by_date"] = true,
+            ["date_granularity"] = "day",
+        });
+
+        Assert.Equal(2, Int(preview, "matches"));
+        Assert.Equal(3, Int(preview, "examined"));
+        Assert.Null(preview["problem"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_dated_preview_reaches_by_time_and_not_by_a_count_of_folders()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Files.Add($"{Folder}\\2026", "GARISSA_20260821.dat", Settled(agent));
+
+        var preview = await Preview(agent, new JsonObject
+        {
+            ["local_folder_path"] = Folder,
+            ["file_pattern"] = "GARISSA_*.dat",
+            ["dir_structured_by_date"] = true,
+            ["date_granularity"] = "year",
+        });
+
+        // One year folder, not fifty. A preview bounded only by a count of
+        // folders would walk this station's tree back to 1977 while somebody
+        // was still typing, and then report having looked in fifty folders
+        // for a station that has one.
+        Assert.Equal(1, Int(preview, "matches"));
+        Assert.Equal(1, Int(preview, "examined"));
+        Assert.False(preview["truncated"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task A_dated_preview_of_a_station_uses_that_stations_timezone()
+    {
+        await using var agent = new AgentHarness();
+
+        agent.Server.Config = SyncConfigs.With(SyncConfigs.Link(11, Folder, "GARISSA_*.dat"));
+
+        await agent.PairAsync();
+        await agent.Configuration.RefreshAsync();
+
+        // Ten in the evening, UTC; one in the morning of the 22nd in Nairobi,
+        // which is the station's zone and so the folder its vendor is writing
+        // into. The timezone is HQ's tier and the window cannot type it, so a
+        // preview that did not read it off the named station would count the
+        // wrong folder for every station outside UTC.
+        agent.Time.Advance(TimeSpan.FromHours(13));
+
+        agent.Files.Add($"{Folder}\\2026\\08\\22", "GARISSA_MIDNIGHT.dat", Settled(agent));
+
+        var preview = await Preview(agent, new JsonObject
+        {
+            ["station_link_id"] = 11,
+            ["dir_structured_by_date"] = true,
+            ["date_granularity"] = "day",
+        });
+
+        Assert.Equal(1, Int(preview, "matches"));
+    }
+
+    [Fact]
     public async Task A_station_with_no_pattern_yet_is_told_to_type_one_rather_than_shown_a_zero()
     {
         await using var agent = new AgentHarness();

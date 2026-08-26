@@ -60,6 +60,28 @@ public sealed class FolderPreview
     /// </remarks>
     public const int MostNamesTried = 500;
 
+    /// <summary>
+    /// The most dated sub-folders one preview of a station filed by date will
+    /// walk.
+    /// </summary>
+    /// <remarks>
+    /// A backstop rather than the reach. What a preview looks at is the same
+    /// recent window a routine cycle does
+    /// (<see cref="DatedFolders.DefaultRecentWindow"/>), which is two days --
+    /// 49 folders at hour granularity, three at day, one or two at month and
+    /// year. That is enough to tell a tree the vendor writes into from one
+    /// nobody does, which is the only question a preview is asked, and it is
+    /// the answer for the folders the technician can check against what the
+    /// vendor just wrote.
+    /// <para>
+    /// The count is here because a reach measured in time is not a reach
+    /// measured in folders: without it, a granularity nobody expected would
+    /// have the tray walking directories between two keystrokes. Fifty
+    /// clears the window at every one of the four granularities.
+    /// </para>
+    /// </remarks>
+    public const int MostFoldersWalked = 50;
+
     /// <summary>How many matched names the answer carries back.</summary>
     private const int SampleSize = 10;
 
@@ -77,21 +99,12 @@ public sealed class FolderPreview
     /// The clock the DIRECT_FETCH names are built from. Ignored under
     /// ENUMERATE, which has no clock in it.
     /// </param>
-    public FolderPreviewResult Preview(StationLinkAppConfig config, DateTimeOffset now)
+    public FolderPreviewResult Preview(
+        StationLinkAppConfig config, string? timezoneId, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(config.LocalFolderPath))
         {
             return Problem(config, "Type the folder this station's files are written into.");
-        }
-
-        if (config.DirStructuredByDate)
-        {
-            // The same sentence the cycle would report, said before the
-            // setting is saved rather than a check interval later.
-            return Problem(
-                config,
-                "This station's files are in dated sub-folders, which this version of the agent does not walk. "
-                + "Point it at the folder the files are actually in.");
         }
 
         if (ListingStrategies.IsDirectFetch(config.ListingStrategy))
@@ -106,11 +119,21 @@ public sealed class FolderPreview
                 $"This station is set to {config.ListingStrategy}, which this version of the agent does not know.");
         }
 
-        return Walking(config);
+        return Walking(config, timezoneId, now);
     }
 
     /// <summary>The enumerate strategy's answer: one walk, counted.</summary>
-    private FolderPreviewResult Walking(StationLinkAppConfig config)
+    /// <remarks>
+    /// Or as many walks as a dated tree turns out to be, which is the one
+    /// place a preview and a cycle look at different folders: a cycle walks
+    /// the whole recent window and this walks the newest
+    /// <see cref="MostFoldersWalked"/> of it. The question is the same one
+    /// either way -- do these settings pick out this station's files -- and
+    /// the folders it is asked of are the newest, which are the ones the
+    /// technician can check against what the vendor just wrote.
+    /// </remarks>
+    private FolderPreviewResult Walking(
+        StationLinkAppConfig config, string? timezoneId, DateTimeOffset now)
     {
         var pattern = FilePattern.For(config.FilePattern);
 
@@ -122,29 +145,62 @@ public sealed class FolderPreview
                 + "Without one no file in this folder can be said to be this station's.");
         }
 
+        var root = config.LocalFolderPath;
+        var folders = new List<string> { root };
+        var dated = config.DirStructuredByDate;
+
+        var truncated = false;
+
+        if (dated)
+        {
+            // The recent window and not the backlog. A floor rather than a
+            // bare count, because a count means a different span at each
+            // granularity: fifty folders is two days of hourly ones and half
+            // a century of yearly ones, and a preview that walked back to
+            // 1977 would take longer than the technician's patience to say
+            // nothing extra.
+            var expanded = DatedFolders.For(
+                config, timezoneId, now - DatedFolders.DefaultRecentWindow, now, MostFoldersWalked);
+
+            if (expanded.Problem is not null)
+            {
+                return Problem(config, expanded.Problem);
+            }
+
+            folders = expanded.Segments.Select(segments => _files.Descend(root, segments)).ToList();
+            truncated = expanded.Truncated;
+        }
+
         var examined = 0;
         var matches = 0;
-        var truncated = false;
         var sample = new List<FileFacts>();
 
-        foreach (var facts in _files.Enumerate(config.LocalFolderPath))
+        foreach (var folder in folders)
         {
-            if (examined >= MostEntriesExamined)
+            foreach (var facts in _files.Enumerate(folder))
             {
-                truncated = true;
+                if (examined >= MostEntriesExamined)
+                {
+                    truncated = true;
 
+                    break;
+                }
+
+                examined++;
+
+                if (!pattern.Matches(facts.Name))
+                {
+                    continue;
+                }
+
+                matches++;
+                Remember(sample, facts);
+            }
+
+            if (truncated)
+            {
                 break;
             }
-
-            examined++;
-
-            if (!pattern.Matches(facts.Name))
-            {
-                continue;
-            }
-
-            matches++;
-            Remember(sample, facts);
         }
 
         return new FolderPreviewResult
@@ -161,8 +217,12 @@ public sealed class FolderPreview
             // seam answers a folder that is not there and a folder that is
             // empty the same way, so this says both.
             Problem = examined == 0
-                ? "Nothing was found in this folder. Check that the path is right and that this "
-                    + "machine can read it."
+                ? dated
+                    ? $"Nothing was found in the {folders.Count} dated sub-folders below this folder that were "
+                        + "looked in. Check that the path, the granularity and the month format match what the "
+                        + "vendor writes, and that this machine can read them."
+                    : "Nothing was found in this folder. Check that the path is right and that this "
+                        + "machine can read it."
                 : null,
         };
     }

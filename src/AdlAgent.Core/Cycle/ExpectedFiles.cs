@@ -130,7 +130,7 @@ public sealed class ExpectedFiles
                 "No filename datetime format is set for this station, so its filenames cannot be built.");
         }
 
-        if (!TryResolveZone(config.DirectFetchDatetimeTimezone, out var zone))
+        if (!StationZone.TryResolve(config.DirectFetchDatetimeTimezone, out var zone))
         {
             return Problematic(
                 $"This machine does not know the timezone '{config.DirectFetchDatetimeTimezone}', "
@@ -247,48 +247,5 @@ public sealed class ExpectedFiles
         var local = TimeZoneInfo.ConvertTime(instant, zone);
 
         return instant.AddTicks(-(local.TimeOfDay.Ticks % interval.Ticks));
-    }
-
-    /// <summary>
-    /// The timezone ADL named, or UTC when it named none.
-    /// </summary>
-    /// <remarks>
-    /// A name this machine cannot resolve is a problem and not a fallback.
-    /// Falling back to UTC would have an East African station look for files
-    /// three hours from the ones its vendor writes, find none of them, and
-    /// report nothing wrong -- for ever.
-    /// <para>
-    /// It can genuinely fail. ADL sends IANA names ("Africa/Nairobi"), and
-    /// Windows resolves those through a mapping that lives in ICU -- which
-    /// the operating system supplies from Windows 10 / Server 2019 onwards
-    /// and older Windows does not have at all. On a Server 2016 machine (the
-    /// tested floor) a station whose filenames are written in local time may
-    /// therefore land here. That it says so is the whole point: the sentence
-    /// reaches the fleet listing through the cycle report, where a station
-    /// silently looking for the wrong filenames would not.
-    /// </para>
-    /// </remarks>
-    private static bool TryResolveZone(string? id, out TimeZoneInfo zone)
-    {
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            zone = TimeZoneInfo.Utc;
-
-            return true;
-        }
-
-        try
-        {
-            zone = TimeZoneInfo.FindSystemTimeZoneById(id);
-
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is TimeZoneNotFoundException or InvalidTimeZoneException)
-        {
-            zone = TimeZoneInfo.Utc;
-
-            return false;
-        }
     }
 }
