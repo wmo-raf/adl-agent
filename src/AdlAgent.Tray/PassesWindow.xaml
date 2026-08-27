@@ -58,7 +58,24 @@
 
             <TextBlock Text="{Binding ReadAt}" VerticalAlignment="Center" Margin="16,0,0,0"
                        Opacity="0.7" />
+            <TextBlock Text="Reading…" VerticalAlignment="Center" Margin="10,0,0,0"
+                       Opacity="0.7"
+                       Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
         </WrapPanel>
+
+        <!--
+            Whose counts the columns are. A DataGridColumn is not in the visual
+            tree and inherits no DataContext, so its Header cannot simply bind;
+            and the counts DO change meaning with the station filter — they
+            become that station's own rather than the unit's. A change that
+            silent is the Banfora-reading-Bobo-Dioulasso's-failures mistake
+            this filter exists to prevent, so it is said on its own line above
+            the table where it cannot be missed.
+        -->
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" Foreground="#5A6472" TextWrapping="Wrap">
+            <Run Text="Scanned, held, up, fail and backlog are" /><Run Text=" " /><Run
+                Text="{Binding CountsHeading, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="." />
+        </TextBlock>
 
         <!-- The reach line and the one button that goes further back. Paging
              and resuming past a read that gave up looking are the same
@@ -188,27 +205,62 @@
                                                Foreground="#A33B2A" Margin="0,0,0,8"
                                                Visibility="{Binding WasCutShort, Converter={StaticResource Visible}}" />
 
-                                    <ItemsControl ItemsSource="{Binding Stations}" Margin="0,0,0,10">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel>
-                                                    <TextBlock>
-                                                        <Run Text="{Binding Station, Mode=OneWay}" FontWeight="SemiBold" />
-                                                        <Run Text="  scanned " /><Run Text="{Binding Scanned, Mode=OneWay}" />
-                                                        <Run Text="  held " /><Run Text="{Binding Held, Mode=OneWay}" />
-                                                        <Run Text="  offered " /><Run Text="{Binding Offered, Mode=OneWay}" />
-                                                        <Run Text="  wanted " /><Run Text="{Binding Wanted, Mode=OneWay}" />
-                                                        <Run Text="  up " /><Run Text="{Binding Uploaded, Mode=OneWay}" />
-                                                        <Run Text="  fail " /><Run Text="{Binding Failed, Mode=OneWay}" />
-                                                        <Run Text="  backlog " /><Run Text="{Binding Backlog, Mode=OneWay}" />
-                                                    </TextBlock>
-                                                    <TextBlock Text="{Binding Error}" TextWrapping="Wrap"
-                                                               Foreground="#8A5A00" Margin="14,1,0,4"
-                                                               Visibility="{Binding HasError, Converter={StaticResource Visible}}" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <!--
+                                        Which ADL this pass was made against. A
+                                        repoint deliberately leaves the logs
+                                        alone, so a machine's record can hold
+                                        passes from two instances — and station
+                                        link ids the newer one has since issued
+                                        to entirely different stations.
+                                    -->
+                                    <TextBlock Margin="0,0,0,8" Opacity="0.7" TextWrapping="Wrap">
+                                        <Run Text="Recorded against" /><Run Text=" " /><Run
+                                            Text="{Binding Instance, Mode=OneWay}" />
+                                    </TextBlock>
+
+                                    <DataGrid ItemsSource="{Binding Stations}" AutoGenerateColumns="False"
+                                              IsReadOnly="True" HeadersVisibility="Column"
+                                              GridLinesVisibility="None" RowHeight="24" MaxHeight="200"
+                                              BorderBrush="#DCE0E6" BorderThickness="1"
+                                              Background="White" CanUserSortColumns="False"
+                                              CanUserReorderColumns="False" CanUserAddRows="False"
+                                              Margin="0,0,0,10">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Station" Binding="{Binding Station}"
+                                                                Width="Auto" MinWidth="180" MaxWidth="300" />
+                                            <DataGridTextColumn Header="Scanned" Binding="{Binding Scanned}"
+                                                                Width="Auto" MinWidth="70"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Held" Binding="{Binding Held}"
+                                                                Width="Auto" MinWidth="55"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Offered" Binding="{Binding Offered}"
+                                                                Width="Auto" MinWidth="65"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Wanted" Binding="{Binding Wanted}"
+                                                                Width="Auto" MinWidth="65"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Up" Binding="{Binding Uploaded}"
+                                                                Width="Auto" MinWidth="50"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Fail" Binding="{Binding Failed}"
+                                                                Width="Auto" MinWidth="50"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Backlog" Binding="{Binding Backlog}"
+                                                                Width="Auto" MinWidth="70"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <!--
+                                                The sentence a station the scan
+                                                turned away carries, and the
+                                                only column here that is not a
+                                                number. Half-configured is a
+                                                common real fault and this is
+                                                where it is legible.
+                                            -->
+                                            <DataGridTextColumn Header="Problem" Binding="{Binding Error}"
+                                                                Width="*" MinWidth="160" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
 
                                     <DataGrid ItemsSource="{Binding Files}" AutoGenerateColumns="False"
                                               IsReadOnly="True" HeadersVisibility="Column"

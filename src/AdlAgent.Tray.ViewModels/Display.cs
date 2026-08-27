@@ -70,6 +70,18 @@ internal static class Display
     public static string Ago(DateTimeOffset from, DateTimeOffset now) =>
         $"{Span(from, now)} ago";
 
+    /// <summary>
+    /// A file size, as the sentence beside a saved file says one.
+    /// </summary>
+    /// <remarks>
+    /// Worth saying at all because it is what tells a technician the file they
+    /// are about to attach has something in it: a bundle of nine hundred bytes
+    /// is a machine that has recorded nothing, and that is itself the answer.
+    /// </remarks>
+    public static string Size(long bytes) => bytes < 1024
+        ? string.Create(CultureInfo.CurrentCulture, $"{bytes} bytes")
+        : string.Create(CultureInfo.CurrentCulture, $"{bytes / 1024.0:0} KB");
+
     private static string Counted(int count, string unit) => count == 1
         ? $"1 {unit}"
         : string.Create(CultureInfo.CurrentCulture, $"{count} {unit}s");

@@ -259,11 +259,11 @@ public sealed class AgentControlService : BackgroundService
         return ControlResponse.Success(ToJson(page with
         {
             Rows = rows,
-            // A trimmed page has not reached the end of anything, whatever
-            // the read thought, and it carries on from the last row that
-            // survived rather than from the last one read.
+            // A trimmed page has not reached the end of anything, whatever the
+            // read thought. It still resumes where the read stopped: the rows
+            // dropped here were matches, and a resume that stepped back over
+            // them would hand the next page the same ones it could not fit.
             Exhausted = page.Exhausted && !trimmed,
-            ResumeBefore = trimmed ? rows[^1].At : page.ResumeBefore,
         }));
     }
 
@@ -296,7 +296,7 @@ public sealed class AgentControlService : BackgroundService
         StationLinkId(payload),
         payload?["trigger"]?.GetValue<string>(),
         payload?["problems_only"]?.GetValue<bool>() ?? false,
-        Moment(payload, "before"),
+        Math.Max(0, Whole(payload, "skip") ?? 0),
         Math.Clamp(Whole(payload, "most") ?? DefaultPasses, 1, MostPasses));
 
     /// <summary>How many rows a UI gets when it does not say.</summary>

@@ -152,8 +152,6 @@ public class PassesWindowTests
             Completed = true,
             Scanned = 0,
             Held = 0,
-            Offered = 0,
-            Wanted = 0,
             Uploaded = 0,
             Failed = 0,
             Backlog = 0,

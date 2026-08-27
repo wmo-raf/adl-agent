@@ -234,9 +234,9 @@ public sealed class AgentControlLink
             payload["problems_only"] = true;
         }
 
-        if (query.Before is { } before)
+        if (query.Skip > 0)
         {
-            payload["before"] = before.ToString("O", CultureInfo.InvariantCulture);
+            payload["skip"] = query.Skip;
         }
 
         return payload;

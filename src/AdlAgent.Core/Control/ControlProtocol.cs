@@ -181,6 +181,26 @@ public static class ControlProtocol
     /// </remarks>
     public const string PassCommand = "pass";
 
+    /// <summary>
+    /// Write a plain-text diagnostics bundle. Payload: <c>{"path": "..."}</c>,
+    /// plus any of the filters <see cref="PassesIndexCommand"/> takes.
+    /// </summary>
+    /// <remarks>
+    /// The path comes from the client and the file is written by the agent,
+    /// which is the only arrangement that works on the service tier: the logs
+    /// are in a folder whose permissions the MSI has replaced with SYSTEM and
+    /// Administrators, so the tray cannot read them and the service can. The
+    /// technician picks where it goes and the service fills it. The bundle
+    /// rather than the bytes, for the same reason: it is far larger than
+    /// <see cref="MaxMessageBytes"/>.
+    /// <para>
+    /// The filters are here so that what a technician sends is what they were
+    /// looking at. A bundle that always carried the newest passes could not
+    /// hold the failure three weeks back that the window had just been used to
+    /// find, which would make the window good at locating something it could
+    /// not then report.
+    /// </para>
+    /// </remarks>
     public const string DiagnosticsCommand = "diagnostics";
 
     /// <summary>

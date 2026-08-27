@@ -33,6 +33,9 @@ public partial class MainWindow : Window
 
     private readonly ShellViewModel _shell;
 
+    /// <summary>The passes window, while one is open. Single-instance.</summary>
+    private PassesWindow? _passes;
+
     public MainWindow(ShellViewModel shell)
     {
         _shell = shell;
@@ -290,6 +293,11 @@ public partial class MainWindow : Window
     {
         if (_passes is { IsLoaded: true })
         {
+            // Pointed at what was asked for rather than merely raised.
+            // Right-clicking a second station while the window is open would
+            // otherwise show the first one's filter, focused and unchanged,
+            // with nothing to say the one asked for had been dropped.
+            _passes.FilterTo(stationLinkId);
             _passes.Activate();
 
             return;
@@ -300,9 +308,6 @@ public partial class MainWindow : Window
 
         _passes.Show();
     }
-
-    /// <summary>The passes window, while one is open.</summary>
-    private PassesWindow? _passes;
 
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
 

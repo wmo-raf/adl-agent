@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.Serialization;
@@ -60,56 +59,17 @@ public sealed class CycleLogReader
     public CyclePassIndex Index(CyclePassQuery query)
     {
         var rows = new List<CyclePassRow>();
-        var scanned = 0;
-        DateTimeOffset? oldest = null;
+        var walk = new Counter();
 
-        foreach (var path in Newest(query.Before))
+        foreach (var record in Walking(query.Skip, walk))
         {
-            foreach (var line in Backwards(path))
+            if (query.Matches(record))
             {
-                if (Parse(line) is not { } record)
+                rows.Add(CyclePassRow.Of(record, query.StationLinkId));
+
+                if (rows.Count >= query.Most)
                 {
-                    continue;
-                }
-
-                // Counted after parsing, so the budget bounds records rather
-                // than lines -- a file's blank tail would otherwise spend it.
-                if (query.Before is not null && record.At >= query.Before)
-                {
-                    continue;
-                }
-
-                scanned++;
-                oldest = record.At;
-
-                if (query.Matches(record))
-                {
-                    rows.Add(CyclePassRow.Of(record, query.StationLinkId));
-
-                    if (rows.Count >= query.Most)
-                    {
-                        return new CyclePassIndex
-                        {
-                            Rows = rows,
-                            Exhausted = false,
-                            Scanned = scanned,
-                            ResumeBefore = oldest,
-                        };
-                    }
-                }
-
-                if (scanned >= MostRecordsScanned)
-                {
-                    // Stopped looking, which is not the same as having found
-                    // everything -- and the difference is the whole reason
-                    // this answer carries three facts instead of a list.
-                    return new CyclePassIndex
-                    {
-                        Rows = rows,
-                        Exhausted = false,
-                        Scanned = scanned,
-                        ResumeBefore = oldest,
-                    };
+                    break;
                 }
             }
         }
@@ -117,9 +77,9 @@ public sealed class CycleLogReader
         return new CyclePassIndex
         {
             Rows = rows,
-            Exhausted = true,
-            Scanned = scanned,
-            ResumeBefore = oldest,
+            Exhausted = walk.Exhausted,
+            Scanned = walk.Examined,
+            Resume = query.Skip + walk.Examined,
         };
     }
 
@@ -135,9 +95,49 @@ public sealed class CycleLogReader
     public IReadOnlyList<CycleRecord> Recent(CyclePassQuery query)
     {
         var found = new List<CycleRecord>();
-        var scanned = 0;
 
-        foreach (var path in Newest(query.Before))
+        foreach (var record in Walking(query.Skip, new Counter()))
+        {
+            if (!query.Matches(record))
+            {
+                continue;
+            }
+
+            found.Add(record);
+
+            if (found.Count >= query.Most)
+            {
+                break;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Every record in this log, newest first, past the first
+    /// <paramref name="skip"/> and bounded by
+    /// <see cref="MostRecordsScanned"/>.
+    /// </summary>
+    /// <remarks>
+    /// One walk, consumed by both the index and the bundle. They had a copy
+    /// each, and the copies had already drifted: one counted its budget before
+    /// deciding whether a record matched and the other after, so the same log
+    /// gave up in two different places depending on which question was asked.
+    /// <para>
+    /// Skipped records count against the budget. Without that, a deep page
+    /// would walk the whole log to reach its own starting point -- against a
+    /// pipe the client abandons after three seconds.
+    /// </para>
+    /// </remarks>
+    /// <param name="counter">
+    /// Filled in as the walk goes, and read after it stops. The caller owns it
+    /// because a caller that breaks out early -- which every one of them does
+    /// -- still has to know how far the walk got and whether it ran out.
+    /// </param>
+    private IEnumerable<CycleRecord> Walking(int skip, Counter counter)
+    {
+        foreach (var path in Newest())
         {
             foreach (var line in Backwards(path))
             {
@@ -146,31 +146,34 @@ public sealed class CycleLogReader
                     continue;
                 }
 
-                if (query.Before is not null && record.At >= query.Before)
+                // Counted after parsing, so the budget bounds records rather
+                // than lines: a file's blank tail would otherwise spend it.
+                counter.Examined++;
+
+                if (counter.Examined > skip)
                 {
-                    continue;
+                    yield return record;
                 }
 
-                if (++scanned > MostRecordsScanned)
+                if (counter.Examined - skip >= MostRecordsScanned)
                 {
-                    return found;
-                }
-
-                if (!query.Matches(record))
-                {
-                    continue;
-                }
-
-                found.Add(record);
-
-                if (found.Count >= query.Most)
-                {
-                    return found;
+                    // Stopped looking, which is not the same as having found
+                    // everything -- and the difference is the whole reason the
+                    // answer carries three facts instead of a list.
+                    yield break;
                 }
             }
         }
 
-        return found;
+        counter.Exhausted = true;
+    }
+
+    /// <summary>What a walk got through, readable after it has stopped.</summary>
+    private sealed class Counter
+    {
+        public int Examined { get; set; }
+
+        public bool Exhausted { get; set; }
     }
 
     /// <summary>
@@ -189,32 +192,23 @@ public sealed class CycleLogReader
     /// such a record has no folders walked and no files, so the row asking for
     /// its detail already holds everything there is.
     /// </para>
+    /// <para>
+    /// The whole log is searched rather than the part of it near the moment
+    /// wanted, and that is not laziness. Units run several at a time and a
+    /// record is written when its unit <em>finishes</em> while its timestamp
+    /// is when the unit <em>started</em>, so records are not in timestamp
+    /// order and there is no point at which this could stop early and be
+    /// right. What bounds it is the same budget every other read has.
+    /// </para>
     /// </remarks>
     /// <returns>The record, or <c>null</c> if it has been evicted since.</returns>
     public CycleRecord? One(DateTimeOffset at, string unit)
     {
-        // Newest-first from just after the moment wanted: the record cannot be
-        // newer than its own timestamp, so everything above that is skipped by
-        // filename before a byte is read.
-        foreach (var path in Newest(at.AddTicks(1)))
+        foreach (var record in Walking(0, new Counter()))
         {
-            foreach (var line in Backwards(path))
+            if (record.At == at && string.Equals(record.Unit, unit, StringComparison.Ordinal))
             {
-                if (Parse(line) is not { } record)
-                {
-                    continue;
-                }
-
-                if (record.At == at && string.Equals(record.Unit, unit, StringComparison.Ordinal))
-                {
-                    return record;
-                }
-
-                if (record.At < at)
-                {
-                    // Past it, and the log is ordered: it is not here.
-                    return null;
-                }
+                return record;
             }
         }
 
@@ -230,54 +224,9 @@ public sealed class CycleLogReader
     /// day gzipped late would sort as the newest thing in the folder and a
     /// window asking for recent passes would be handed last week's.
     /// </remarks>
-    /// <param name="before">
-    /// Skip whole files that can hold nothing older than this. The name
-    /// carries the day, so a read paging back through months does not
-    /// decompress and deserialise every part above the one it wants -- which
-    /// on a full log is a hundred thousand records, against a pipe the client
-    /// abandons after three seconds.
-    /// </param>
-    private IEnumerable<string> Newest(DateTimeOffset? before = null) =>
+    private IEnumerable<string> Newest() =>
         AgentLogs.FilesIn(_directory, AgentLogs.CycleLogName, CycleLog.Extension)
-            .Where(path => Reaches(path, before))
             .OrderByDescending(path => path, StringComparer.Ordinal);
-
-    /// <summary>
-    /// True when this file could hold a record older than
-    /// <paramref name="before"/>.
-    /// </summary>
-    /// <remarks>
-    /// A file is named for the day it holds, and the cut is that day rather
-    /// than the instant: a file named for the cursor's own day holds records
-    /// on both sides of it, so it is read and filtered record by record. Only
-    /// whole days above the cursor are skipped, which is the cheap and safe
-    /// half of the saving.
-    /// <para>
-    /// A file whose name carries no day is kept. It is not one this writer
-    /// made, and answering a question by silently ignoring a file is worse
-    /// than reading one too many.
-    /// </para>
-    /// </remarks>
-    private static bool Reaches(string path, DateTimeOffset? before)
-    {
-        if (before is null)
-        {
-            return true;
-        }
-
-        var name = Path.GetFileName(path);
-        var dash = name.IndexOf('-');
-
-        if (dash < 0 || name.Length < dash + 9 ||
-            !DateOnly.TryParseExact(
-                name.Substring(dash + 1, 8), "yyyyMMdd", CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var day))
-        {
-            return true;
-        }
-
-        return day <= DateOnly.FromDateTime(before.Value.UtcDateTime);
-    }
 
     /// <summary>
     /// One file's lines, last first.

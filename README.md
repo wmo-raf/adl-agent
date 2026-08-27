@@ -565,6 +565,15 @@ pastes into an email is the pass HQ reads in the attachment.
   *read from the 20,000 most recent*, or *that is all this machine has
   recorded*. The window holds 5,000 rows, said out loud, with the filter
   offered as the way past it.
+- **the cursor is a position, not a moment**, and that is load-bearing. Units
+  run several at a time (two by default) and a record is written when its unit
+  *finishes* while its timestamp is when the unit *started* — so a long unit's
+  record sits below records that started after it, and the log is not in
+  timestamp order. A "older than this moment" cursor would skip exactly those
+  records, silently, at every page boundary. A record arriving at the top
+  between pages can shift the window and repeat a row instead, which the
+  window drops by key: being wrong in the direction of a repeat rather than a
+  disappearance is the whole point.
 - **refresh on open, on the button, on re-focus — no timer.** The control
   surface serves one client at a time and the tray already polls it every five
   seconds for the header; a second poller would contend for that slot and make
@@ -1258,7 +1267,9 @@ stopped looking" look identical and mean opposite things.
 
 `pass` fetches one record by `(at, unit)`. No id is invented: two units never
 share a folder, and one unit cannot pass twice at once. It answers with nothing
-when that pass has been evicted since the row was drawn.
+when that pass has been evicted since the row was drawn — and it searches the
+whole log rather than the part near the moment wanted, because for the reason
+above there is no point at which it could stop early and be right.
 
 `diagnostics` takes the path and writes the file itself, because on the service
 tier the client cannot: the logs are beside the device token, in a folder whose

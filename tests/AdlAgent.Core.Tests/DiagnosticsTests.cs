@@ -155,6 +155,31 @@ public class DiagnosticsTests
     }
 
     [Fact]
+    public async Task A_bundle_carries_the_bundles_own_number_of_passes_not_a_windows_page_size()
+    {
+        // The filter that travels with the path is a window's, and a window's
+        // Most is its page size. Borrowing it once quietly cut every bundle
+        // from two hundred passes to fifty.
+        await using var shown = await Collecting();
+
+        var path = Path.Combine(
+            Directory.CreateTempSubdirectory("adl-agent-bundle").FullName, "diagnostics.txt");
+
+        try
+        {
+            await shown.Window.SaveDiagnosticsAsync(path);
+
+            Assert.Contains(
+                $"at most {DiagnosticsBundle.Passes}",
+                await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task A_bundle_the_agent_cannot_write_is_a_sentence_rather_than_a_crash()
     {
         await using var shown = await Collecting(collect: false);

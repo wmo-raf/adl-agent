@@ -36,6 +36,9 @@ public partial class PassesWindow : Window
         DataContext = passes;
     }
 
+    /// <summary>Point this window at a station, without opening a second one.</summary>
+    internal void FilterTo(long? stationLinkId) => _passes.FilterTo(stationLinkId);
+
     /// <summary>
     /// Read as the window appears, without being asked.
     /// </summary>
@@ -67,7 +70,12 @@ public partial class PassesWindow : Window
     {
         base.OnActivated(e);
 
-        if (IsLoaded)
+        // Only while the window is still showing the newest page. History does
+        // not change, so a technician who has walked back through four pages
+        // looking for something is reading a part of the log a refresh could
+        // only throw away -- and closing the Save dialog is enough to raise
+        // this.
+        if (IsLoaded && _passes.RefreshOnReturn)
         {
             _passes.RefreshCommand.Execute(null);
         }

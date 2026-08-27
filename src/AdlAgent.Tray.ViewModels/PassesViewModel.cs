@@ -60,9 +60,19 @@ public sealed class PassesViewModel : Observable
     private bool _busy;
     private bool _exhausted;
     private int _scanned;
-    private DateTimeOffset? _resumeBefore;
+    private int _resume;
+    private bool _walkedBack;
     private string _problem = "";
     private string _message = "";
+
+    /// <summary>
+    /// The passes already on screen, so a repeat is not shown twice.
+    /// </summary>
+    /// <remarks>
+    /// By the same natural key the detail is fetched with, which is unique for
+    /// the reason given there.
+    /// </remarks>
+    private readonly HashSet<(DateTimeOffset At, string Unit)> _seen = [];
     private DateTimeOffset? _readAt;
     private PassRowViewModel? _selected;
     private PassDetailViewModel? _detail;
@@ -219,7 +229,7 @@ public sealed class PassesViewModel : Observable
     /// sentence above the button differs, so a second affordance would be a
     /// distinction without a difference.
     /// </remarks>
-    public bool CanLoadMore => !_exhausted && Rows.Count < Ceiling && _resumeBefore is not null;
+    public bool CanLoadMore => !_exhausted && Rows.Count < Ceiling;
 
     /// <summary>
     /// What the line above the button says: three answers that look alike and
@@ -256,7 +266,7 @@ public sealed class PassesViewModel : Observable
                 return counted + " That is all this machine has recorded.";
             }
 
-            return _resumeBefore is null
+            return _exhausted
                 ? counted
                 : counted + string.Create(
                     CultureInfo.CurrentCulture,
@@ -278,10 +288,7 @@ public sealed class PassesViewModel : Observable
             _detail = null;
             _detailProblem = "";
 
-            Raise(nameof(Detail));
-            Raise(nameof(HasDetail));
-            Raise(nameof(DetailProblem));
-            Raise(nameof(HasDetailProblem));
+            DetailChanged();
 
             if (value is not null)
             {
@@ -299,7 +306,7 @@ public sealed class PassesViewModel : Observable
     public bool HasDetailProblem => _detailProblem.Length > 0;
 
     /// <summary>The filter as the service is asked for it.</summary>
-    public CyclePassQuery Query => new(_stationLinkId, _trigger, _problemsOnly, null, Page);
+    public CyclePassQuery Query => new(_stationLinkId, _trigger, _problemsOnly, Most: Page);
 
     /// <summary>What just happened, when something did.</summary>
     /// <remarks>
@@ -329,7 +336,7 @@ public sealed class PassesViewModel : Observable
             ? written.Detail ?? "The agent could not write a diagnostics file."
             : string.Create(
                 CultureInfo.CurrentCulture,
-                $"Saved to {written.Value.Path} ({Kilobytes(written.Value.Bytes)})."));
+                $"Saved to {written.Value.Path} ({Display.Size(written.Value.Bytes)})."));
     }
 
     /// <summary>Say something on the window's own line.</summary>
@@ -341,19 +348,41 @@ public sealed class PassesViewModel : Observable
         Raise(nameof(HasMessage));
     }
 
-    private static string Kilobytes(long bytes) => bytes < 1024
-        ? string.Create(CultureInfo.CurrentCulture, $"{bytes} bytes")
-        : string.Create(CultureInfo.CurrentCulture, $"{bytes / 1024.0:0} KB");
+    /// <summary>
+    /// Point an already-open window at a station.
+    /// </summary>
+    /// <remarks>
+    /// The window is single-instance, so a technician who right-clicks a
+    /// second station while it is open would otherwise be shown the one they
+    /// opened first -- focused, unchanged, and with nothing to say the filter
+    /// they asked for had been dropped.
+    /// </remarks>
+    public void FilterTo(long? stationLinkId) =>
+        SelectedStation = Stations.FirstOrDefault(
+            choice => choice.StationLinkId == stationLinkId) ?? Stations[0];
+
+    /// <summary>
+    /// Whether coming back to this window should re-read it.
+    /// </summary>
+    /// <remarks>
+    /// Only while it is still showing the newest page. History does not
+    /// change, so a technician who has walked back through four pages looking
+    /// for something is reading a part of the log that a refresh could only
+    /// throw away -- and closing the Save dialog is enough to raise this.
+    /// </remarks>
+    public bool RefreshOnReturn => !_walkedBack && !_busy;
 
     /// <summary>Read the newest page, throwing away what is on screen.</summary>
     public async Task RefreshAsync()
     {
         Rows.Clear();
+        _seen.Clear();
         SelectedPass = null;
 
         _exhausted = false;
         _scanned = 0;
-        _resumeBefore = null;
+        _resume = 0;
+        _walkedBack = false;
 
         await ReadAsync(Query).ConfigureAwait(true);
     }
@@ -371,7 +400,9 @@ public sealed class PassesViewModel : Observable
             return;
         }
 
-        await ReadAsync(Query with { Before = _resumeBefore }).ConfigureAwait(true);
+        _walkedBack = true;
+
+        await ReadAsync(Query with { Skip = _resume }).ConfigureAwait(true);
     }
 
     private async Task ReadAsync(CyclePassQuery query)
@@ -399,12 +430,20 @@ public sealed class PassesViewModel : Observable
                     break;
                 }
 
-                Rows.Add(new PassRowViewModel(row));
+                // A pass arriving at the top between one page and the next
+                // shifts the window a little, so a row can come back twice.
+                // Dropped here rather than prevented there, because a cursor
+                // that could not repeat could only be one that dropped
+                // instead, and a repeat is the safe direction to be wrong in.
+                if (_seen.Add((row.At, row.Unit)))
+                {
+                    Rows.Add(new PassRowViewModel(row));
+                }
             }
 
             _exhausted = answer.Value.Exhausted;
             _scanned += answer.Value.Scanned;
-            _resumeBefore = answer.Value.ResumeBefore;
+            _resume = answer.Value.Resume;
             _problem = Rows.Count > 0 ? "" : Nothing();
         }
         finally
@@ -424,7 +463,7 @@ public sealed class PassesViewModel : Observable
     /// </remarks>
     private string Nothing()
     {
-        if (!_exhausted && _resumeBefore is not null)
+        if (!_exhausted)
         {
             var read = string.Create(
                 CultureInfo.CurrentCulture,
@@ -491,6 +530,12 @@ public sealed class PassesViewModel : Observable
             _detail = new PassDetailViewModel(answer.Value.Record);
         }
 
+        DetailChanged();
+    }
+
+    /// <summary>The detail pane has something new, or nothing, to show.</summary>
+    private void DetailChanged()
+    {
         Raise(nameof(Detail));
         Raise(nameof(HasDetail));
         Raise(nameof(DetailProblem));

@@ -1634,7 +1634,7 @@ public sealed class ShellViewModel : Observable
             ? written.Detail ?? "The agent could not write a diagnostics file."
             : string.Create(
                 CultureInfo.CurrentCulture,
-                $"Diagnostics saved to {written.Value.Path} ({Kilobytes(written.Value.Bytes)}).");
+                $"Diagnostics saved to {written.Value.Path} ({Display.Size(written.Value.Bytes)}).");
     }
 
     /// <summary>
@@ -1645,10 +1645,6 @@ public sealed class ShellViewModel : Observable
     /// are about to attach has something in it. A bundle of 900 bytes is a
     /// machine that has recorded nothing, and that is itself the answer.
     /// </remarks>
-    private static string Kilobytes(long bytes) => bytes < 1024
-        ? string.Create(CultureInfo.CurrentCulture, $"{bytes} bytes")
-        : string.Create(CultureInfo.CurrentCulture, $"{bytes / 1024.0:0} KB");
-
     /// <summary>
     /// Count what a station's boxes would match (story 7).
     /// </summary>

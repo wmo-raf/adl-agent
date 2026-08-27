@@ -33,18 +33,32 @@ namespace AdlAgent.Core.Diagnostics;
 /// one switch rather than three, because a technician looking for trouble
 /// should not first have to know which of the three kinds it was.
 /// </param>
-/// <param name="Before">
-/// Only passes older than this instant, which is how paging walks backwards.
-/// The cursor is the oldest record <em>examined</em> rather than the oldest
-/// returned, so resuming after a read that gave up part-way carries on from
-/// where it gave up rather than from the last thing it happened to match.
+/// <param name="Skip">
+/// How many records to walk past before examining any, which is how paging
+/// walks backwards.
+/// <para>
+/// A position and deliberately not an instant. Paging by "older than this
+/// moment" reads like the obvious thing and is wrong here: units run several
+/// at a time (<see cref="Cycle.CycleConcurrency.Units"/> is two by default)
+/// and a record is written when its unit <em>finishes</em>, while its
+/// timestamp is when the unit <em>started</em> -- so a long unit's record sits
+/// below records that started after it. A timestamp cursor would skip exactly
+/// those, silently, at every page boundary.
+/// </para>
+/// <para>
+/// The walk is deterministic -- files newest first by name, lines reversed --
+/// so a position means the same thing twice. What can move it is records
+/// arriving at the top between one page and the next, which shifts the window
+/// and can repeat a row rather than drop one. That is the right direction to
+/// be wrong in, and the window drops the repeat.
+/// </para>
 /// </param>
 /// <param name="Most">How many matching rows to return.</param>
 public sealed record CyclePassQuery(
     long? StationLinkId = null,
     string? Trigger = null,
     bool ProblemsOnly = false,
-    DateTimeOffset? Before = null,
+    int Skip = 0,
     int Most = 50)
 {
     /// <summary>True when this record is one of the ones being asked for.</summary>

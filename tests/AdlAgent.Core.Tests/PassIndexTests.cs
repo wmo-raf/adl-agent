@@ -180,11 +180,11 @@ public class PassIndexTests : IDisposable
 
         Assert.Equal(10, page.Rows.Count);
         Assert.False(page.Exhausted);
-        Assert.NotNull(page.ResumeBefore);
+        Assert.Equal(10, page.Resume);
 
         // And the cursor walks: the next page starts where this one stopped
         // looking, and never repeats a row.
-        var next = Reader.Index(new CyclePassQuery(Before: page.ResumeBefore, Most: 10));
+        var next = Reader.Index(new CyclePassQuery(Skip: page.Resume, Most: 10));
 
         Assert.Equal(10, next.Rows.Count);
         Assert.All(next.Rows, row => Assert.DoesNotContain(row.At, page.Rows.Select(seen => seen.At)));
@@ -219,7 +219,34 @@ public class PassIndexTests : IDisposable
         Assert.Empty(page.Rows);
         Assert.False(page.Exhausted);
         Assert.Equal(CycleLogReader.MostRecordsScanned, page.Scanned);
-        Assert.NotNull(page.ResumeBefore);
+        Assert.Equal(CycleLogReader.MostRecordsScanned, page.Resume);
+    }
+
+    [Fact]
+    public void Paging_does_not_drop_a_pass_whose_unit_finished_out_of_order()
+    {
+        // Units run several at a time and a record is written when its unit
+        // FINISHES, while its timestamp is when the unit STARTED -- so a long
+        // unit's record sits below records that started after it. A cursor
+        // that paged by "older than this moment" would skip exactly those, at
+        // every page boundary, silently.
+        //
+        // Written newest-completion-first, as the log has them: the long unit
+        // started earliest and is written first, so reading backwards meets it
+        // last.
+        Write(Pass(minutes: 0, unit: "C:\\Vendor\\slow"));
+        Write(Pass(minutes: 30, unit: "C:\\Vendor\\a"));
+        Write(Pass(minutes: 20, unit: "C:\\Vendor\\b"));
+        Write(Pass(minutes: 10, unit: "C:\\Vendor\\c"));
+
+        var first = Reader.Index(new CyclePassQuery(Most: 2));
+        var second = Reader.Index(new CyclePassQuery(Skip: first.Resume, Most: 2));
+
+        // All four, once each. The one that started first and finished last is
+        // the one a timestamp cursor loses.
+        Assert.Equal(
+            ["C:\\Vendor\\a", "C:\\Vendor\\b", "C:\\Vendor\\c", "C:\\Vendor\\slow"],
+            first.Rows.Concat(second.Rows).Select(row => row.Unit).Order());
     }
 
     // ---------- one pass, by its natural key ----------
@@ -249,6 +276,22 @@ public class PassIndexTests : IDisposable
 
         Assert.NotNull(adcon);
         Assert.Equal(7, adcon.Stations.Sum(station => station.Uploaded));
+    }
+
+    [Fact]
+    public void A_pass_whose_unit_finished_out_of_order_is_still_found()
+    {
+        // The same hazard, on the detail fetch. Stopping the search at the
+        // first record older than the one wanted would report a pass that is
+        // sitting in the file as evicted.
+        Write(Pass(minutes: 0, unit: "C:\\Vendor\\slow", files: 5));
+        Write(Pass(minutes: 30, unit: "C:\\Vendor\\a"));
+        Write(Pass(minutes: 20, unit: "C:\\Vendor\\b"));
+
+        var found = Reader.One(TestClock.Start, "C:\\Vendor\\slow");
+
+        Assert.NotNull(found);
+        Assert.Equal(5, found.Files.Count);
     }
 
     [Fact]

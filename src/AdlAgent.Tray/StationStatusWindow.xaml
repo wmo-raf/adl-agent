@@ -206,8 +206,8 @@
                         <Button DockPanel.Dock="Right" Content="View more…"
                                 Style="{StaticResource Quiet}" Click="ViewMore"
                                 VerticalAlignment="Center" />
-                        <TextBlock Text="Recent passes" FontWeight="SemiBold"
-                                   VerticalAlignment="Center" />
+                        <TextBlock Text="Recent passes" Style="{StaticResource Caption}"
+                                   Margin="0" VerticalAlignment="Center" />
                     </DockPanel>
 
                     <!--

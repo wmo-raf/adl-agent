@@ -179,9 +179,16 @@ public sealed class DiagnosticsBundle
     /// </remarks>
     private void RecentPasses(StringBuilder text, CyclePassQuery query)
     {
-        Heading(text, $"Recent collection passes ({Describe(query)}, newest first, at most {query.Most})");
+        // How many passes a bundle carries is the bundle's business, never the
+        // caller's. What arrives here is a window's filter, and that window's
+        // Most is its own page size -- borrowing it once quietly cut every
+        // bundle from two hundred passes to fifty.
+        var asked = query with { Skip = 0, Most = Passes };
 
-        var records = _passes.Recent(query with { Most = Math.Min(query.Most, Passes) });
+        Heading(
+            text, $"Recent collection passes ({Describe(query)}, newest first, at most {Passes})");
+
+        var records = _passes.Recent(asked);
 
         text.AppendLine(records.Count == 0
             ? "No collection pass on this machine matches that."

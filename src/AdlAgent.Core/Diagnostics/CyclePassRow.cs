@@ -45,13 +45,17 @@ public sealed record CyclePassRow
     /// </remarks>
     public string? Station { get; init; }
 
+    /// <summary>
+    /// The counts a column shows, and only those.
+    /// </summary>
+    /// <remarks>
+    /// Offered and wanted are deliberately not here. They are in the detail,
+    /// where a station's line spells all seven, and a row's whole purpose is
+    /// being light enough that hundreds of them cross one control message.
+    /// </remarks>
     public required int Scanned { get; init; }
 
     public required int Held { get; init; }
-
-    public required int Offered { get; init; }
-
-    public required int Wanted { get; init; }
 
     public required int Uploaded { get; init; }
 
@@ -97,8 +101,6 @@ public sealed record CyclePassRow
             Station = station?.Station,
             Scanned = station?.Scanned ?? record.Stations.Sum(entry => entry.Scanned),
             Held = station?.Held ?? record.Stations.Sum(entry => entry.Held),
-            Offered = station?.Offered ?? record.Stations.Sum(entry => entry.Offered),
-            Wanted = station?.Wanted ?? record.Stations.Sum(entry => entry.Wanted),
             Uploaded = station?.Uploaded ?? record.Stations.Sum(entry => entry.Uploaded),
             Failed = station?.Failed ?? record.Stations.Sum(entry => entry.Failed),
             Backlog = station?.Backlog ?? record.Stations.Sum(entry => entry.Backlog),
@@ -140,8 +142,8 @@ public sealed record CyclePassIndex
     public required int Scanned { get; init; }
 
     /// <summary>
-    /// The oldest record examined, which is where a further read carries on
-    /// from.
+    /// Where a further read carries on from: this page's skip plus what it
+    /// examined.
     /// </summary>
     /// <remarks>
     /// Examined rather than returned. A filtered read that gave up part-way
@@ -149,5 +151,5 @@ public sealed record CyclePassIndex
     /// would walk the same stretch of log again and give up in the same
     /// place, for ever.
     /// </remarks>
-    public DateTimeOffset? ResumeBefore { get; init; }
+    public required int Resume { get; init; }
 }
