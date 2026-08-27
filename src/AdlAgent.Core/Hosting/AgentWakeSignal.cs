@@ -48,19 +48,53 @@ public sealed class AgentWakeSignal
     }
 
     /// <summary>
+    /// Start listening, before doing the work a wake might arrive during.
+    /// </summary>
+    /// <remarks>
+    /// The whole of why a wake is not lost. <see cref="Set"/> completes
+    /// whatever is pending and puts a fresh one in its place, so a loop that
+    /// only reached for the pending task *after* its pass would reach for the
+    /// replacement and sleep through the signal -- for a whole check
+    /// interval, which is minutes.
+    /// <para>
+    /// That is the one moment this class exists for. A technician types the
+    /// pairing code and watches for the machine to appear; the wake arrives
+    /// while the loop is still finishing the pass it was already in, and
+    /// before this it was dropped. The install looked broken for ten minutes
+    /// and then worked, which is the worst way for it to behave.
+    /// </para>
+    /// <para>
+    /// Held as a plain task rather than a registration to dispose: it is one
+    /// completion source shared by every loop waiting on this signal, and
+    /// listening costs nothing to abandon.
+    /// </para>
+    /// </remarks>
+    public Task Listen()
+    {
+        lock (_gate)
+        {
+            return _pending.Task;
+        }
+    }
+
+    /// <summary>
     /// Wait for <paramref name="delay"/>, or until someone calls
     /// <see cref="Set"/>.
     /// </summary>
     /// <returns>True when woken early.</returns>
-    public async Task<bool> WaitAsync(
-        TimeSpan delay, TimeProvider time, CancellationToken cancellationToken)
-    {
-        Task woken;
+    public Task<bool> WaitAsync(
+        TimeSpan delay, TimeProvider time, CancellationToken cancellationToken) =>
+        WaitAsync(Listen(), delay, time, cancellationToken);
 
-        lock (_gate)
-        {
-            woken = _pending.Task;
-        }
+    /// <summary>
+    /// Wait for <paramref name="delay"/>, or until a wake arrives -- counting
+    /// one that arrived since <paramref name="listening"/> was taken.
+    /// </summary>
+    /// <returns>True when woken early.</returns>
+    public async Task<bool> WaitAsync(
+        Task listening, TimeSpan delay, TimeProvider time, CancellationToken cancellationToken)
+    {
+        var woken = listening;
 
         // The timer is cancelled on the way out, not abandoned. A loop woken
         // early would otherwise leave a live timer behind for the rest of
