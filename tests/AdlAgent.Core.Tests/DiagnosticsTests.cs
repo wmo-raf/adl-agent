@@ -1,6 +1,9 @@
 using AdlAgent.Core.Diagnostics;
 using AdlAgent.TestSupport;
 using AdlAgent.Tray;
+using AdlAgent.Windows;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
@@ -250,6 +253,115 @@ public class DiagnosticsTests
         finally
         {
             Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_machine_whose_settings_file_asks_for_Debug_actually_gets_Debug()
+    {
+        // Through the real host, which is the only place this can be told.
+        // The provider has a minimum of its own, but it is not the thing that
+        // decides: the framework's filter pipeline runs first, and this
+        // agent ships an appsettings.json with a Logging section in it.
+        var state = Directory.CreateTempSubdirectory("adl-agent-level").FullName;
+
+        try
+        {
+            using var host = Windows.WindowsAgentHost.CreateBuilder([
+                "--Agent:AdlBaseUrl=https://adl.example.org",
+                $"--Agent:StateDirectory={state}",
+                "--Agent:LogLevel=Debug",
+            ]).Build();
+
+            host.Services.GetRequiredService<ILogger<DiagnosticsTests>>()
+                .LogDebug("A support session asked for this.");
+
+            foreach (var log in host.Services.GetServices<ILogFlush>())
+            {
+                await log.FlushAsync();
+            }
+
+            Assert.Contains(
+                "A support session asked for this.",
+                await File.ReadAllTextAsync(Newest(AgentLogs.In(state))));
+        }
+        finally
+        {
+            Directory.Delete(state, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_machine_that_asks_for_nothing_is_not_told_about_every_file_ADL_takes()
+    {
+        var state = Directory.CreateTempSubdirectory("adl-agent-level").FullName;
+
+        try
+        {
+            using var host = Windows.WindowsAgentHost.CreateBuilder([
+                "--Agent:AdlBaseUrl=https://adl.example.org",
+                $"--Agent:StateDirectory={state}",
+            ]).Build();
+
+            var logger = host.Services.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+            logger.LogDebug("ADL took a file.");
+            logger.LogWarning("The manifest did not reach ADL.");
+
+            foreach (var log in host.Services.GetServices<ILogFlush>())
+            {
+                await log.FlushAsync();
+            }
+
+            var written = await File.ReadAllTextAsync(Newest(AgentLogs.In(state)));
+
+            Assert.DoesNotContain("ADL took a file.", written);
+            Assert.Contains("The manifest did not reach ADL.", written);
+        }
+        finally
+        {
+            Directory.Delete(state, recursive: true);
+        }
+    }
+
+    private static string Newest(string folder) =>
+        Directory.EnumerateFiles(folder).OrderByDescending(File.GetLastWriteTimeUtc).First();
+
+    [Fact]
+    public void The_ceilings_a_settings_file_asks_for_are_the_ceilings_the_logs_hold()
+    {
+        // Through the real host and the real INI reader, because "settable in
+        // MachineSettings" is a claim about a file an administrator edits over
+        // a telephone -- and a key named in the code but never read would look
+        // exactly like one that works.
+        var state = Directory.CreateTempSubdirectory("adl-agent-ceilings").FullName;
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(state, MachineSettings.FileName),
+                string.Join(
+                    "\r\n",
+                    $"[{MachineSettings.Section}]",
+                    $"{MachineSettings.AdlBaseUrlKey}=https://adl.example.org",
+                    $"{MachineSettings.CycleLogMegabytesKey}=8",
+                    $"{MachineSettings.GeneralLogMegabytesKey}=4",
+                    ""));
+
+            var configuration = new ConfigurationBuilder()
+                .AddIniFile(MachineSettings.PathIn(state))
+                .Build();
+
+            var options = new AgentOptions();
+
+            configuration.GetSection(AgentOptions.SectionName).Bind(options);
+
+            Assert.Equal(8, options.CycleLogMegabytes);
+            Assert.Equal(4, options.GeneralLogMegabytes);
+        }
+        finally
+        {
+            Directory.Delete(state, recursive: true);
         }
     }
 

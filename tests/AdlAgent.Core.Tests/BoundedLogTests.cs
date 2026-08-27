@@ -189,6 +189,29 @@ public class BoundedLogTests : IDisposable
     }
 
     [Fact]
+    public void What_is_evicted_is_the_oldest_day_and_not_the_oldest_file_on_the_disk()
+    {
+        // The two come apart on exactly the machine this feature is for.
+        // Compressing rewrites a file's timestamp, and the recovery path
+        // gzips a plain file left behind by a machine that lost power days
+        // ago -- so last Tuesday's archive carries this morning's stamp.
+        // Ordering by that stamp would evict this morning and keep Tuesday.
+        var tuesday = Path.Combine(_folder, "cycle-20260821-001.jsonl.gz");
+        var friday = Path.Combine(_folder, "cycle-20260825-001.jsonl.gz");
+
+        File.WriteAllText(friday, "friday");
+        File.WriteAllText(tuesday, "tuesday");
+
+        // Tuesday's archive carries the newer stamp, which is what
+        // compressing it late does. Ordering by that stamp would make Tuesday
+        // the newest thing in the folder and evict Friday first.
+        File.SetLastWriteTimeUtc(friday, new DateTime(2026, 8, 25, 9, 0, 0, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(tuesday, new DateTime(2026, 8, 30, 9, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal([tuesday, friday], Writer(megabytes: 4).Files());
+    }
+
+    [Fact]
     public void A_machine_that_is_not_an_installed_agent_keeps_no_log()
     {
         // The hazard this closes is narrow and serious. The state folder's

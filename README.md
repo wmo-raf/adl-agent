@@ -673,6 +673,14 @@ on `Debug` costs is retained window, which collapses from months to days.
 Letting ADL set it remotely is deliberately not here — a machine that cannot
 reach ADL is most of the machines anybody wants a log from.
 
+Set, it wins over the `Logging` section of `appsettings.json`; unset, it leaves
+that section alone, so a developer's build still logs what they told it to.
+That is a filter rule rather than a minimum level, and the distinction is
+load-bearing: `SetMinimumLevel` looks as though it works and does not, because
+a rule read from configuration beats it outright — which would leave a machine
+whose `agent.ini` said `Debug` writing `Information` and nobody able to see
+why.
+
 Run `adl-agent.exe` with no arguments to run it as a console process. On a
 real machine it is installed rather than run, and the installer asks for the
 URL: double-click `AdlAgent-0.2.0-x64.msi` and one screen in the middle of it

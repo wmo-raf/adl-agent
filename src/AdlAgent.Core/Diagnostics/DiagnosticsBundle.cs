@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.IO.Compression;
 using System.Text;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.Status;
@@ -40,7 +39,13 @@ public sealed class DiagnosticsBundle
     public const int Passes = 200;
 
     /// <summary>How much of the general log's tail the bundle carries.</summary>
-    public const int GeneralLogBytes = 512 * 1024;
+    /// <remarks>
+    /// The tail and not the whole, because the whole is up to the general
+    /// log's entire ceiling and this has to survive being attached to an email
+    /// sent from a country server. The newest of it is also the part anybody
+    /// reads.
+    /// </remarks>
+    public const int GeneralLogCharacters = 512 * 1024;
 
     private readonly AgentStatusReader _status;
     private readonly AgentStationsReader _stations;
@@ -116,7 +121,7 @@ public sealed class DiagnosticsBundle
         text.AppendLine(Line("Last problem", status.LastError ?? "-"));
 
         Stations(text);
-        Passes_(text);
+        RecentPasses(text);
         General(text);
 
         return text.ToString();
@@ -164,7 +169,7 @@ public sealed class DiagnosticsBundle
     /// at differently-worded copies of one event is a conversation about the
     /// wording.
     /// </remarks>
-    private void Passes_(StringBuilder text)
+    private void RecentPasses(StringBuilder text)
     {
         Heading(text, $"Recent collection passes (newest first, at most {Passes})");
 
@@ -176,26 +181,16 @@ public sealed class DiagnosticsBundle
     }
 
     /// <summary>The tail of the general log.</summary>
-    /// <remarks>
-    /// The tail and not the whole, because the whole is up to the general
-    /// log's entire ceiling and this has to survive being attached to an
-    /// email from a country server. The newest of it is also the part
-    /// anybody reads.
-    /// </remarks>
     private void General(StringBuilder text)
     {
-        Heading(text, $"Agent log (the last {GeneralLogBytes / 1024} KB)");
+        Heading(text, $"Agent log (the last {GeneralLogCharacters / 1024} KB)");
 
         try
         {
-            var newest = Directory.Exists(_directory)
-                ? Directory
-                    .EnumerateFiles(
-                        _directory,
-                        $"{AgentLogs.GeneralLogName}-*{AgentFileLoggerProvider.Extension}*")
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault()
-                : null;
+            var newest = AgentLogs
+                .FilesIn(_directory, AgentLogs.GeneralLogName, AgentFileLoggerProvider.Extension)
+                .OrderByDescending(path => path, StringComparer.Ordinal)
+                .FirstOrDefault();
 
             if (newest is null)
             {
@@ -204,7 +199,7 @@ public sealed class DiagnosticsBundle
                 return;
             }
 
-            text.AppendLine(Tail(newest, GeneralLogBytes));
+            text.AppendLine(Tail(newest, GeneralLogCharacters));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -212,29 +207,32 @@ public sealed class DiagnosticsBundle
         }
     }
 
-    /// <summary>The last <paramref name="bytes"/> of a log file, plain or gzipped.</summary>
-    private static string Tail(string path, int bytes)
+    /// <summary>
+    /// The last <paramref name="characters"/> of a log file, plain or
+    /// gzipped.
+    /// </summary>
+    /// <remarks>
+    /// Read whole and cut, rather than seeked. A plain file here is at most
+    /// one rolled part and a gzipped one has to be decompressed from the
+    /// front anyway, so the seek bought a little on one of the two cases and
+    /// a second way to open a file on both.
+    /// </remarks>
+    private static string Tail(string path, int characters)
     {
-        using var file = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = AgentLogs.OpenRead(path);
 
-        if (path.EndsWith(".gz", StringComparison.Ordinal))
+        var whole = reader.ReadToEnd();
+
+        if (whole.Length <= characters)
         {
-            using var gzip = new GZipStream(file, CompressionMode.Decompress);
-            using var reader = new StreamReader(gzip, Encoding.UTF8);
-            var whole = reader.ReadToEnd();
-
-            return whole.Length <= bytes ? whole : whole[^bytes..];
+            return whole;
         }
 
-        if (file.Length > bytes)
-        {
-            file.Seek(-bytes, SeekOrigin.End);
-        }
+        // Cut at a line, so the bundle does not open on half a stack frame.
+        var cut = whole.Length - characters;
+        var line = whole.IndexOf('\n', cut);
 
-        using var plain = new StreamReader(file, Encoding.UTF8);
-
-        return plain.ReadToEnd();
+        return line < 0 ? whole[cut..] : whole[(line + 1)..];
     }
 
     private static void Heading(StringBuilder text, string title)

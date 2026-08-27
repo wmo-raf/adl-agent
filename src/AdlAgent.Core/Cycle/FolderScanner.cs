@@ -134,10 +134,7 @@ public sealed class FolderScanner
         /// scan turned away for want of a folder has nothing to be named by,
         /// which is precisely what is wrong with it.
         /// </remarks>
-        public string Folder =>
-            Walking.SelectMany(sought => sought.Targets).Select(walked => walked.Folder)
-                .Concat(Fetching.Select(fetched => fetched.Folder))
-                .FirstOrDefault() ?? "";
+        public string Folder => Targets.Select(target => target.Folder).FirstOrDefault() ?? "";
 
         /// <summary>
         /// True when this unit is offering everything it has rather than only
@@ -148,9 +145,19 @@ public sealed class FolderScanner
         /// is what started the pass. A unit planned as a sweep whose every
         /// station was then turned away did not stop being a sweep.
         /// </remarks>
-        public bool Reconciling =>
-            Walking.SelectMany(sought => sought.Targets).Any(walked => walked.Reconciling)
-            || Fetching.Any(fetched => fetched.Reconciling);
+        public bool Reconciling => Targets.Any(target => target.Reconciling);
+
+        /// <summary>
+        /// Everything this unit will look at, walked and fetched alike.
+        /// </summary>
+        /// <remarks>
+        /// The two lists are kept apart because they are read apart -- one is
+        /// walked and the other is asked after by name -- but the questions
+        /// above are about the unit rather than about either strategy, and
+        /// spelling the join twice is how the two answers come to disagree.
+        /// </remarks>
+        internal IEnumerable<Target> Targets =>
+            Walking.SelectMany(sought => sought.Targets).Concat<Target>(Fetching);
 
         internal List<Sought> Walking { get; }
 
@@ -221,7 +228,7 @@ public sealed class FolderScanner
         // everything, and must not have its day's reconciliation spent on it.
         var reconciled = new HashSet<long>();
 
-        foreach (var target in unit.Walking.SelectMany(sought => sought.Targets).Concat<Target>(unit.Fetching))
+        foreach (var target in unit.Targets)
         {
             if (target.Reconciling)
             {
@@ -886,10 +893,13 @@ public sealed class FolderScanner
             // is one it would earn again on every cycle for the life of the
             // install -- a manifest slot and an upload, forever, for a file
             // that can never be accepted.
+            // Worded so that it still reads as a sentence with the filename
+            // in front of it, which is how every failure reaches an operator:
+            // "BOB.dat: larger than the 52428800 bytes ADL accepts".
             target.Tally.Fail(
                 facts.Name,
                 facts.Length,
-                $"is {facts.Length} bytes, more than the {target.Limits.FileBytes} ADL accepts");
+                $"larger than the {target.Limits.FileBytes} bytes ADL accepts, at {facts.Length}");
 
             return;
         }

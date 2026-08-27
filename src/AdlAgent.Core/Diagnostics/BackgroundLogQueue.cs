@@ -68,9 +68,6 @@ public sealed class BackgroundLogQueue : IAsyncDisposable
         _draining = Task.Run(DrainAsync);
     }
 
-    /// <summary>The log this queue writes into.</summary>
-    public BoundedLogWriter Writer => _writer;
-
     /// <summary>How many records have been dropped for want of room.</summary>
     public long Dropped => Interlocked.Read(ref _dropped);
 

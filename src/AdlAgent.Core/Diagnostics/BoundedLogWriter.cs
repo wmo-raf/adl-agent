@@ -133,7 +133,7 @@ public sealed class BoundedLogWriter
     {
         try
         {
-            var bytes = Encoding.UTF8.GetBytes(Trimmed(text) + "\n");
+            var bytes = Trimmed(Encoding.UTF8.GetBytes(text));
 
             Prepare(bytes.Length);
 
@@ -179,10 +179,17 @@ public sealed class BoundedLogWriter
             return [];
         }
 
-        return Directory
-            .EnumerateFiles(_directory, $"{_baseName}-*{_extension}*")
+        // Ordered by the day and part in the name, never by the file's
+        // timestamp. Compressing rewrites that timestamp, so a plain file
+        // left by a machine that lost power last Tuesday -- gzipped on the
+        // next start, which is the recovery path above -- would carry today's
+        // stamp and sort as the newest thing in the folder. Eviction would
+        // then delete this morning and keep last Tuesday, which is the exact
+        // opposite of what it promises. The name already carries the date.
+        return AgentLogs.FilesIn(_directory, _baseName, _extension)
             .Where(Owns)
-            .OrderBy(File.GetLastWriteTimeUtc)
+            .OrderBy(path => DayOf(path) ?? DateOnly.MinValue)
+            .ThenBy(PartOf)
             .ThenBy(path => path, StringComparer.Ordinal)
             .ToList();
     }
@@ -360,13 +367,34 @@ public sealed class BoundedLogWriter
                 _directory,
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{_baseName}-{day:yyyyMMdd}-{sequence:D3}{_extension}.gz"));
+                    $"{_baseName}-{day:yyyyMMdd}-{sequence:D3}{_extension}{AgentLogs.CompressedSuffix}"));
 
             if (!File.Exists(candidate))
             {
                 return candidate;
             }
         }
+    }
+
+    /// <summary>
+    /// The sequence number in a rolled part's name, or zero for the day's
+    /// plain file.
+    /// </summary>
+    /// <remarks>
+    /// Zero for the plain one so that it sorts before the day's parts, which
+    /// is wrong by a few minutes and right in the only way that matters: the
+    /// plain file is never a candidate for eviction, because it is the one
+    /// being written.
+    /// </remarks>
+    private static int PartOf(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
+        var dash = name.LastIndexOf('-');
+
+        return dash > 0 && int.TryParse(
+            name[(dash + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var sequence)
+            ? sequence
+            : 0;
     }
 
     private IEnumerable<string> Plain() =>
@@ -414,7 +442,7 @@ public sealed class BoundedLogWriter
         var name = Path.GetFileName(path);
 
         return name.EndsWith(_extension, StringComparison.Ordinal)
-            || name.EndsWith(_extension + ".gz", StringComparison.Ordinal);
+            || name.EndsWith(_extension + AgentLogs.CompressedSuffix, StringComparison.Ordinal);
     }
 
     private static long Length(string path)
@@ -432,14 +460,41 @@ public sealed class BoundedLogWriter
     }
 
     /// <summary>
-    /// The text, capped.
+    /// The record as the bytes to append, capped and newline-terminated.
     /// </summary>
     /// <remarks>
-    /// Only capped. Newlines are left alone on purpose: the cycle log cannot
-    /// contain one -- compact JSON escapes them -- and the general log is
-    /// full of them, because an exception's stack trace is the thing somebody
-    /// opens that file to read.
+    /// Capped in bytes rather than in characters, which are the same number
+    /// only for a fleet whose station names have no accents in them -- and
+    /// this one runs in Burkina Faso and the Comoros. A cap counted in
+    /// characters is not the cap it claims to be on the paths that most need
+    /// one.
+    /// <para>
+    /// Cut on a character boundary all the same, so the file stays readable:
+    /// the cut walks back off any UTF-8 continuation byte rather than
+    /// splitting a letter in half.
+    /// </para>
+    /// <para>
+    /// Newlines inside the record are left alone on purpose. The cycle log
+    /// cannot contain one -- compact JSON escapes them -- and the general log
+    /// is full of them, because an exception's stack trace is the thing
+    /// somebody opens that file to read.
+    /// </para>
     /// </remarks>
-    private static string Trimmed(string text) =>
-        text.Length <= MaxLineBytes ? text : text[..MaxLineBytes] + "…";
+    private static byte[] Trimmed(byte[] text)
+    {
+        if (text.Length <= MaxLineBytes)
+        {
+            return [.. text, (byte)'\n'];
+        }
+
+        var cut = MaxLineBytes;
+
+        // 10xxxxxx is a continuation byte: still inside a character.
+        while (cut > 0 && (text[cut] & 0xC0) == 0x80)
+        {
+            cut--;
+        }
+
+        return [.. text.AsSpan(0, cut), .. "…\n"u8];
+    }
 }

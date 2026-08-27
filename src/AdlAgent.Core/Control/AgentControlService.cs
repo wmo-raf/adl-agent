@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
@@ -248,8 +249,16 @@ public sealed class AgentControlService : BackgroundService
         var more = found.Count > most;
         var passes = found.Take(most).ToList();
 
-        while (passes.Count > 1 && Size(passes, more) > PassesBudget)
+        // Measured per record and summed, rather than by re-serialising the
+        // whole list once per record dropped. The envelope's own few bytes sit
+        // inside the slack the budget already leaves.
+        var sizes = passes.Select(Size).ToList();
+        var total = sizes.Sum();
+
+        while (passes.Count > 1 && total > PassesBudget)
         {
+            total -= sizes[^1];
+            sizes.RemoveAt(sizes.Count - 1);
             passes.RemoveAt(passes.Count - 1);
             more = true;
         }
@@ -278,9 +287,16 @@ public sealed class AgentControlService : BackgroundService
     /// </remarks>
     private const int PassesBudget = ControlProtocol.MaxMessageBytes - 4096;
 
-    private static int Size(IReadOnlyList<CycleRecord> passes, bool more) =>
-        JsonSerializer.Serialize(
-            new CyclePasses { Passes = passes, More = more }, AgentJson.Options).Length;
+    /// <summary>
+    /// How many bytes one record costs on the wire.
+    /// </summary>
+    /// <remarks>
+    /// Bytes and not characters. The reader at the other end caps a line in
+    /// bytes, and a folder path or a station name carrying an accent -- which
+    /// is much of this fleet -- costs more of them than it has letters.
+    /// </remarks>
+    private static int Size(CycleRecord pass) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(pass, AgentJson.Options));
 
     /// <summary>
     /// Write a plain-text diagnostics bundle where the client asked.
@@ -461,7 +477,17 @@ public sealed class AgentControlService : BackgroundService
         return value.TryGetValue<int>(out var narrower) ? narrower : null;
     }
 
-    /// <summary>A plain number a command carries, however the client spelled it.</summary>
+    /// <summary>
+    /// A plain count a command carries, however the client spelled it.
+    /// </summary>
+    /// <remarks>
+    /// Two attempts, for the reason <see cref="StationLinkId"/> gives above:
+    /// a request that came over the transport was parsed from text and is a
+    /// JSON number, while one built in process -- by a test, or by a head
+    /// that skips the wire -- is whatever C# literal somebody wrote. A caller
+    /// that passed <c>10L</c> and was silently given the default instead
+    /// would be the trap that comment exists to describe.
+    /// </remarks>
     private static int? Whole(JsonObject? payload, string name)
     {
         if (payload?[name] is not JsonValue value)
@@ -469,7 +495,14 @@ public sealed class AgentControlService : BackgroundService
             return null;
         }
 
-        return value.TryGetValue<int>(out var whole) ? whole : null;
+        if (value.TryGetValue<int>(out var whole))
+        {
+            return whole;
+        }
+
+        return value.TryGetValue<long>(out var wider)
+            ? (int)Math.Clamp(wider, int.MinValue, int.MaxValue)
+            : null;
     }
 
     private static JsonObject ToJson<T>(T value) =>

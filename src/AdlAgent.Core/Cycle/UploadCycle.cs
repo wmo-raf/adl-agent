@@ -398,7 +398,8 @@ public sealed class UploadCycle
         var startedAt = _time.GetUtcNow();
         var scan = _scanner.Scan(unit, startedAt);
 
-        bool delivered;
+        var delivered = false;
+        var stopped = AdlStoppedAnswering;
 
         try
         {
@@ -411,7 +412,25 @@ public sealed class UploadCycle
             // this one. Cut short exactly as if this unit had found it
             // itself: what it managed is still worth recording, and its
             // completion still is not.
-            delivered = false;
+        }
+        catch (Exception exception)
+        {
+            // Everything else, including the service being stopped and
+            // anything nobody foresaw -- and the record is written on the way
+            // past rather than lost. The pass whose absence is hardest to
+            // explain is the one that ended in a way nobody expected, and a
+            // machine somebody is restarting because it is stuck is exactly
+            // the machine whose last pass somebody is about to go looking
+            // for.
+            stopped = exception is OperationCanceledException
+                ? "The agent was stopped while this station was being collected."
+                : $"This station's collection ended unexpectedly: {exception.Message}";
+
+            Log(
+                configuration, unit, scan, startedAt, _time.GetUtcNow(),
+                new Ending(Trigger(unit), Completed: false, stopped));
+
+            throw;
         }
 
         var at = _time.GetUtcNow();
@@ -455,9 +474,7 @@ public sealed class UploadCycle
             scan,
             startedAt,
             at,
-            unit.Reconciling ? CycleTriggers.Reconciliation : CycleTriggers.Scheduled,
-            completed: delivered,
-            stopped: delivered ? null : AdlStoppedAnswering);
+            new Ending(Trigger(unit), delivered, delivered ? null : stopped));
 
         return delivered;
     }
@@ -616,11 +633,12 @@ public sealed class UploadCycle
             scan,
             startedAt,
             _time.GetUtcNow(),
-            CycleTriggers.Collect,
-            completed: delivered && !cancellationToken.IsCancellationRequested,
-            stopped: cancellationToken.IsCancellationRequested
-                ? "Somebody at the machine stopped this collect."
-                : delivered ? null : AdlStoppedAnswering);
+            new Ending(
+                CycleTriggers.Collect,
+                Completed: delivered && !cancellationToken.IsCancellationRequested,
+                Stopped: cancellationToken.IsCancellationRequested
+                    ? "Somebody at the machine stopped this collect."
+                    : delivered ? null : AdlStoppedAnswering));
 
         return new RequestedCollect
         {
@@ -1120,21 +1138,18 @@ public sealed class UploadCycle
         ScanResult scan,
         DateTimeOffset startedAt,
         DateTimeOffset at,
-        string trigger,
-        bool completed,
-        string? stopped)
+        Ending ending)
     {
         var names = Names(configuration);
 
         _log.Write(new CycleRecord
         {
-            Instance = "",
             At = startedAt,
             Seconds = Math.Max(0, (at - startedAt).TotalSeconds),
             Unit = unit.Folder,
-            Trigger = trigger,
-            Completed = completed,
-            Stopped = stopped,
+            Trigger = ending.Trigger,
+            Completed = ending.Completed,
+            Stopped = ending.Stopped,
             Folders = scan.Folders,
             Stations = scan.Links.Values
                 .OrderBy(tally => tally.StationLinkId)
@@ -1155,6 +1170,29 @@ public sealed class UploadCycle
             Files = scan.Journal.Files(),
         });
     }
+
+    /// <summary>
+    /// How a unit pass ended, which is one fact in three parts.
+    /// </summary>
+    /// <remarks>
+    /// Together because they are only ever read together and are only ever
+    /// wrong together: a pass marked finished with a reason for stopping, or
+    /// cut short with none, is a record that contradicts itself. Passing them
+    /// as three arguments had already produced one call site where the
+    /// completion and the sentence were worked out several lines apart.
+    /// </remarks>
+    private readonly record struct Ending(string Trigger, bool Completed, string? Stopped);
+
+    /// <summary>
+    /// What started this unit's pass, on the scheduled path.
+    /// </summary>
+    /// <remarks>
+    /// Read off the plan rather than off what the scan managed: a unit
+    /// planned as a sweep whose every station was then turned away did not
+    /// stop being a sweep.
+    /// </remarks>
+    private static string Trigger(FolderScanner.ScanUnit unit) =>
+        unit.Reconciling ? CycleTriggers.Reconciliation : CycleTriggers.Scheduled;
 
     /// <summary>
     /// Every station link's name, so a record read months later means

@@ -1,5 +1,3 @@
-using System.IO.Compression;
-using System.Text;
 using System.Text.Json;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.Serialization;
@@ -96,19 +94,18 @@ public sealed class CycleLogReader
         return found;
     }
 
-    /// <summary>This log's files, newest first.</summary>
-    private IEnumerable<string> Newest()
-    {
-        if (!Directory.Exists(_directory))
-        {
-            return [];
-        }
-
-        return Directory
-            .EnumerateFiles(_directory, $"{AgentLogs.CycleLogName}-*{CycleLog.Extension}*")
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .ThenByDescending(path => path, StringComparer.Ordinal);
-    }
+    /// <summary>
+    /// This log's files, newest first.
+    /// </summary>
+    /// <remarks>
+    /// By the name and not by the file's timestamp, for the same reason the
+    /// writer evicts by the name: compressing a part rewrites its stamp, so a
+    /// day gzipped late would sort as the newest thing in the folder and a
+    /// window asking for recent passes would be handed last week's.
+    /// </remarks>
+    private IEnumerable<string> Newest() =>
+        AgentLogs.FilesIn(_directory, AgentLogs.CycleLogName, CycleLog.Extension)
+            .OrderByDescending(path => path, StringComparer.Ordinal);
 
     /// <summary>
     /// One file's lines, last first.
@@ -144,14 +141,7 @@ public sealed class CycleLogReader
 
     private static List<string> Read(string path)
     {
-        using var file = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-
-        // ReadWrite and Delete: the newest file is being appended to right
-        // now, and the oldest may be evicted while this is reading it.
-        using var reader = path.EndsWith(".gz", StringComparison.Ordinal)
-            ? new StreamReader(new GZipStream(file, CompressionMode.Decompress), Encoding.UTF8)
-            : new StreamReader(file, Encoding.UTF8);
+        using var reader = AgentLogs.OpenRead(path);
 
         var lines = new List<string>();
 

@@ -110,6 +110,8 @@ public static class WindowsAgentHost
 
         builder.Configuration.GetSection(AgentOptions.SectionName).Bind(options);
 
+        var asked = builder.Configuration[$"{AgentOptions.SectionName}:{MachineSettings.LogLevelKey}"];
+
         var level = Enum.TryParse<LogLevel>(options.LogLevel, ignoreCase: true, out var parsed)
             ? parsed
             // A level nobody can parse is a typo in a file somebody edited
@@ -117,19 +119,32 @@ public static class WindowsAgentHost
             // rather than silence.
             : LogLevel.Information;
 
-        builder.Logging.SetMinimumLevel(level);
+        if (!string.IsNullOrWhiteSpace(asked))
+        {
+            // A filter rule and not SetMinimumLevel, which does not work here
+            // and looked as though it did. This program ships an
+            // appsettings.json carrying a Logging section, and a rule read
+            // from configuration beats LoggerFilterOptions.MinLevel outright
+            // -- so a machine whose agent.ini said Debug went on writing
+            // Information, which is the one failure a verbosity setting must
+            // not have. Added after the configuration's own rules, so that
+            // between two rules of equal reach this is the later and wins.
+            //
+            // Only when the machine actually asked. A developer's build reads
+            // appsettings.json, and a default nobody typed should not quietly
+            // overrule what they put there.
+            builder.Logging.AddFilter(category: null, level: level);
+        }
 
         // The folder is the head's -- it is the one thing about a log that is
         // platform-shaped -- and everything else about it is the core's.
         var sink = new AgentFileLoggerProvider(
-            AgentLogs.In(
-                string.IsNullOrWhiteSpace(options.StateDirectory)
-                    ? Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        Platform.WindowsHostLifecycle.StateFolderName)
-                    : options.StateDirectory),
+            AgentLogs.In(options.ResolveStateDirectory(new Platform.WindowsHostLifecycle(TimeProvider.System))),
             options.GeneralLogMegabytes,
-            level,
+            // Whatever the filter pipeline lets through. The pipeline is the
+            // one authority on verbosity; a second opinion held here would be
+            // a second place for the answer to differ.
+            LogLevel.Trace,
             TimeProvider.System);
 
         builder.Logging.AddProvider(sink);
