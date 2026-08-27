@@ -1543,6 +1543,78 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
+    /// The passes this station has been in, newest first.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the sentence the live probe answers. The probe says
+    /// what is in the folder at the moment somebody is looking; this says what
+    /// the machine has actually been doing there, which is the half nothing
+    /// on this machine could answer before -- the counts were in memory and
+    /// were overwritten by the next pass ten minutes later.
+    /// <para>
+    /// Read through the service like every other fact this window shows. The
+    /// records are in a folder whose permissions are SYSTEM and Administrators
+    /// and the tray runs as whoever is logged in, so a window that read them
+    /// itself would work for the developer and for nobody in a ministry.
+    /// </para>
+    /// </remarks>
+    public async Task<PassesAnswer> RecentPassesAsync(long stationLinkId)
+    {
+        var answer = await _agent.PassesAsync(stationLinkId).ConfigureAwait(true);
+
+        if (answer.Value is null)
+        {
+            return new PassesAnswer(
+                [],
+                false,
+                answer.Detail ?? "The agent could not read this machine's record of what it has done.");
+        }
+
+        return new PassesAnswer(
+            answer.Value.Passes.Select(record => new PassViewModel(record)).ToList(),
+            answer.Value.More,
+            null);
+    }
+
+    /// <summary>
+    /// Have the agent write a diagnostics bundle, and say what happened.
+    /// </summary>
+    /// <remarks>
+    /// The agent writes it and this only chooses where, which is the only
+    /// arrangement that works on a machine an administrator has installed
+    /// properly: the logs are where the token is, and the tray cannot read
+    /// that folder.
+    /// </remarks>
+    public async Task SaveDiagnosticsAsync(string path)
+    {
+        // Said before the wait rather than after it. The agent flushes both
+        // logs and then reads a few hundred kilobytes off them, which on a
+        // country server is long enough for a window that had not changed to
+        // read as a button that did nothing.
+        Message = "Collecting diagnostics…";
+
+        var written = await _agent.SaveDiagnosticsAsync(path).ConfigureAwait(true);
+
+        Message = written.Value is null
+            ? written.Detail ?? "The agent could not write a diagnostics file."
+            : string.Create(
+                CultureInfo.CurrentCulture,
+                $"Diagnostics saved to {written.Value.Path} ({Kilobytes(written.Value.Bytes)}).");
+    }
+
+    /// <summary>
+    /// A file size, as the sentence beside a saved file says one.
+    /// </summary>
+    /// <remarks>
+    /// Worth saying at all because it is what tells a technician the file they
+    /// are about to attach has something in it. A bundle of 900 bytes is a
+    /// machine that has recorded nothing, and that is itself the answer.
+    /// </remarks>
+    private static string Kilobytes(long bytes) => bytes < 1024
+        ? string.Create(CultureInfo.CurrentCulture, $"{bytes} bytes")
+        : string.Create(CultureInfo.CurrentCulture, $"{bytes / 1024.0:0} KB");
+
+    /// <summary>
     /// Count what a station's boxes would match (story 7).
     /// </summary>
     /// <remarks>
@@ -1926,3 +1998,15 @@ public sealed class ShellViewModel : Observable
         nameof(StationsAvailable),
     ];
 }
+
+/// <summary>
+/// What the agent had to say about a station's recent passes.
+/// </summary>
+/// <remarks>
+/// <paramref name="More"/> rather than a silent truncation: a window showing
+/// six of a station's passes without saying there are more reads as a machine
+/// that has only run six times, which is the exact misreading this whole
+/// record exists to stop.
+/// </remarks>
+public sealed record PassesAnswer(
+    IReadOnlyList<PassViewModel> Passes, bool More, string? Problem);

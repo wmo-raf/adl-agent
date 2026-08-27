@@ -180,6 +180,94 @@
                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}"
                                Text="{Binding Error}" />
                 </Grid>
+
+                <!--
+                    What this machine has actually been doing here, which is
+                    the half of the question the probe above cannot answer. The
+                    probe speaks about this instant; a station that has been
+                    quietly doing nothing since Tuesday is a question about the
+                    past, and until this list existed nothing on the machine
+                    could answer it — the counts lived in memory and the pass
+                    after overwrote them.
+
+                    Bound to the window rather than to the station, so this
+                    breaks out of the StackPanel's DataContext above.
+                -->
+                <StackPanel DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}">
+                    <TextBlock Style="{StaticResource Caption}" Text="Recent passes" />
+
+                    <!--
+                        A sentence and not an empty box. The empty box is the
+                        thing this whole record exists to stop being the
+                        answer: a machine that has genuinely not collected yet
+                        and a service too old to keep a record look identical,
+                        and both of them look like nothing.
+                    -->
+                    <TextBlock Text="{Binding PassesMessage}" TextWrapping="Wrap" Foreground="#5A6472">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPasses}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!--
+                        Closed to a line each, because somebody looking down
+                        this list is looking for a moment — "what happened at
+                        13:24" — and only then wants the files. A list that
+                        showed every file of every pass would bury the moments
+                        under them.
+                    -->
+                    <ItemsControl ItemsSource="{Binding Passes}"
+                                  Visibility="{Binding HasPasses, Converter={StaticResource Visible}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Expander Margin="0,0,0,2">
+                                    <Expander.Header>
+                                        <TextBlock Text="{Binding Heading}" TextWrapping="Wrap">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <!--
+                                                            A pass that did not
+                                                            finish is the one
+                                                            worth finding in a
+                                                            list of forty.
+                                                        -->
+                                                        <DataTrigger Binding="{Binding Completed}" Value="False">
+                                                            <Setter Property="Foreground" Value="#A33B2A" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Expander.Header>
+                                    <TextBox Text="{Binding Detail, Mode=OneWay}" IsReadOnly="True"
+                                             FontFamily="Consolas" FontSize="11.5"
+                                             BorderThickness="0" Background="#F2F4F7"
+                                             Padding="8,6" Margin="0,4,0,6"
+                                             TextWrapping="NoWrap"
+                                             HorizontalScrollBarVisibility="Auto" />
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!--
+                        Said out loud. Ten rows with nothing under them reads
+                        as a machine that has run ten times, and on the machine
+                        this happens to — a busy one — that is the opposite of
+                        the truth.
+                    -->
+                    <TextBlock Text="Older passes than these are in this machine's log."
+                               Margin="0,4,0,0" Opacity="0.75" TextWrapping="Wrap"
+                               Visibility="{Binding HasMorePasses, Converter={StaticResource Visible}}" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

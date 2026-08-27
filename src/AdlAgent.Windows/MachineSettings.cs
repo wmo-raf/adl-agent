@@ -41,6 +41,30 @@ public static class MachineSettings
     /// <summary>The key holding the address of this machine's ADL.</summary>
     public const string AdlBaseUrlKey = "AdlBaseUrl";
 
+    /// <summary>
+    /// The keys that decide how much this machine writes down about itself.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than only on <see cref="AdlAgent.Core.AgentOptions"/>
+    /// because this is the file a support session asks somebody to edit, over
+    /// a telephone, on a server in another country. A key named in two places
+    /// and spelled differently in one of them is a support call that ends with
+    /// nothing having changed.
+    /// <para>
+    /// The ceilings are two and not one so that a chatty subsystem can never
+    /// evict cycle history, and the level has no auto-revert: the ceilings
+    /// make a machine left on <c>Debug</c> harmless, and what it costs is
+    /// retained window rather than a disk.
+    /// </para>
+    /// </remarks>
+    public const string CycleLogMegabytesKey = "CycleLogMegabytes";
+
+    /// <inheritdoc cref="CycleLogMegabytesKey"/>
+    public const string GeneralLogMegabytesKey = "GeneralLogMegabytes";
+
+    /// <inheritdoc cref="CycleLogMegabytesKey"/>
+    public const string LogLevelKey = "LogLevel";
+
     /// <summary>Where the file lives for a machine whose state is in <paramref name="stateDirectory"/>.</summary>
     public static string PathIn(string stateDirectory) =>
         Path.Combine(stateDirectory, FileName);

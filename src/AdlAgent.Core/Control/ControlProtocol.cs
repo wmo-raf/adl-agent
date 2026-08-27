@@ -140,6 +140,42 @@ public static class ControlProtocol
     public const string CollectCancelCommand = "collect_cancel";
 
     /// <summary>
+    /// The unit passes this machine has recorded, newest first. Payload:
+    /// <c>{"station_link_id": 11, "most": 10}</c>, both optional.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the sentence the live probe answers. That probe
+    /// exists to tell "scanned 0, no error" apart from a folder that is
+    /// really empty, and it can only ever speak about this instant; this
+    /// speaks about the passes that already happened, which is where a
+    /// question about 13:24 is answered.
+    /// <para>
+    /// Named by station rather than by unit, because a station's unit is
+    /// whatever it happens to share a folder with and nobody knows the name
+    /// of that. Omitting the station gives the machine's own passes, which is
+    /// what the diagnostics bundle takes.
+    /// </para>
+    /// </remarks>
+    public const string PassesCommand = "passes";
+
+    /// <summary>
+    /// Write a plain-text diagnostics bundle. Payload: <c>{"path": "..."}</c>.
+    /// </summary>
+    /// <remarks>
+    /// The path comes from the client and the file is written by the agent,
+    /// which is the only arrangement that works on the service tier: the logs
+    /// are in a folder whose permissions the MSI has replaced with SYSTEM and
+    /// Administrators, so the tray cannot read them, and the service can. The
+    /// technician picks where it goes and the service fills it.
+    /// <para>
+    /// The bundle rather than the bytes, for the same reason: it is far larger
+    /// than <see cref="MaxMessageBytes"/> and this surface serves one client
+    /// at a time.
+    /// </para>
+    /// </remarks>
+    public const string DiagnosticsCommand = "diagnostics";
+
+    /// <summary>
     /// The agent accepted the connection and then closed it without saying
     /// anything.
     /// </summary>

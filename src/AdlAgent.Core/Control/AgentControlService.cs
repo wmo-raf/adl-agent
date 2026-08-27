@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
@@ -33,6 +34,8 @@ public sealed class AgentControlService : BackgroundService
     private readonly FolderPreview _preview;
     private readonly OnDemandSync _syncs;
     private readonly OnDemandCollect _collects;
+    private readonly CycleLogReader _passes;
+    private readonly DiagnosticsBundle _bundle;
     private readonly AgentWakeSignal _wake;
     private readonly TimeProvider _time;
     private readonly ILogger<AgentControlService> _logger;
@@ -47,6 +50,8 @@ public sealed class AgentControlService : BackgroundService
         FolderPreview preview,
         OnDemandSync syncs,
         OnDemandCollect collects,
+        CycleLogReader passes,
+        DiagnosticsBundle bundle,
         AgentWakeSignal wake,
         TimeProvider time,
         ILogger<AgentControlService> logger)
@@ -60,6 +65,8 @@ public sealed class AgentControlService : BackgroundService
         _preview = preview;
         _syncs = syncs;
         _collects = collects;
+        _passes = passes;
+        _bundle = bundle;
         _wake = wake;
         _time = time;
         _logger = logger;
@@ -102,6 +109,9 @@ public sealed class AgentControlService : BackgroundService
                 ControlProtocol.CollectCommand => Collect(request),
                 ControlProtocol.CollectStatusCommand => CollectStatus(),
                 ControlProtocol.CollectCancelCommand => CollectCancel(request),
+                ControlProtocol.PassesCommand => Passes(request),
+                ControlProtocol.DiagnosticsCommand => await DiagnosticsAsync(request, cancellationToken)
+                    .ConfigureAwait(false),
                 _ => ControlResponse.Failure(
                     "unknown_command",
                     $"This agent does not know the command '{request.Command}'."),
@@ -214,6 +224,103 @@ public sealed class AgentControlService : BackgroundService
         }
 
         return ControlResponse.Success(ToJson(_collects.Progress!));
+    }
+
+    /// <summary>
+    /// The unit passes this machine has recorded, newest first.
+    /// </summary>
+    /// <remarks>
+    /// Trimmed to fit one control message rather than truncated per record.
+    /// A record is one unit's whole story and half of one is worse than none:
+    /// a reader shown a pass with its file detail cut off has no way to tell
+    /// that from a pass in which nothing happened. So whole passes are dropped
+    /// from the oldest end until the answer fits, and the answer says that it
+    /// was.
+    /// </remarks>
+    private ControlResponse Passes(ControlRequest request)
+    {
+        var most = Math.Clamp(Whole(request.Payload, "most") ?? DefaultPasses, 1, MostPasses);
+
+        // One more than was asked for, so that "there are older ones" is
+        // something this knows rather than something it infers from having
+        // filled the answer exactly.
+        var found = _passes.Recent(most + 1, StationLinkId(request.Payload));
+        var more = found.Count > most;
+        var passes = found.Take(most).ToList();
+
+        while (passes.Count > 1 && Size(passes, more) > PassesBudget)
+        {
+            passes.RemoveAt(passes.Count - 1);
+            more = true;
+        }
+
+        return ControlResponse.Success(ToJson(new CyclePasses
+        {
+            Passes = passes,
+            More = more,
+        }));
+    }
+
+    /// <summary>How many passes a UI gets when it does not say.</summary>
+    private const int DefaultPasses = 10;
+
+    /// <summary>The most it may ask for, whatever it says.</summary>
+    private const int MostPasses = 25;
+
+    /// <summary>
+    /// How much of one control message the passes may take.
+    /// </summary>
+    /// <remarks>
+    /// Below <see cref="ControlProtocol.MaxMessageBytes"/> with room over for
+    /// the envelope around it, because the reader at the other end refuses a
+    /// line longer than that cap and a refusal here would be a window that
+    /// shows nothing at all on exactly the busiest machine.
+    /// </remarks>
+    private const int PassesBudget = ControlProtocol.MaxMessageBytes - 4096;
+
+    private static int Size(IReadOnlyList<CycleRecord> passes, bool more) =>
+        JsonSerializer.Serialize(
+            new CyclePasses { Passes = passes, More = more }, AgentJson.Options).Length;
+
+    /// <summary>
+    /// Write a plain-text diagnostics bundle where the client asked.
+    /// </summary>
+    /// <remarks>
+    /// Performed rather than started, unlike sync and collect. This one is
+    /// bounded -- it is a few hundred kilobytes off local files -- and the
+    /// window that asked has a Save dialog open behind it and nothing to draw
+    /// until it knows whether the file was written.
+    /// </remarks>
+    private async Task<ControlResponse> DiagnosticsAsync(
+        ControlRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Payload?["path"]?.GetValue<string>() is not { } path ||
+            string.IsNullOrWhiteSpace(path))
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say where the bundle should be written: {\"path\": \"C:\\\\Temp\\\\adl-agent.txt\"}.");
+        }
+
+        try
+        {
+            var bytes = await _bundle.WriteToAsync(path, cancellationToken).ConfigureAwait(false);
+
+            return ControlResponse.Success(new JsonObject
+            {
+                ["path"] = path,
+                ["bytes"] = bytes,
+            });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or NotSupportedException or ArgumentException)
+        {
+            // The service runs as SYSTEM and the path came from somebody's
+            // Save dialog, so this is a real case: a mapped drive the service
+            // account does not have, or a folder it may not write.
+            return ControlResponse.Failure(
+                "diagnostics_failed", $"The agent could not write {path}: {exception.Message}");
+        }
     }
 
     /// <summary>
@@ -352,6 +459,17 @@ public sealed class AgentControlService : BackgroundService
         }
 
         return value.TryGetValue<int>(out var narrower) ? narrower : null;
+    }
+
+    /// <summary>A plain number a command carries, however the client spelled it.</summary>
+    private static int? Whole(JsonObject? payload, string name)
+    {
+        if (payload?[name] is not JsonValue value)
+        {
+            return null;
+        }
+
+        return value.TryGetValue<int>(out var whole) ? whole : null;
     }
 
     private static JsonObject ToJson<T>(T value) =>

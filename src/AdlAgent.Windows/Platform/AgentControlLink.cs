@@ -4,6 +4,7 @@ using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 
@@ -145,6 +146,49 @@ public sealed class AgentControlLink
                 new JsonObject { ["station_link_id"] = stationLinkId }),
             cancellationToken);
 
+    /// <summary>
+    /// The unit passes this machine has recorded, newest first.
+    /// </summary>
+    /// <param name="stationLinkId">
+    /// Only the passes this station was in, or <c>null</c> for the machine's
+    /// own.
+    /// </param>
+    public Task<AgentAnswer<CyclePasses>> PassesAsync(
+        long? stationLinkId = null, int? most = null, CancellationToken cancellationToken = default)
+    {
+        var payload = new JsonObject();
+
+        if (stationLinkId is not null)
+        {
+            payload["station_link_id"] = stationLinkId.Value;
+        }
+
+        if (most is not null)
+        {
+            payload["most"] = most.Value;
+        }
+
+        return AskAsync<CyclePasses>(
+            new ControlRequest(ControlProtocol.PassesCommand, payload), cancellationToken);
+    }
+
+    /// <summary>
+    /// Have the agent write a plain-text diagnostics bundle at this path.
+    /// </summary>
+    /// <remarks>
+    /// The agent writes it rather than the caller, because on the service tier
+    /// the caller cannot read the logs: the state folder's permissions are
+    /// SYSTEM and Administrators, and the tray runs as whoever is logged in.
+    /// The path is the technician's choice and the bytes are the service's.
+    /// </remarks>
+    public Task<AgentAnswer<DiagnosticsWritten>> SaveDiagnosticsAsync(
+        string path, CancellationToken cancellationToken = default) =>
+        AskAsync<DiagnosticsWritten>(
+            new ControlRequest(
+                ControlProtocol.DiagnosticsCommand,
+                new JsonObject { ["path"] = path }),
+            cancellationToken);
+
     /// <summary>Write a station's app tier through the service to ADL.</summary>
     public Task<AgentAnswer<ConfigWriteResponse>> ConfigureAsync(
         long stationLinkId, JsonObject config, CancellationToken cancellationToken = default) =>
@@ -226,6 +270,19 @@ public sealed class AgentControlLink
             return null;
         }
     }
+}
+
+/// <summary>Where the agent put the bundle, and how big it is.</summary>
+/// <remarks>
+/// The size is worth carrying: the window says it, and "written, 412 KB" is
+/// what tells a technician the file they are about to attach has something in
+/// it.
+/// </remarks>
+public sealed record DiagnosticsWritten
+{
+    public string Path { get; init; } = "";
+
+    public long Bytes { get; init; }
 }
 
 /// <summary>

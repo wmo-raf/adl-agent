@@ -3,6 +3,7 @@ using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.State;
@@ -80,6 +81,26 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<AgentStationsReader>();
         services.TryAddSingleton<StationLinkConfigWriter>();
         services.TryAddSingleton<UpdateService>();
+
+        // What survives the cycle that wrote it. Registered here rather than
+        // beside the logging providers because it is not one: the general
+        // sink is built while logging is being configured and owns its own
+        // writer, and keeping the two apart is what gives them their two
+        // independent ceilings.
+        services.TryAddSingleton<CycleLog>();
+        services.TryAddSingleton<CycleLogReader>();
+        services.TryAddSingleton<DiagnosticsBundle>();
+
+        // Under its flushing face as well, so that a bundle read off these
+        // files holds the pass that was still in the queue when somebody
+        // pressed the button. The head adds the general sink beside it, and
+        // the bundle asks for every registration rather than for either.
+        //
+        // Added rather than TryAdd'd: this is one of a list, and the same
+        // instance under a second face rather than a second instance -- which
+        // is why it is a factory over the singleton above and not a type.
+        services.AddSingleton<ILogFlush>(
+            static provider => provider.GetRequiredService<CycleLog>());
 
         // The cycle's report is written by the scan loop and read by the
         // heartbeat, so one instance is registered under both faces.

@@ -1068,6 +1068,32 @@
                         <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
                         <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
                     </Grid>
+
+                    <!--
+                        The artefact that actually reaches HQ. A technician in
+                        a country nobody can reach is not going to read a
+                        JSON Lines file down a telephone, and they cannot get
+                        an operator at HQ into a folder whose permissions are
+                        SYSTEM and Administrators — but they can press this and
+                        attach what comes out.
+
+                        Quiet, and at the bottom, because a machine that is
+                        working has no reason to touch it. There is
+                        deliberately no third tab for any of this: the Pairing
+                        tab was deleted precisely because it gave a technician
+                        a whole screen with nothing on it to do, in the
+                        leftmost and most prominent position, and a
+                        machine-wide activity tab would be that again on the
+                        many machines that are simply working.
+                    -->
+                    <Separator Margin="0,14,0,4" Background="#DCE0E6" />
+
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="Save diagnostics…" Style="{StaticResource Quiet}"
+                                Click="SaveDiagnostics" />
+                        <TextBlock Text="  ·  everything this machine knows about itself, as one text file"
+                                   Opacity="0.75" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </WrapPanel>
                 </StackPanel>
             </TabItem>
 

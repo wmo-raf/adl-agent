@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Threading.Tasks;
 
@@ -22,6 +23,13 @@ namespace AdlAgent.Tray;
 /// is answered by it and by nothing else. It runs the existing preview
 /// command with no settings laid over the stored ones, so what is counted is
 /// exactly the configuration the cycle will use.
+/// </para>
+/// <para>
+/// The recent passes are the third thing, and they are the other half of that
+/// same sentence. The probe can only ever speak about this instant; a station
+/// that has been quietly doing nothing since Tuesday is a question about the
+/// past, and until this list existed nothing on the machine could answer it --
+/// the counts lived in memory and the pass after overwrote them.
 /// </para>
 /// <para>
 /// Nothing here writes. That is what makes it safe to open on a station a
@@ -75,6 +83,38 @@ public sealed class StationStatusViewModel : Observable
     public bool IsChecking => _probing;
 
     /// <summary>
+    /// This station's recent passes, newest first, each opening to its files.
+    /// </summary>
+    public ObservableCollection<PassViewModel> Passes { get; } = [];
+
+    /// <summary>
+    /// What to say where the passes go when there are none to show.
+    /// </summary>
+    /// <remarks>
+    /// A sentence and not an empty box, because the empty box is the thing
+    /// this whole feature exists to stop being the answer. A machine that has
+    /// genuinely not collected yet and a service too old to keep a record are
+    /// different states, and both of them look like nothing.
+    /// </remarks>
+    public string PassesMessage => _passesMessage;
+
+    /// <summary>True when there is a list rather than a sentence.</summary>
+    public bool HasPasses => Passes.Count > 0;
+
+    /// <summary>
+    /// True when older passes exist than this window was given.
+    /// </summary>
+    /// <remarks>
+    /// Said out loud. Six rows with nothing under them reads as a machine that
+    /// has run six times, and on the machine this happens to -- a busy one --
+    /// that is the opposite of the truth.
+    /// </remarks>
+    public bool HasMorePasses => _more;
+
+    private string _passesMessage = "";
+    private bool _more;
+
+    /// <summary>
     /// Count the folder as it stands, and say so while it is happening.
     /// </summary>
     /// <remarks>
@@ -90,11 +130,43 @@ public sealed class StationStatusViewModel : Observable
         try
         {
             await _shell.CountMatchesAsync(Station).ConfigureAwait(true);
+            await ReadPassesAsync().ConfigureAwait(true);
         }
         finally
         {
             Probing(false);
         }
+    }
+
+    /// <summary>
+    /// Fill the recent-passes list from the machine's own record.
+    /// </summary>
+    /// <remarks>
+    /// Beside the count rather than after a button of its own, because the two
+    /// answer one question between them and a technician who has just fixed a
+    /// share wants both re-read. It costs a local file read of a few hundred
+    /// kilobytes, against a probe that may walk a folder over a network.
+    /// </remarks>
+    private async Task ReadPassesAsync()
+    {
+        var answer = await _shell.RecentPassesAsync(Station.StationLinkId).ConfigureAwait(true);
+
+        Passes.Clear();
+
+        foreach (var pass in answer.Passes)
+        {
+            Passes.Add(pass);
+        }
+
+        _more = answer.More;
+        _passesMessage = answer.Problem
+            ?? (Passes.Count > 0
+                ? ""
+                : "This machine has not recorded a collection pass for this station yet.");
+
+        Raise(nameof(PassesMessage));
+        Raise(nameof(HasPasses));
+        Raise(nameof(HasMorePasses));
     }
 
     /// <summary>

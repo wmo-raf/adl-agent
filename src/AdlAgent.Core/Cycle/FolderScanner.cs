@@ -1,5 +1,6 @@
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Platform;
 using Microsoft.Extensions.Logging;
 
@@ -107,7 +108,49 @@ public sealed class FolderScanner
             Walking = walking;
             Fetching = fetching;
             Tallies = tallies;
+
+            // One journal for the unit, joined here rather than at each
+            // tally's construction: a tally is made before anything knows
+            // which unit it will land in, and the record a pass leaves behind
+            // is the unit's story rather than any one station's. Bounding it
+            // per unit is also what keeps a vendor's dump directory of forty
+            // stations from writing forty times the file detail.
+            foreach (var tally in tallies.Values)
+            {
+                tally.Journal = Journal;
+            }
         }
+
+        /// <summary>What this unit's files did, bounded, for the cycle log.</summary>
+        internal UnitJournal Journal { get; } = new();
+
+        /// <summary>
+        /// The folder this unit is known by, or empty when it has none.
+        /// </summary>
+        /// <remarks>
+        /// A folder path because no stable unit id exists anywhere in this
+        /// product, and inventing one to put in a log would be inventing a
+        /// fact. Empty happens, and honestly: a unit holding one station the
+        /// scan turned away for want of a folder has nothing to be named by,
+        /// which is precisely what is wrong with it.
+        /// </remarks>
+        public string Folder =>
+            Walking.SelectMany(sought => sought.Targets).Select(walked => walked.Folder)
+                .Concat(Fetching.Select(fetched => fetched.Folder))
+                .FirstOrDefault() ?? "";
+
+        /// <summary>
+        /// True when this unit is offering everything it has rather than only
+        /// what the candidate window admits.
+        /// </summary>
+        /// <remarks>
+        /// Read off the plan and not off what the scan managed, because this
+        /// is what started the pass. A unit planned as a sweep whose every
+        /// station was then turned away did not stop being a sweep.
+        /// </remarks>
+        public bool Reconciling =>
+            Walking.SelectMany(sought => sought.Targets).Any(walked => walked.Reconciling)
+            || Fetching.Any(fetched => fetched.Reconciling);
 
         internal List<Sought> Walking { get; }
 
@@ -203,13 +246,19 @@ public sealed class FolderScanner
 
         var matched = new List<Match>();
 
+        // What was walked and how much was in it, which nothing anywhere
+        // recorded before -- and which for a station filed by date is the
+        // dated sub-folders this cycle actually expanded to.
+        var entered = new List<CycleFolderRecord>();
+
         foreach (var targets in folders.Values)
         {
             // The folder as ADL spells it, not the key it was grouped under.
             // What goes to the seam is always a path an administrator typed,
             // or one dated directory below it; the key is this method's
             // private business.
-            Walk(targets[0].Folder, targets, now, matched);
+            entered.Add(new CycleFolderRecord(
+                targets[0].Folder, Walk(targets[0].Folder, targets, unit.Journal, now, matched)));
         }
 
         Diagnose(unit.Walking);
@@ -231,7 +280,11 @@ public sealed class FolderScanner
                 : string.Compare(left.Facts.Name, right.Facts.Name, StringComparison.OrdinalIgnoreCase);
         });
 
-        return new ScanResult(Hashing(matched), unit.Tallies, reconciled);
+        return new ScanResult(Hashing(matched), unit.Tallies, reconciled)
+        {
+            Folders = entered,
+            Journal = unit.Journal,
+        };
     }
 
     /// <summary>
@@ -368,7 +421,8 @@ public sealed class FolderScanner
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                match.Target.Tally.Fail($"{match.Facts.Name} could not be read: {exception.Message}");
+                match.Target.Tally.Fail(
+                    match.Facts.Name, match.Facts.Length, $"could not be read -- {exception.Message}");
 
                 _logger.LogWarning(exception, "Could not read {Path} to hash it.", match.Facts.Path);
 
@@ -700,8 +754,10 @@ public sealed class FolderScanner
     /// the day's first file -- so what a station has to say is said once it
     /// has been offered all of them, in <see cref="Diagnose"/>.
     /// </remarks>
-    private void Walk(
-        string folder, List<Walked> targets, DateTimeOffset now, List<Match> matched)
+    /// <returns>How many entries the walk went past.</returns>
+    private int Walk(
+        string folder, List<Walked> targets, UnitJournal journal,
+        DateTimeOffset now, List<Match> matched)
     {
         var entries = 0;
 
@@ -709,12 +765,25 @@ public sealed class FolderScanner
         {
             entries++;
 
+            var claimed = false;
+
             foreach (var target in targets)
             {
                 if (target.Pattern.Matches(facts.Name))
                 {
+                    claimed = true;
+
                     Consider(target, facts, target.Floor, now, matched);
                 }
+            }
+
+            if (!claimed)
+            {
+                // Nobody's. Written down up to a small cap, because a vendor
+                // that started writing .DAT into a folder configured for
+                // .dat looks, in every number this product has, exactly like
+                // a folder with nothing in it.
+                journal.Unmatched(facts.Name, facts.Length);
             }
         }
 
@@ -722,6 +791,8 @@ public sealed class FolderScanner
         {
             target.Entries = entries;
         }
+
+        return entries;
     }
 
     /// <summary>
@@ -803,6 +874,8 @@ public sealed class FolderScanner
         {
             // Behind the floor ADL put under this station. Nothing is wrong;
             // this is how the window keeps a settled folder cheap.
+            target.Tally.Skip(facts.Name, facts.Length);
+
             return;
         }
 
@@ -814,7 +887,9 @@ public sealed class FolderScanner
             // install -- a manifest slot and an upload, forever, for a file
             // that can never be accepted.
             target.Tally.Fail(
-                $"{facts.Name} is {facts.Length} bytes, more than the {target.Limits.FileBytes} ADL accepts.");
+                facts.Name,
+                facts.Length,
+                $"is {facts.Length} bytes, more than the {target.Limits.FileBytes} ADL accepts");
 
             return;
         }
@@ -824,12 +899,31 @@ public sealed class FolderScanner
             // Still being written, or held open by whoever is writing it.
             // Not a failure -- the newest file in a live folder is in this
             // state on every single cycle -- just not this cycle's business.
-            target.Tally.Wait();
+            target.Tally.Wait(facts.Name, facts.Length, Waiting(facts, target, now));
 
             return;
         }
 
         matched.Add(new Match(facts, target));
+    }
+
+    /// <summary>
+    /// Why a file was left alone, in the two numbers that decide it.
+    /// </summary>
+    /// <remarks>
+    /// Both of them, because either one alone is unreadable. "Written 12
+    /// seconds ago" is a fact about the vendor; "window 60s" is a fact about
+    /// the configuration; and the only thing anybody wants to know is which
+    /// of the two to change.
+    /// </remarks>
+    private static string Waiting(FileFacts facts, Target target, DateTimeOffset now)
+    {
+        var age = now - facts.WindowTimestamp;
+        var window = target.Link.Config.StabilityWindow;
+
+        return age < TimeSpan.Zero
+            ? $"dated ahead of this machine's clock, window {window.TotalSeconds:0}s"
+            : $"written {age.TotalSeconds:0}s ago, window {window.TotalSeconds:0}s";
     }
 
     /// <summary>

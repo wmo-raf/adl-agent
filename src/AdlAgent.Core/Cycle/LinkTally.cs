@@ -1,4 +1,5 @@
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Diagnostics;
 
 namespace AdlAgent.Core.Cycle;
 
@@ -67,11 +68,40 @@ public sealed class LinkTally
     /// <summary>Files this machine has seen that ADL does not hold.</summary>
     public int Backlog => Pending + Math.Max(0, Requested - Uploaded);
 
+    /// <summary>
+    /// Where this station's files are written down for somebody to read
+    /// later.
+    /// </summary>
+    /// <remarks>
+    /// The unit's, not this station's: the record a pass leaves behind is one
+    /// unit's story, and a unit owns its stations outright. Assigned by
+    /// <see cref="FolderScanner.ScanUnit"/> as it is built, before anything is
+    /// scanned; a tally nobody has put in a unit writes into one of its own
+    /// and nobody reads it, which is what a tally built by a test should do.
+    /// </remarks>
+    internal UnitJournal Journal { get; set; } = new();
+
     /// <summary>A file in the folder matched this station's pattern.</summary>
     public void Saw() => Interlocked.Increment(ref _scanned);
 
+    /// <summary>
+    /// A file matched and is older than the floor ADL put under this station.
+    /// </summary>
+    /// <remarks>
+    /// Not counted anywhere, because nothing is wrong: this is how the
+    /// candidate window keeps a settled folder cheap. It is written down all
+    /// the same, because "everything in the folder is behind the watermark"
+    /// and "the folder is empty" are the same absence in every number this
+    /// product has, and they are fixed by different people.
+    /// </remarks>
+    public void Skip(string name, long size) => Journal.Skipped(name, size, StationLinkId);
+
     /// <summary>A file was left alone until it has finished being written.</summary>
-    public void Wait() => Interlocked.Increment(ref _pending);
+    public void Wait(string name, long size, string reason)
+    {
+        Interlocked.Increment(ref _pending);
+        Journal.Held(name, size, StationLinkId, reason);
+    }
 
     /// <summary>A file went into a manifest.</summary>
     public void Offer() => Interlocked.Increment(ref _offered);
@@ -80,13 +110,35 @@ public sealed class LinkTally
     public void Want() => Interlocked.Increment(ref _requested);
 
     /// <summary>ADL took a file.</summary>
-    public void Accept() => Interlocked.Increment(ref _uploaded);
+    public void Accept(string name, long size)
+    {
+        Interlocked.Increment(ref _uploaded);
+        Journal.Uploaded(name, size, StationLinkId);
+    }
 
     /// <summary>A file did not go, and here is what to tell whoever asks.</summary>
     public void Fail(string reason)
     {
         Interlocked.Increment(ref _failed);
         Note(reason);
+    }
+
+    /// <summary>
+    /// One named file did not go, and here is the reason on its own.
+    /// </summary>
+    /// <remarks>
+    /// The name and the reason apart, and that is the whole point of this
+    /// overload. The sentence an operator reads is "name: reason" and always
+    /// has been -- it still is, below -- but a record that stored that
+    /// sentence could not fold five hundred identical faults into one line,
+    /// because a reason with a filename in it is five hundred distinct
+    /// reasons.
+    /// </remarks>
+    public void Fail(string name, long? size, string reason)
+    {
+        Interlocked.Increment(ref _failed);
+        Journal.Failed(name, size, StationLinkId, reason);
+        Note($"{name}: {reason}");
     }
 
     /// <summary>

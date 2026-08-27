@@ -1,4 +1,5 @@
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.State;
 using Microsoft.Extensions.Configuration;
 using AdlAgent.TestSupport;
@@ -374,6 +375,53 @@ public class SetUrlTests : IDisposable
         // machine's entire outbound path belongs behind the operating
         // system's consent, not behind a pipe ACL.
         Assert.False(AgentCli.Handles(["set-url", "https://adl.example.org"]));
+    }
+
+    // ---------- what a repoint must not touch ----------
+
+    [Fact]
+    public async Task A_repoint_leaves_this_machines_logs_where_they_are()
+    {
+        Pair();
+
+        var logs = Logs();
+
+        Assert.Equal(0, await Repoint("https://elsewhere.example.org"));
+
+        // The pairing, the cache and the sweep log went, because they came
+        // from the old instance. The logs did not, because a repoint is very
+        // often performed *because* something was wrong, and destroying the
+        // evidence at the moment somebody is investigating is the worst
+        // available timing.
+        Assert.Null(_state.Load().Token);
+        Assert.True(File.Exists(logs));
+    }
+
+    [Fact]
+    public async Task A_repoint_that_keeps_the_pairing_leaves_the_logs_too()
+    {
+        Pair();
+
+        var logs = Logs();
+
+        Assert.Equal(0, await Repoint("https://elsewhere.example.org", SetUrl.KeepPairingSwitch));
+
+        Assert.Equal("device-token", _state.Load().Token);
+        Assert.True(File.Exists(logs));
+    }
+
+    /// <summary>A machine with a day of history in it.</summary>
+    private string Logs()
+    {
+        var folder = AgentLogs.In(_stateDirectory);
+
+        Directory.CreateDirectory(folder);
+
+        var path = Path.Combine(folder, $"{AgentLogs.CycleLogName}-20260821{CycleLog.Extension}");
+
+        File.WriteAllText(path, "{\"unit\":\"C:\\\\VendorData\\\\Garissa\"}\n");
+
+        return path;
     }
 
     private Task<int> Repoint(string url, params string[] switches) =>

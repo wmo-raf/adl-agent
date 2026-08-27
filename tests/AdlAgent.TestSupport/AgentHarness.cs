@@ -1,6 +1,7 @@
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Control;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
@@ -155,6 +156,34 @@ public sealed class AgentHarness : IAsyncDisposable
     public CycleReportStore Cycles => Services.GetRequiredService<CycleReportStore>();
 
     public AgentStatusReader Status => Services.GetRequiredService<AgentStatusReader>();
+
+    /// <summary>What survives the cycle that wrote it.</summary>
+    public CycleLog CycleLog => Services.GetRequiredService<CycleLog>();
+
+    /// <summary>The same records, read back.</summary>
+    public CycleLogReader Passes => Services.GetRequiredService<CycleLogReader>();
+
+    /// <summary>The plain-text bundle a technician emails.</summary>
+    public DiagnosticsBundle Bundle => Services.GetRequiredService<DiagnosticsBundle>();
+
+    /// <summary>Where this machine's logs are.</summary>
+    public string LogDirectory => AgentLogs.In(HostLifecycle.StateDirectory);
+
+    /// <summary>
+    /// The unit passes this machine has recorded, newest first.
+    /// </summary>
+    /// <remarks>
+    /// Flushed first, because the log is written through a background queue --
+    /// which is the whole point of it -- so what the last cycle did is in
+    /// memory for a moment after the cycle returns.
+    /// </remarks>
+    public async Task<IReadOnlyList<CycleRecord>> RecordedPassesAsync(
+        int most = 50, long? stationLinkId = null)
+    {
+        await CycleLog.FlushAsync().ConfigureAwait(false);
+
+        return Passes.Recent(most, stationLinkId);
+    }
 
     /// <summary>The station list as the tray reads it.</summary>
     public AgentStationsReader Stations => Services.GetRequiredService<AgentStationsReader>();

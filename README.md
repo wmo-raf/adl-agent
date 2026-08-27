@@ -455,6 +455,92 @@ editing and saves it through the verb above.
   state by the same code. What is tested here is the handful of decisions that
   are the window's own.
 
+A bounded diagnostic log on the country server
+([wmo-raf/adl#306](https://github.com/wmo-raf/adl/issues/306)) — until this,
+nothing the agent did survived the cycle that did it. The counts lived in
+memory for the heartbeat and were overwritten by the next pass; the sentence
+working out *why* a silent station is silent was computed, written into a
+tally, and thrown away ten minutes later. And there was no file log anywhere:
+on the service tier `ILogger` output went to the Windows Event Log, and on the
+per-user tier to a console window that closes. When somebody asks what
+happened at 13:24, this is what answers.
+
+Everything lands in `%ProgramData%\ADL Agent\logs\` — a subfolder of the
+state directory and never the state directory itself, which holds the device
+token, the configuration cache and the sweep log. The eviction routine never
+walks the same directory as those.
+
+- **a hard byte ceiling, oldest evicted first** — not an age window. A bad
+  week is a hundred times a good one, and the promise that has to be makeable
+  to a ministry's system administrator is one sentence: *this folder never
+  exceeds 96 MB*. Two independent ceilings — cycle log 64 MB, general log
+  32 MB, both settable in `agent.ini` — so a chatty subsystem can never evict
+  cycle history.
+- **today's file plain, rolled days gzipped** — these records are enormously
+  repetitive (the same station names, the same verbs, the same folder paths,
+  144 times a day), so gzip returns roughly 10–15× on the archive and turns
+  the ceiling from months of history into years, for free. The active file
+  also rolls at an eighth of the ceiling, which is what makes the ceiling hold
+  *during* a pathological pass rather than the morning after it.
+- **one JSONL record per unit pass** — a unit is what
+  [#304](https://github.com/wmo-raf/adl/issues/304) made it: a station and
+  whatever it shares a folder with, finishing on its own. One self-contained
+  record answers one question without joining anything, and eviction expires
+  whole stories rather than halves of them. It carries when the pass started,
+  what triggered it (scheduled / reconciliation sweep / collect now), how long
+  it took, the folders walked with the entry count of each — for a station
+  filed by date, the dated sub-folders actually expanded, which nothing else
+  records — and per station `scanned / held / offered / wanted / uploaded /
+  failed / backlog` and the error sentence if there is one.
+- **the file list is bounded by usefulness, not by a count** — a flat
+  "newest N" was rejected. On a bad cycle the newest N are all the same
+  failure and the one interesting anomaly further down is what gets thrown
+  away. So every distinct failure reason is kept once with a count and one
+  example filename; held, skipped and unmatched files are kept to a small cap;
+  uploads are sampled with the remainder as a tally. A catastrophic pass is no
+  longer than a quiet one and still says the right thing.
+- **a pass cut short is written down too**, with what it got to and why it
+  stopped — the record whose absence is hardest to explain is the one for the
+  pass that went wrong. **Stations the scan turned away get a record too** —
+  no folder, no pattern, half-configured `DIRECT_FETCH` — carrying the reason
+  `Diagnose` already computes. Half-configured is a common real fault and was
+  invisible everywhere.
+- **a general file sink for `ILogger`**, through the same writer and the same
+  queue. No new dependency: the rolling, gzipping and evicting machinery had
+  to exist for the cycle log anyway, and Serilog and `NReco.Logging.File`
+  would each have brought a second, independent retention model that knows
+  nothing about the cycle log's ceiling. This is the **first durable log the
+  per-user tray tier has ever had**.
+- **no log call touches disk on a cycle thread** — both logs are written
+  through a background queue that refuses rather than blocks when it is full,
+  and says how much it lost when it catches up.
+- **a repoint does not clear the logs** — `adl-agent set-url` clears the
+  pairing, the configuration cache and the sweep log, on the grounds that they
+  came from the old instance. The logs folder is untouched: a repoint is very
+  often performed *because* something was wrong, and destroying the evidence
+  at the moment somebody is investigating is the worst available timing.
+  Records carry the instance they were written against, so stale station link
+  ids cannot be misread as current.
+
+Read at the machine in the two places somebody already is when they have a
+question, and deliberately **not** in a third tab — `TrayTabs` records that the
+Pairing tab was deleted precisely because it gave a technician a whole screen
+with nothing on it to do, in the leftmost and most prominent position.
+
+- **"Recent passes" in Check status…** — that window is already read-only,
+  already safe to open on a station mid-cycle, and its live probe exists to
+  answer *"scanned 0, no error"*. Cycle history is the other half of that same
+  sentence: the probe speaks about this instant, and a station that has been
+  quietly doing nothing since Tuesday is a question about the past. It lists
+  the unit records touching that station, newest first, each opening to its
+  file detail.
+- **"Save diagnostics…" on the Status tab** — a plain-text bundle: what this
+  machine is, its stations, its recent passes rendered as text, and the tail
+  of the general log. This is the artefact that actually reaches HQ, because
+  somebody emails it. The dialog is the tray's and the file is written by the
+  service, which is the only arrangement that works on an installed machine:
+  the logs are where the token is, in a folder the tray's account cannot read.
+
 ## Structure
 
 ```
@@ -566,6 +652,26 @@ Nothing re-reads the setting in place: `agent.ini` is read once at start-up
 and the environment is taken at logon, so whatever sets the address restarts
 the agent, and it comes up working. On an installed service tier that whatever
 is [`adl-agent set-url`](#changing-where-a-machine-reports).
+
+Four other keys live in the same file, and every one of them is about how much
+this machine writes down about itself. They are all optional and all shown here
+at their defaults:
+
+```ini
+[Agent]
+AdlBaseUrl=https://adl.example.org
+AutoUpdate=true
+LogLevel=Information
+CycleLogMegabytes=64
+GeneralLogMegabytes=32
+```
+
+`LogLevel` is what a support session asks for over a telephone — `Debug` for a
+day, and no auto-revert, because the ceilings make a machine left on it
+harmless: it churns within its cap rather than filling a disk. What being left
+on `Debug` costs is retained window, which collapses from months to days.
+Letting ADL set it remotely is deliberately not here — a machine that cannot
+reach ADL is most of the machines anybody wants a log from.
 
 Run `adl-agent.exe` with no arguments to run it as a console process. On a
 real machine it is installed rather than run, and the installer asks for the
@@ -797,6 +903,16 @@ so what is counted is exactly the configuration the cycle will use — and
 **Check again** re-runs it, for the common case of having this window open on
 one screen while a share is being granted on another.
 
+At the bottom of it, **Recent passes**: the unit records touching this station,
+newest first, each closed to a line and opening to its file detail. That is the
+other half of the sentence the count answers. The count speaks about this
+instant; a station that has been quietly doing nothing since Tuesday is a
+question about the past, and until the
+[cycle log](#what-is-built-so-far) existed nothing on the machine could answer
+it — the counts lived in memory and the pass after overwrote them. A station
+with no record yet is told so in a sentence rather than shown a blank, because
+a blank is exactly the absence all of this exists to stop being the answer.
+
 Nothing on it writes, which is what makes it safe to open on a station a cycle
 is in the middle of. Like the settings window it is modal and stops the list
 behind it rebuilding, for the same reason: it holds a copy of a row.
@@ -912,6 +1028,30 @@ that, both come back from the file count as *"Nothing was found in this
 folder. Check that the path is right and that this machine can read it."* —
 which is true, and which is also what a mistyped folder name says.
 
+#### Sending everything to HQ
+
+At the bottom of the Status tab, quietly, **Save diagnostics…**. It writes one
+plain-text file: what this machine is, its stations and their bindings, its
+most recent collection passes rendered as text, and the tail of the general
+log. This is the artefact that actually reaches HQ, because it is the one
+somebody can attach to an email — a technician in a country nobody can reach is
+not going to read JSON Lines down a telephone, and they cannot get an operator
+at HQ into a folder whose permissions are SYSTEM and Administrators.
+
+The dialog is the tray's and the file is written by the service, which is the
+only arrangement that works on an installed machine: the tray runs as whoever
+is logged in and the logs are beside the device token. The passes in it are
+rendered by the same code the Check status… window uses, so the pass a
+technician read on screen before pressing the button and the pass HQ reads in
+the attachment are the same sentences.
+
+Quiet, and at the bottom, because a machine that is working has no reason to
+touch it — and deliberately not a tab of its own. `TrayTabs` records that the
+Pairing tab was deleted precisely because it gave a technician a whole screen
+with nothing on it to do, in the leftmost and most prominent position; a
+machine-wide activity tab would be that again on the many machines that are
+simply working.
+
 #### Finding a broken binding
 
 A WPF binding whose path is wrong neither throws nor draws: the label is
@@ -1025,8 +1165,10 @@ both heads mean the same thing by each of them:
 | `collect` | Run a cycle for one station now |
 | `collect_status` | Where that run has got to |
 | `collect_cancel` | Stop it |
+| `passes` | The unit passes this machine has recorded, newest first |
+| `diagnostics` | Write a plain-text diagnostics bundle where the client asks |
 
-The last four all **start** something and answer at once rather than waiting
+The middle four all **start** something and answer at once rather than waiting
 for it, and that is the surface's shape rather than a preference. It serves
 one client at a time and times out in three seconds, so a command that waited
 for an HTTP call — let alone an upload of a station with months of backlog —
@@ -1041,6 +1183,15 @@ progress arrives on `collect_status`, asked once a second in short round trips
 that leave the surface free between them. That is also what makes
 `collect_cancel` possible at all: a held connection has nowhere for a second
 command to arrive.
+
+`passes` and `diagnostics` are the two exceptions, and for the opposite
+reason: both are bounded reads of local files, and the window that asked has
+nothing to draw until it knows the answer. `passes` trims whole records from
+the oldest end until the answer fits one line of this protocol and says that
+it did — half a record cannot be told from a pass in which nothing happened.
+`diagnostics` takes the path and writes the file itself, because on the
+service tier the client cannot: the logs are beside the device token, in a
+folder whose permissions the MSI has replaced with SYSTEM and Administrators.
 
 The pipe carries an explicit ACL: the service's own account and the machine's
 administrators in full, the technician's interactive logon session enough to

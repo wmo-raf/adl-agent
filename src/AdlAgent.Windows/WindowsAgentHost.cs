@@ -1,9 +1,12 @@
+using AdlAgent.Core;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Platform;
 using AdlAgent.Windows.Platform;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace AdlAgent.Windows;
 
@@ -67,6 +70,8 @@ public static class WindowsAgentHost
 
         builder.Services.AddAdlAgentCore(builder.Configuration);
 
+        AddFileLog(builder);
+
         builder.Services.AddSingleton<IHostLifecycle, WindowsHostLifecycle>();
         builder.Services.AddSingleton<IFileMetadataSource, WindowsFileMetadataSource>();
         builder.Services.AddSingleton<IFileReadinessProbe, WindowsFileReadinessProbe>();
@@ -74,5 +79,65 @@ public static class WindowsAgentHost
         builder.Services.AddSingleton<IUpdateInstaller, WindowsUpdateInstaller>();
 
         return builder;
+    }
+
+    /// <summary>
+    /// Send <see cref="ILogger"/> output to a file under the state directory.
+    /// </summary>
+    /// <remarks>
+    /// Before this, the head registered no logging provider at all. On the
+    /// service tier that meant <c>ILogger</c> output went to the Windows Event
+    /// Log -- findable, unstructured, and interleaved with everything else on
+    /// the machine -- and on the per-user tray tier it went to a console
+    /// window that closes, which is to say nowhere. That tier had no durable
+    /// record of a crash, a TLS failure or an unhandled exception, and this
+    /// is its first.
+    /// <para>
+    /// Registered on both tiers by one call, because they are one program
+    /// started two ways, and the tier with no administrator is the one that
+    /// needed this most.
+    /// </para>
+    /// <para>
+    /// The minimum level is set on the whole logging builder rather than only
+    /// on this provider: a machine an administrator has put on <c>Debug</c>
+    /// for a day has said something about what the machine should record, not
+    /// about which sink should record it.
+    /// </para>
+    /// </remarks>
+    private static void AddFileLog(HostApplicationBuilder builder)
+    {
+        var options = new AgentOptions();
+
+        builder.Configuration.GetSection(AgentOptions.SectionName).Bind(options);
+
+        var level = Enum.TryParse<LogLevel>(options.LogLevel, ignoreCase: true, out var parsed)
+            ? parsed
+            // A level nobody can parse is a typo in a file somebody edited
+            // over a telephone, and the answer to a typo is the default
+            // rather than silence.
+            : LogLevel.Information;
+
+        builder.Logging.SetMinimumLevel(level);
+
+        // The folder is the head's -- it is the one thing about a log that is
+        // platform-shaped -- and everything else about it is the core's.
+        var sink = new AgentFileLoggerProvider(
+            AgentLogs.In(
+                string.IsNullOrWhiteSpace(options.StateDirectory)
+                    ? Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                        Platform.WindowsHostLifecycle.StateFolderName)
+                    : options.StateDirectory),
+            options.GeneralLogMegabytes,
+            level,
+            TimeProvider.System);
+
+        builder.Logging.AddProvider(sink);
+
+        // The same instance, under the one face the container needs it for:
+        // a diagnostics bundle is read off these files and has to know they
+        // are up to date first. Registered rather than constructed twice --
+        // two providers over one file would be two writers over one file.
+        builder.Services.AddSingleton<ILogFlush>(sink);
     }
 }

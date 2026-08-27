@@ -201,6 +201,50 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Write everything about this machine to a file somebody can email.
+    /// </summary>
+    /// <remarks>
+    /// The dialog is here and the file is written by the service, which is the
+    /// only arrangement that works on a properly installed machine: the logs
+    /// live beside the device token, in a folder whose permissions the MSI has
+    /// replaced with SYSTEM and Administrators, and this program runs as
+    /// whoever is logged in. So the technician chooses where it goes and the
+    /// service fills it.
+    /// <para>
+    /// A default name carrying the date, because the second thing that happens
+    /// to this file is that it is attached to an email beside somebody else's.
+    /// </para>
+    /// </remarks>
+    private async void SaveDiagnostics(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            var save = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save ADL Agent diagnostics",
+                FileName = $"adl-agent-diagnostics-{DateTime.Now:yyyyMMdd-HHmm}.txt",
+                DefaultExt = ".txt",
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                AddExtension = true,
+            };
+
+            if (save.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            await _shell.SaveDiagnosticsAsync(save.FileName).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            // An async void handler: nothing above this can catch anything,
+            // and an exception escaping would take down the one program on the
+            // machine whose job is to explain what is wrong.
+            _shell.Failed(exception);
+        }
+    }
+
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();
 
     private void StationActivated(object sender, MouseButtonEventArgs args) => OpenSettings();

@@ -62,6 +62,60 @@ public sealed class AgentOptions
     public bool AutoUpdate { get; set; } = true;
 
     /// <summary>
+    /// The most the cycle log may ever occupy, in megabytes.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling on the folder and not a window on the calendar, because the
+    /// promise that has to be makeable to a ministry's system administrator is
+    /// one sentence rather than an estimate. It is settable here -- which on
+    /// Windows means the same <c>agent.ini</c> the ADL address lives in --
+    /// for the machine whose disk is smaller than the fleet's, and for the
+    /// support session that wants a deeper record for a week.
+    /// <para>
+    /// Independent of <see cref="GeneralLogMegabytes"/> on purpose: two
+    /// ceilings mean a chatty subsystem can never evict cycle history.
+    /// </para>
+    /// </remarks>
+    public int CycleLogMegabytes { get; set; } = Diagnostics.AgentLogs.CycleLogMegabytesDefault;
+
+    /// <summary>The most the general log may ever occupy, in megabytes.</summary>
+    public int GeneralLogMegabytes { get; set; } = Diagnostics.AgentLogs.GeneralLogMegabytesDefault;
+
+    /// <summary>
+    /// How much this machine writes to its general log.
+    /// </summary>
+    /// <remarks>
+    /// <c>Information</c>, which is what a machine nobody is looking at should
+    /// say. A support session asks for <c>Debug</c> for a day by editing one
+    /// line of the settings file.
+    /// <para>
+    /// There is no auto-revert, and there does not need to be: the ceiling
+    /// makes a machine left on <c>Debug</c> harmless -- it churns within its
+    /// cap rather than filling a disk. What being left on it costs is
+    /// retained window, which collapses from months to days.
+    /// </para>
+    /// <para>
+    /// Letting ADL set this remotely is deliberately not here. A verbosity a
+    /// machine can be told to change from the far end is part of the wire
+    /// work, and this has to be usable on a machine that cannot reach ADL at
+    /// all -- which is most of the machines anybody wants a log from.
+    /// </para>
+    /// </remarks>
+    public string LogLevel { get; set; } = "Information";
+
+    /// <summary>
+    /// Where state actually goes: what this says, or what the head decided.
+    /// </summary>
+    /// <remarks>
+    /// Named once because three things now ask it -- the state store, the
+    /// cycle log and the general log -- and a machine that had moved its
+    /// state directory but whose logs stayed under the head's default would
+    /// be a machine whose evidence is not where its operator was told to look.
+    /// </remarks>
+    public string ResolveStateDirectory(Platform.IHostLifecycle host) =>
+        string.IsNullOrWhiteSpace(StateDirectory) ? host.StateDirectory : StateDirectory!;
+
+    /// <summary>
     /// The versioned agent surface, under ADL's plugin mount. Fixed: the
     /// mount point is part of the contract, and a machine pointed at a
     /// different one is misconfigured rather than differently configured.
