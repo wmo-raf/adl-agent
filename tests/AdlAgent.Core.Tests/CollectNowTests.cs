@@ -265,19 +265,25 @@ public class CollectNowTests
         await agent.PairAsync();
         await agent.Cycle.RunAsync();
 
-        var cycle = agent.Cycles.LastCompletedCycle;
+        var completedAt = agent.Cycles.LastCompletedCycle!.CompletedAt;
 
-        Assert.Equal(2, cycle!.Links.Count);
+        Assert.Equal(2, agent.Cycles.LastCompletedCycle!.Links.Count);
 
         agent.Time.Advance(TimeSpan.FromMinutes(1));
 
         await agent.Cycle.CollectStationAsync(11, ICollectWatcher.Nobody, CancellationToken.None);
 
-        // Untouched, and that is the whole decision. Recorded as a cycle, this
-        // run would reach HQ as a cycle that had just finished having scanned
-        // one station of two -- and ADL's own cycle-stuck and coverage checks
-        // would read that as the machine having stopped collecting the rest.
-        Assert.Same(cycle, agent.Cycles.LastCompletedCycle);
+        // Untouched, and that is the whole decision. Recorded as a pass, this
+        // run would reach HQ as collection that had just finished for a
+        // station, moving a mark ADL's cycle-stuck check reads -- and a
+        // technician pressing the button on one healthy station would be
+        // vouching for a machine that had in fact stopped.
+        //
+        // Asserted on the mark rather than on the object: the store keeps a
+        // rolling picture per station and renders a report from it on every
+        // read, so two reads are equal and never the same instance.
+        Assert.Equal(completedAt, agent.Cycles.LastCompletedCycle!.CompletedAt);
+        Assert.Equal(2, agent.Cycles.LastCompletedCycle!.Links.Count);
     }
 
     [Fact]

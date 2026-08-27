@@ -129,27 +129,106 @@ public sealed class UploadCycle
         // which dies in the middle of a sweep leaves the sweep still owed.
         var sweep = _sweeps.Plan(configuration, now);
 
-        var scan = _scanner.Scan(configuration, sweep, now);
+        // The tick's shape, decided before a single folder is read. Each unit
+        // is a station and whatever it shares a folder with -- one station and
+        // one folder, for almost every station in a fleet.
+        var units = _scanner.Plan(configuration, sweep, now);
+
+        var cutShort = false;
+
+        foreach (var unit in units)
+        {
+            if (!await CollectAsync(token, configuration, unit, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                // ADL has stopped answering, which is not this unit's
+                // problem: it is every unit's. The rest of the tick is
+                // abandoned rather than spent discovering the same thing
+                // once per folder on a link that is already down.
+                cutShort = true;
+
+                break;
+            }
+        }
+
+        // Once for the tick, not once per unit. The cache forgets whatever it
+        // was not asked about since the last call, so a per-unit sweep of it
+        // would throw away every other unit's working set.
+        _hashes.Forget();
+
+        if (cutShort)
+        {
+            return;
+        }
+
+        // This tick went round everything the machine has. The units have
+        // already stamped their own completions, so on an ordinary tick this
+        // agrees with the last of them; what it is here for is the machine
+        // with no units at all -- every station switched off in ADL, or none
+        // linked yet -- which completes a pass over an empty fleet every
+        // check interval and is perfectly healthy.
+        _cycles.Finished(_time.GetUtcNow());
+
+        // Left to the end, and only on a tick that finished, because both
+        // answer "which stations has this machine still got?" -- a question
+        // about the whole fleet rather than about any one unit. A
+        // configuration served from cache to a machine that could not reach
+        // ADL is not the fleet; it is the last fleet anybody saw.
+        _sweeps.Prune(sweep);
+
+        if (sweep.Prunes)
+        {
+            // Without it the reported picture would be every station this
+            // device has ever been given, and stations moved to another
+            // machine months ago would go on reporting their last counts and
+            // their backlog to ADL for the life of the service.
+            _cycles.Prune(sweep.Known);
+        }
+    }
+
+    /// <summary>
+    /// Scan one unit, offer what it found, and record what it came to.
+    /// </summary>
+    /// <remarks>
+    /// The unit is the thing that finishes. Its counts, its sweep and its
+    /// completion are recorded here rather than at the end of a pass over the
+    /// whole machine, which is what stops a station's report from waiting on
+    /// a folder it has nothing to do with -- and stops ADL reading a machine
+    /// that is uploading hard as a machine that has stopped
+    /// (wmo-raf/adl#303, wmo-raf/adl#304).
+    /// </remarks>
+    /// <returns>False when ADL stopped answering and the tick cannot go on.</returns>
+    private async Task<bool> CollectAsync(
+        string token,
+        AgentConfiguration configuration,
+        FolderScanner.ScanUnit unit,
+        CancellationToken cancellationToken)
+    {
+        var scan = _scanner.Scan(unit, _time.GetUtcNow());
 
         var delivered = await DeliverAsync(token, configuration, scan, cancellationToken)
             .ConfigureAwait(false);
 
-        if (!delivered)
+        var at = _time.GetUtcNow();
+
+        if (delivered)
         {
-            // Cut short by an ADL that stopped answering. Not recorded as a
-            // completed cycle -- and there is nowhere to send the report
-            // anyway, since the heartbeat is going down the same link.
-            return;
+            // The station offered everything it could, so its day's
+            // reconciliation is spent. A unit cut short offered some of its
+            // folder and not the rest, and recording that as done would leave
+            // the unoffered part waiting another day for no reason.
+            _sweeps.Record(scan.Reconciled, at);
         }
 
-        // Only now: the files are read as the pages are built, so until the
-        // last page has gone out the cache does not yet know what this
-        // cycle's working set was.
-        _hashes.Forget();
+        // Recorded either way, and completion only on the first. A unit that
+        // died mid-page still knows what it scanned and why it stopped, and
+        // that sentence is the only thing standing between an operator and a
+        // station showing "no cycle yet" for ever. What it must not do is
+        // move the completion mark: a machine whose every pass is cut short
+        // is exactly the machine ADL is meant to call stuck.
+        Record(scan, at, completed: delivered);
 
-        _sweeps.Record(sweep, scan.Reconciled, now);
-
-        Record(scan);
+        return delivered;
     }
 
     /// <summary>
@@ -236,7 +315,15 @@ public sealed class UploadCycle
 
         watcher.Step("Scanning the folder…");
 
-        var scan = _scanner.Scan(narrowed, sweep, now);
+        // Through the same seam as a scheduled tick, and for the same reason
+        // narrowing the configuration was chosen over filtering inside the
+        // scan: a station collected this way is collected exactly as it would
+        // have been an hour later. A configuration holding one station plans
+        // to one unit -- there is nothing left for it to share a folder with.
+        var scan = _scanner.Plan(narrowed, sweep, now) is [var only]
+            ? _scanner.Scan(only, now)
+            : throw new InvalidOperationException(
+                "A configuration narrowed to one station planned to more than one unit.");
 
         // Before the delivery rather than after it, because the counts move
         // during the delivery and this is what the window watching reads them
@@ -259,7 +346,11 @@ public sealed class UploadCycle
             // The sweep is recorded on this run alone, so the station's next
             // scheduled sweep is a day from now rather than a day from
             // whenever the loop last got to it. One just happened.
-            _sweeps.Record(sweep, scan.Reconciled, now);
+            //
+            // Recorded and never pruned. This plan knows one station, and
+            // every other station on the machine is absent from it because
+            // nobody asked rather than because it has gone.
+            _sweeps.Record(scan.Reconciled, now);
         }
 
         var tally = scan.For(stationLinkId);
@@ -654,22 +745,25 @@ public sealed class UploadCycle
     private static int PageSize(AgentLimits limits) => Math.Clamp(limits.ManifestEntries, 1, 5_000);
 
     /// <summary>Leave the cycle where the heartbeat will find it.</summary>
-    private void Record(ScanResult scan)
+    private void Record(ScanResult scan, DateTimeOffset at, bool completed)
     {
         var links = scan.Links.Values
             .OrderBy(tally => tally.StationLinkId)
             .ToList();
 
-        _cycles.Record(
-            new CycleReport
-            {
-                CompletedAt = _time.GetUtcNow(),
-                Links = links.Select(tally => tally.ToReport()).ToList(),
-            },
-            backlogCount: links.Sum(tally => tally.Backlog));
+        _cycles.Record(new CycleUnitReport
+        {
+            At = at,
+            Completed = completed,
+            Links = links.Select(tally => tally.ToReport()).ToList(),
+            Backlogs = links.ToDictionary(
+                tally => tally.StationLinkId, tally => tally.Backlog),
+        });
 
         _logger.LogDebug(
-            "Cycle finished: {Scanned} file(s) scanned, {Offered} offered, {Uploaded} uploaded.",
+            completed
+                ? "Unit finished: {Scanned} file(s) scanned, {Offered} offered, {Uploaded} uploaded."
+                : "Unit cut short: {Scanned} file(s) scanned, {Offered} offered, {Uploaded} uploaded.",
             links.Sum(tally => tally.Scanned),
             links.Sum(tally => tally.Offered),
             links.Sum(tally => tally.Uploaded));

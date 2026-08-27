@@ -124,11 +124,17 @@ public sealed class AgentStationsReader
                     Uploaded = last?.Uploaded,
                     Failed = last?.Failed,
                     Error = last?.Error,
-                    // Null once a scheduled cycle has overtaken it, which is
+                    // Null once a scheduled pass has overtaken it, which is
                     // the whole of the join: the row shows one age of one
                     // fact, and which one it is decided here rather than in
                     // each UI.
-                    Requested = _requested.For(link.Id, cycle?.CompletedAt),
+                    //
+                    // Against this station's own last pass, not the machine's.
+                    // Collection runs a unit at a time, so the machine's most
+                    // recent finish is some other folder's and says nothing
+                    // about whether this station has been round again since
+                    // the button was pressed.
+                    Requested = _requested.For(link.Id, _cycles.LastPassAt(link.Id)),
                 });
             }
         }

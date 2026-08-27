@@ -1,4 +1,5 @@
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Heartbeat;
 using AdlAgent.TestSupport;
 
 namespace AdlAgent.Core.Tests;
@@ -17,24 +18,24 @@ public class HeartbeatTests
         agent.HostLifecycle.PlatformDescription = "Microsoft Windows 10.0.20348";
         agent.HostLifecycle.StartedAt = agent.Time.GetUtcNow() - TimeSpan.FromHours(3);
 
-        agent.Cycles.Record(
-            new CycleReport
-            {
-                CompletedAt = agent.Time.GetUtcNow() - TimeSpan.FromMinutes(4),
-                Links =
-                [
-                    new CycleLinkReport
-                    {
-                        StationLinkId = 11,
-                        Scanned = 40,
-                        Offered = 6,
-                        Uploaded = 5,
-                        Failed = 1,
-                        Error = "GARISSA_20260821.dat was still being written.",
-                    },
-                ],
-            },
-            backlogCount: 2);
+        agent.Cycles.Record(new CycleUnitReport
+        {
+            At = agent.Time.GetUtcNow() - TimeSpan.FromMinutes(4),
+            Completed = true,
+            Links =
+            [
+                new CycleLinkReport
+                {
+                    StationLinkId = 11,
+                    Scanned = 40,
+                    Offered = 6,
+                    Uploaded = 5,
+                    Failed = 1,
+                    Error = "GARISSA_20260821.dat was still being written.",
+                },
+            ],
+            Backlogs = new Dictionary<long, int> { [11] = 2 },
+        });
 
         await agent.PairAsync();
         await agent.HeartbeatLoop.BeatAsync();

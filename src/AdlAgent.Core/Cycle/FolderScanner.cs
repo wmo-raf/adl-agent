@@ -71,23 +71,106 @@ public sealed class FolderScanner
     }
 
     /// <summary>
-    /// Every file worth offering, newest first, and a tally per station.
+    /// One collection unit: stations, and the folders they share, grouped so
+    /// that nothing is shared across units.
     /// </summary>
+    /// <remarks>
+    /// The unit a cycle is made of. It is <em>not</em> the station and not
+    /// the folder, because neither survives the two ways they fail to line
+    /// up: several stations write into one dump directory, which has to be
+    /// walked once between them, and one station filed by date is spread
+    /// over as many dated directories as its window holds.
+    /// <para>
+    /// So a unit is whatever a station and a folder drag in with them -- and
+    /// in the overwhelming case, where a station has one folder to itself,
+    /// that is one station and one folder. Grouping this way is what lets a
+    /// unit be scanned, delivered and <em>reported</em> on its own: a
+    /// station's sentence cannot be written until every folder of its own has
+    /// been walked (see <see cref="Diagnose"/>), and no station here has a
+    /// folder in anybody else's unit.
+    /// </para>
+    /// <para>
+    /// It is also what keeps the tallies free of locks. A unit owns its
+    /// stations' tallies outright, so two units running at once are never
+    /// writing to the same counters.
+    /// </para>
+    /// </remarks>
+    public sealed class ScanUnit
+    {
+        // The unit is public because a caller holds one between planning
+        // and scanning; what is inside it is the assembly's business. A
+        // half-planned walk is of no use to anybody outside this scanner.
+        internal ScanUnit(
+            List<Sought> walking, List<Fetched> fetching,
+            Dictionary<long, LinkTally> tallies)
+        {
+            Walking = walking;
+            Fetching = fetching;
+            Tallies = tallies;
+        }
+
+        internal List<Sought> Walking { get; }
+
+        internal List<Fetched> Fetching { get; }
+
+        internal Dictionary<long, LinkTally> Tallies { get; }
+
+        /// <summary>The stations this unit answers for.</summary>
+        /// <remarks>
+        /// Every enabled station on the machine is in exactly one unit,
+        /// including the ones this cycle will not scan -- no folder, no
+        /// pattern, a listing strategy this build does not know. Such a
+        /// station has a tally carrying its reason and nothing to walk, and
+        /// it is in a unit of its own so that the reason still reaches an
+        /// operator. A station that quietly does nothing is the failure this
+        /// product exists to stop shipping to countries.
+        /// </remarks>
+        public IReadOnlyCollection<long> StationLinkIds => Tallies.Keys;
+    }
+
+    /// <summary>
+    /// What this cycle will collect, as the units it will collect it in.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is read here. This decides the shape of the cycle -- who
+    /// shares a folder with whom -- and the reading happens one unit at a
+    /// time in <see cref="Scan"/>, which is what keeps a folder with a
+    /// hundred thousand files in it from being held in memory beside every
+    /// other folder on the machine.
+    /// </remarks>
     /// <param name="sweep">
     /// The stations offering their whole folder this cycle rather than only
     /// what the candidate window admits. See <see cref="ReconciliationSweep"/>.
     /// </param>
-    public ScanResult Scan(AgentConfiguration configuration, SweepPlan sweep, DateTimeOffset now)
+    public IReadOnlyList<ScanUnit> Plan(
+        AgentConfiguration configuration, SweepPlan sweep, DateTimeOffset now)
     {
         var tallies = new Dictionary<long, LinkTally>();
-        var folders = new Dictionary<string, List<Walked>>(StringComparer.Ordinal);
 
         // What each station is: one or more folders to walk, or a list of
-        // names to ask after. Both are worked out in full before anything is
-        // read, because the grouping below is the whole point -- a folder
-        // cannot be walked once for everything that shares it until
-        // everything that shares it is known.
-        var plan = Plan(configuration, sweep, now, tallies);
+        // names to ask after. Worked out in full before anything is grouped,
+        // because a folder cannot be walked once for everything that shares
+        // it until everything that shares it is known.
+        var order = new List<long>();
+        var plan = Plan(configuration, sweep, now, tallies, order);
+
+        return Group(plan, tallies, order);
+    }
+
+    /// <summary>
+    /// Every file this unit has worth offering, newest first, and its tally
+    /// per station.
+    /// </summary>
+    /// <remarks>
+    /// Newest first <em>within the unit</em>, which is where the ordering was
+    /// always doing its work. Sorting the whole machine at once bought
+    /// nothing a unit-at-a-time sort does not -- every station still puts
+    /// today's observations in front of its own history (story 18) -- and
+    /// cost holding every file on the machine in one list to do it.
+    /// </remarks>
+    public ScanResult Scan(ScanUnit unit, DateTimeOffset now)
+    {
+        var folders = new Dictionary<string, List<Walked>>(StringComparer.Ordinal);
 
         // What was reconciled, as opposed to what the plan asked for. A
         // station the scan turns away -- no folder, no pattern, Direct Fetch
@@ -95,7 +178,7 @@ public sealed class FolderScanner
         // everything, and must not have its day's reconciliation spent on it.
         var reconciled = new HashSet<long>();
 
-        foreach (var target in plan.Walking.SelectMany(sought => sought.Targets).Concat<Target>(plan.Fetching))
+        foreach (var target in unit.Walking.SelectMany(sought => sought.Targets).Concat<Target>(unit.Fetching))
         {
             if (target.Reconciling)
             {
@@ -129,9 +212,9 @@ public sealed class FolderScanner
             Walk(targets[0].Folder, targets, now, matched);
         }
 
-        Diagnose(plan.Walking);
+        Diagnose(unit.Walking);
 
-        foreach (var target in plan.Fetching)
+        foreach (var target in unit.Fetching)
         {
             Fetch(target, now, matched);
         }
@@ -148,8 +231,108 @@ public sealed class FolderScanner
                 : string.Compare(left.Facts.Name, right.Facts.Name, StringComparison.OrdinalIgnoreCase);
         });
 
-        return new ScanResult(Hashing(matched), tallies, reconciled);
+        return new ScanResult(Hashing(matched), unit.Tallies, reconciled);
     }
+
+    /// <summary>
+    /// The plan, cut into units: stations joined to every station they share
+    /// a folder with.
+    /// </summary>
+    /// <remarks>
+    /// A breadth-first walk of the small bipartite graph of stations and
+    /// folder keys. Two stations are in one unit when a folder joins them,
+    /// and transitively -- a dated tree shared by two stations, each of which
+    /// also has a folder of its own, is one unit of two stations and all
+    /// their folders.
+    /// <para>
+    /// A station the scan turned away has no folder to join it to anything,
+    /// so it lands in a unit by itself, carrying the tally that says why.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<ScanUnit> Group(
+        ScanPlan plan, Dictionary<long, LinkTally> tallies, IReadOnlyList<long> order)
+    {
+        // Every station's folders, and every folder's stations. Built once,
+        // then walked; the graph is the size of the fleet, not of the disks.
+        var foldersOf = new Dictionary<long, List<string>>();
+        var stationsOn = new Dictionary<string, List<long>>(StringComparer.Ordinal);
+
+        foreach (var sought in plan.Walking)
+        {
+            foreach (var walked in sought.Targets)
+            {
+                var key = GroupingKey(walked.Folder);
+
+                if (!foldersOf.TryGetValue(walked.Link.Id, out var keys))
+                {
+                    keys = [];
+                    foldersOf[walked.Link.Id] = keys;
+                }
+
+                keys.Add(key);
+
+                if (!stationsOn.TryGetValue(key, out var links))
+                {
+                    links = [];
+                    stationsOn[key] = links;
+                }
+
+                links.Add(walked.Link.Id);
+            }
+        }
+
+        // Indexed rather than searched per station: a device may serve forty
+        // stations across as many folders, and this is walked once each.
+        var walkingOf = plan.Walking.ToDictionary(sought => sought.Tally.StationLinkId);
+        var fetchingOf = plan.Fetching.ToDictionary(fetched => fetched.Link.Id);
+
+        var units = new List<ScanUnit>();
+        var placed = new HashSet<long>();
+
+        // In the order the plan stated them -- which is ADL's order, through
+        // the configuration -- so that a cycle visits stations in the same
+        // order twice and a log reads the same way on Tuesday as on Monday.
+        // From a list rather than from the tally dictionary's keys: a
+        // Dictionary's enumeration order is not a promise it makes, and this
+        // is a promise being made.
+        foreach (var stationLinkId in order)
+        {
+            if (!placed.Add(stationLinkId))
+            {
+                continue;
+            }
+
+            var members = new List<long> { stationLinkId };
+            var queue = new Queue<long>();
+            queue.Enqueue(stationLinkId);
+
+            while (queue.Count > 0)
+            {
+                foreach (var key in Folders(foldersOf, queue.Dequeue()))
+                {
+                    foreach (var neighbour in stationsOn[key])
+                    {
+                        if (placed.Add(neighbour))
+                        {
+                            members.Add(neighbour);
+                            queue.Enqueue(neighbour);
+                        }
+                    }
+                }
+            }
+
+            units.Add(new ScanUnit(
+                members.Where(walkingOf.ContainsKey).Select(id => walkingOf[id]).ToList(),
+                members.Where(fetchingOf.ContainsKey).Select(id => fetchingOf[id]).ToList(),
+                members.ToDictionary(id => id, id => tallies[id])));
+        }
+
+        return units;
+    }
+
+    private static IReadOnlyList<string> Folders(
+        Dictionary<long, List<string>> foldersOf, long stationLinkId) =>
+        foldersOf.TryGetValue(stationLinkId, out var keys) ? keys : [];
 
     /// <summary>
     /// The matched files, hashed as they are asked for and not before.
@@ -226,7 +409,8 @@ public sealed class FolderScanner
         AgentConfiguration configuration,
         SweepPlan sweep,
         DateTimeOffset now,
-        Dictionary<long, LinkTally> tallies)
+        Dictionary<long, LinkTally> tallies,
+        List<long> order)
     {
         var walking = new List<Sought>();
         var fetching = new List<Fetched>();
@@ -252,6 +436,7 @@ public sealed class FolderScanner
                 var tally = new LinkTally(link.Id);
 
                 tallies[link.Id] = tally;
+                order.Add(link.Id);
 
                 if (string.IsNullOrWhiteSpace(link.Config.LocalFolderPath))
                 {
@@ -676,7 +861,7 @@ public sealed class FolderScanner
     }
 
     /// <summary>A file that belongs to a station and is ready to go.</summary>
-    private sealed record Match(FileFacts Facts, Target Target);
+    internal sealed record Match(FileFacts Facts, Target Target);
 
     /// <summary>
     /// One station link's share of one cycle.
@@ -691,7 +876,7 @@ public sealed class FolderScanner
     /// station filed by date -- one dated directory below it. Carried rather
     /// than derived, because a station is only sometimes one folder.
     /// </param>
-    private abstract record Target(
+    internal abstract record Target(
         StationLinkConfig Link, LinkTally Tally, AgentLimits Limits, bool Reconciling, string Folder);
 
     /// <summary>A station whose files are found by walking its folder.</summary>
@@ -699,7 +884,7 @@ public sealed class FolderScanner
     /// The oldest a file's own timestamp may be, or <c>null</c> for no floor
     /// at all.
     /// </param>
-    private sealed record Walked(
+    internal sealed record Walked(
         StationLinkConfig Link,
         LinkTally Tally,
         AgentLimits Limits,
@@ -720,7 +905,7 @@ public sealed class FolderScanner
 
     /// <summary>A station whose filenames are built rather than found.</summary>
     /// <param name="Names">The filenames to ask the filesystem about, newest first.</param>
-    private sealed record Fetched(
+    internal sealed record Fetched(
         StationLinkConfig Link,
         LinkTally Tally,
         AgentLimits Limits,
@@ -739,7 +924,7 @@ public sealed class FolderScanner
     /// </remarks>
     /// <param name="Root">The folder ADL named, which is what a sentence names.</param>
     /// <param name="Dated">True when <paramref name="Root"/> is a tree rather than a folder.</param>
-    private sealed record Sought(
+    internal sealed record Sought(
         LinkTally Tally,
         FilePattern Pattern,
         string Root,
@@ -747,5 +932,5 @@ public sealed class FolderScanner
         IReadOnlyList<Walked> Targets);
 
     /// <summary>Everything this cycle intends to look at, before it looks.</summary>
-    private sealed record ScanPlan(IReadOnlyList<Sought> Walking, IReadOnlyList<Fetched> Fetching);
+    internal sealed record ScanPlan(IReadOnlyList<Sought> Walking, IReadOnlyList<Fetched> Fetching);
 }
