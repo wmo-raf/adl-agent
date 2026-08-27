@@ -132,6 +132,49 @@ public class PassesWindowTests
     }
 
     [Fact]
+    public async Task Pressing_an_open_row_again_shuts_it()
+    {
+        await using var shown = await Collecting();
+
+        var passes = shown.Window.Passes(11);
+
+        await passes.RefreshAsync();
+
+        var row = Assert.Single(passes.Rows);
+
+        passes.Toggle(row);
+
+        Assert.Same(row, passes.SelectedPass);
+
+        await WaitFor(() => passes.HasDetail || passes.HasDetailProblem);
+
+        // A grid leaves an already-selected row selected, so without this the
+        // only way back to a plain list would be to open some other row.
+        passes.Toggle(row);
+
+        Assert.Null(passes.SelectedPass);
+        Assert.False(passes.HasDetail);
+        Assert.False(passes.HasDetailProblem);
+    }
+
+    [Fact]
+    public async Task Pressing_a_different_row_moves_the_detail_rather_than_shutting_it()
+    {
+        await using var shown = await Collecting();
+
+        var passes = shown.Window.Passes();
+
+        await passes.RefreshAsync();
+
+        Assert.Equal(2, passes.Rows.Count);
+
+        passes.Toggle(passes.Rows[0]);
+        passes.Toggle(passes.Rows[1]);
+
+        Assert.Same(passes.Rows[1], passes.SelectedPass);
+    }
+
+    [Fact]
     public async Task A_pass_written_over_since_the_row_was_drawn_is_a_sentence_and_not_a_fault()
     {
         await using var shown = await Collecting();

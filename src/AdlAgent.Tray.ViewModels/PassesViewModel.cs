@@ -349,6 +349,25 @@ public sealed class PassesViewModel : Observable
     }
 
     /// <summary>
+    /// Open this pass, or close it if it is the one already open.
+    /// </summary>
+    /// <remarks>
+    /// A second click on an open row shuts it, which is what a row that
+    /// expands ought to do and what a grid does not do on its own: selecting
+    /// an already-selected row leaves it selected, so the detail would stay
+    /// open until some other row was clicked. On a table whose rows open to
+    /// several tables of their own, that means the only way to get back to a
+    /// plain list is to open something else.
+    /// <para>
+    /// Here rather than in the window so that the rule is one a test can
+    /// state. What the window contributes is which click counts -- a press
+    /// inside the open detail is not a press on the row.
+    /// </para>
+    /// </remarks>
+    public void Toggle(PassRowViewModel row) =>
+        SelectedPass = ReferenceEquals(_selected, row) ? null : row;
+
+    /// <summary>
     /// Point an already-open window at a station.
     /// </summary>
     /// <remarks>

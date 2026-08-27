@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using System.Windows.Input;
 
 namespace AdlAgent.Tray;
 
@@ -79,6 +80,44 @@ public partial class PassesWindow : Window
         {
             _passes.RefreshCommand.Execute(null);
         }
+    }
+
+    /// <summary>
+    /// A press on a row: open it, or shut it if it is already open.
+    /// </summary>
+    /// <remarks>
+    /// Handled here because a grid will not do it. Selecting a row that is
+    /// already selected leaves it selected, so a row opened by a click could
+    /// only be shut by opening a different one -- on a table whose rows open
+    /// to two tables of their own, that leaves no way back to a plain list.
+    /// <para>
+    /// The press is marked handled only when it shuts something. Left
+    /// unhandled the grid would immediately select the row again, which is the
+    /// state this just left; and marking every press handled would break
+    /// selecting a row at all.
+    /// </para>
+    /// <para>
+    /// The rule itself is <see cref="PassesViewModel.Toggle"/>, where a test
+    /// can state it. What is decided here is only which press counts as a
+    /// press on the row.
+    /// </para>
+    /// </remarks>
+    private void RowPressed(object sender, MouseButtonEventArgs args)
+    {
+        if (sender is not FrameworkElement { DataContext: PassRowViewModel row })
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_passes.SelectedPass, row))
+        {
+            // Not the open one. Let the grid select it in the ordinary way.
+            return;
+        }
+
+        _passes.Toggle(row);
+
+        args.Handled = true;
     }
 
     /// <summary>

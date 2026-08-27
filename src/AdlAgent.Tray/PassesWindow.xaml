@@ -125,6 +125,20 @@
                       CanUserReorderColumns="False"
                       CanUserAddRows="False"
                       CanUserSortColumns="False">
+
+                <!--
+                    A press on a cell rather than on the row, which is what
+                    keeps the open detail usable: the details presenter is a
+                    sibling of the cells, so Copy and the tables inside it
+                    never reach this handler and never shut the row they are
+                    in.
+                -->
+                <DataGrid.CellStyle>
+                    <Style TargetType="DataGridCell">
+                        <EventSetter Event="PreviewMouseLeftButtonDown" Handler="RowPressed" />
+                    </Style>
+                </DataGrid.CellStyle>
+
                 <!--
                     Sorting is off, explicitly. This table is a chronology and
                     the paging cursor depends on it; a column sort would
