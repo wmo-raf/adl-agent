@@ -33,6 +33,9 @@ public partial class MainWindow : Window
 
     private readonly ShellViewModel _shell;
 
+    /// <summary>The passes window, while one is open. Single-instance.</summary>
+    private PassesWindow? _passes;
+
     public MainWindow(ShellViewModel shell)
     {
         _shell = shell;
@@ -104,6 +107,12 @@ public partial class MainWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         e.Cancel = true;
+
+        // The passes window goes with it. It is modeless and owned by this
+        // one, so hiding the owner would otherwise leave a table of counts
+        // standing on the desktop with no way back to the program it belongs
+        // to -- and, being modeless, no reason for anybody to close it.
+        _passes?.Close();
 
         Hide();
 
@@ -199,6 +208,105 @@ public partial class MainWindow : Window
             // for as long as the tray runs.
             _shell.EndEditing();
         }
+    }
+
+    /// <summary>
+    /// Write everything about this machine to a file somebody can email.
+    /// </summary>
+    /// <remarks>
+    /// The dialog is here and the file is written by the service, which is the
+    /// only arrangement that works on a properly installed machine: the logs
+    /// live beside the device token, in a folder whose permissions the MSI has
+    /// replaced with SYSTEM and Administrators, and this program runs as
+    /// whoever is logged in. So the technician chooses where it goes and the
+    /// service fills it.
+    /// <para>
+    /// A default name carrying the date, because the second thing that happens
+    /// to this file is that it is attached to an email beside somebody else's.
+    /// </para>
+    /// </remarks>
+    private async void SaveDiagnostics(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            var save = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save ADL Agent diagnostics",
+                FileName = $"adl-agent-diagnostics-{DateTime.Now:yyyyMMdd-HHmm}.txt",
+                DefaultExt = ".txt",
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                AddExtension = true,
+            };
+
+            if (save.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            await _shell.SaveDiagnosticsAsync(save.FileName).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            // An async void handler: nothing above this can catch anything,
+            // and an exception escaping would take down the one program on the
+            // machine whose job is to explain what is wrong.
+            _shell.Failed(exception);
+        }
+    }
+
+    /// <summary>
+    /// The machine's record of what it has collected, filtered to the
+    /// selected station.
+    /// </summary>
+    private void StationPasses(object sender, RoutedEventArgs args)
+    {
+        if (_shell.SelectedStation is { } station)
+        {
+            ShowPasses(station.StationLinkId);
+        }
+    }
+
+    /// <summary>The same window, over everything this machine has done.</summary>
+    private void MachinePasses(object sender, RoutedEventArgs args) => ShowPasses(null);
+
+    /// <summary>
+    /// Open the passes window, or bring the open one forward.
+    /// </summary>
+    /// <remarks>
+    /// One at a time. Two doors lead here and a third sits inside the Check
+    /// status dialog, so without this a technician working through a problem
+    /// would end up with three copies of the same table, each as stale as
+    /// whenever it was opened.
+    /// <para>
+    /// Modeless, and the only window in this program that is: it holds no
+    /// station row, so the reason the others freeze the list behind them does
+    /// not apply, and being able to read it while pressing Collect now on the
+    /// list behind is most of the point.
+    /// </para>
+    /// <para>
+    /// Owned by this window rather than by whatever opened it, because one of
+    /// the doors is inside a modal dialog and an owner that closed would take
+    /// this with it.
+    /// </para>
+    /// </remarks>
+    internal void ShowPasses(long? stationLinkId)
+    {
+        if (_passes is { IsLoaded: true })
+        {
+            // Pointed at what was asked for rather than merely raised.
+            // Right-clicking a second station while the window is open would
+            // otherwise show the first one's filter, focused and unchanged,
+            // with nothing to say the one asked for had been dropped.
+            _passes.FilterTo(stationLinkId);
+            _passes.Activate();
+
+            return;
+        }
+
+        _passes = new PassesWindow(_shell.Passes(stationLinkId)) { Owner = this };
+        _passes.Closed += (_, _) => _passes = null;
+
+        _passes.Show();
     }
 
     private void EditStation(object sender, RoutedEventArgs args) => OpenSettings();

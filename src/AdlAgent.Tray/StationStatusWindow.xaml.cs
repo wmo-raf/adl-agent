@@ -45,6 +45,20 @@ public partial class StationStatusWindow : Window
         _status.CheckCommand.Execute(null);
     }
 
+    /// <summary>
+    /// Open the machine's record, filtered to this station.
+    /// </summary>
+    /// <remarks>
+    /// This window is modal and the passes window is not, which is a state
+    /// worth being deliberate about: the passes window is owned by the main
+    /// window rather than by this one, so closing this leaves it standing and
+    /// gives the main window back. Opened on top rather than handed off,
+    /// because the folder count above is what the technician came here for
+    /// and closing this to answer a second question would throw it away.
+    /// </remarks>
+    private void ViewMore(object sender, RoutedEventArgs args) =>
+        (Owner as MainWindow)?.ShowPasses(_status.StationLinkId);
+
     protected override void OnClosed(EventArgs e)
     {
         // Whatever happened, and however this window was closed, the list

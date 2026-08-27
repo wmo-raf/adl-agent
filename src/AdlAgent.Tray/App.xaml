@@ -68,6 +68,19 @@
         </Style>
 
         <!--
+            A number in a table column. Right-aligned, because a column of
+            figures that lines up is the entire reason for showing counts in a
+            table rather than in a sentence: the one station in a shared dump
+            directory whose numbers differ from its neighbours' is then
+            findable at a glance, and the text form has to pad that column by
+            hand to get half as far.
+        -->
+        <Style x:Key="Figure" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+
+        <!--
             The header's facts: one line each, laid side by side. Styles rather
             than attributes repeated five times, because the thing that makes
             the strip read as one row is that the five are identical, and five

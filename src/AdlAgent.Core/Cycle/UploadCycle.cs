@@ -1,5 +1,6 @@
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
@@ -36,6 +37,7 @@ public sealed class UploadCycle
     private readonly AgentSession _session;
     private readonly AgentCadence _cadence;
     private readonly CycleReportStore _cycles;
+    private readonly CycleLog _log;
     private readonly CycleConcurrency _concurrency;
     private readonly TimeProvider _time;
     private readonly ILogger<UploadCycle> _logger;
@@ -71,6 +73,7 @@ public sealed class UploadCycle
         AgentSession session,
         AgentCadence cadence,
         CycleReportStore cycles,
+        CycleLog log,
         CycleConcurrency concurrency,
         TimeProvider time,
         ILogger<UploadCycle> logger)
@@ -83,6 +86,7 @@ public sealed class UploadCycle
         _session = session;
         _cadence = cadence;
         _cycles = cycles;
+        _log = log;
         _concurrency = concurrency;
         _time = time;
         _logger = logger;
@@ -391,9 +395,11 @@ public sealed class UploadCycle
         CancellationToken cancellationToken,
         CancellationToken stopping)
     {
-        var scan = _scanner.Scan(unit, _time.GetUtcNow());
+        var startedAt = _time.GetUtcNow();
+        var scan = _scanner.Scan(unit, startedAt);
 
-        bool delivered;
+        var delivered = false;
+        var stopped = AdlStoppedAnswering;
 
         try
         {
@@ -406,7 +412,25 @@ public sealed class UploadCycle
             // this one. Cut short exactly as if this unit had found it
             // itself: what it managed is still worth recording, and its
             // completion still is not.
-            delivered = false;
+        }
+        catch (Exception exception)
+        {
+            // Everything else, including the service being stopped and
+            // anything nobody foresaw -- and the record is written on the way
+            // past rather than lost. The pass whose absence is hardest to
+            // explain is the one that ended in a way nobody expected, and a
+            // machine somebody is restarting because it is stuck is exactly
+            // the machine whose last pass somebody is about to go looking
+            // for.
+            stopped = exception is OperationCanceledException
+                ? "The agent was stopped while this station was being collected."
+                : $"This station's collection ended unexpectedly: {exception.Message}";
+
+            Log(
+                configuration, unit, scan, startedAt, _time.GetUtcNow(),
+                new Ending(Trigger(unit), Completed: false, stopped));
+
+            throw;
         }
 
         var at = _time.GetUtcNow();
@@ -443,6 +467,14 @@ public sealed class UploadCycle
         // move the completion mark: a machine whose every pass is cut short
         // is exactly the machine ADL is meant to call stuck.
         Record(scan, at, completed: delivered);
+
+        Log(
+            configuration,
+            unit,
+            scan,
+            startedAt,
+            at,
+            new Ending(Trigger(unit), delivered, delivered ? null : stopped));
 
         return delivered;
     }
@@ -533,6 +565,7 @@ public sealed class UploadCycle
         }
 
         var now = _time.GetUtcNow();
+        var startedAt = now;
 
         // Never mind whether this station is due one. Due-ness is about
         // spending a daily budget wisely, and a person standing at the machine
@@ -551,10 +584,11 @@ public sealed class UploadCycle
         // scan: a station collected this way is collected exactly as it would
         // have been an hour later. A configuration holding one station plans
         // to one unit -- there is nothing left for it to share a folder with.
-        var scan = _scanner.Plan(narrowed, sweep, now) is [var only]
-            ? _scanner.Scan(only, now)
+        var unit = _scanner.Plan(narrowed, sweep, now) is [var only]
+            ? only
             : throw new InvalidOperationException(
                 "A configuration narrowed to one station planned to more than one unit.");
+        var scan = _scanner.Scan(unit, now);
 
         // Before the delivery rather than after it, because the counts move
         // during the delivery and this is what the window watching reads them
@@ -588,6 +622,23 @@ public sealed class UploadCycle
         }
 
         var tally = scan.For(stationLinkId);
+
+        // Left on the disk like any other pass, and marked as the button it
+        // was. A collect somebody asked for is very often the pass that was
+        // being watched when whatever went wrong went wrong, and it would be
+        // the one pass the record does not hold.
+        Log(
+            narrowed,
+            unit,
+            scan,
+            startedAt,
+            _time.GetUtcNow(),
+            new Ending(
+                CycleTriggers.Collect,
+                Completed: delivered && !cancellationToken.IsCancellationRequested,
+                Stopped: cancellationToken.IsCancellationRequested
+                    ? "Somebody at the machine stopped this collect."
+                    : delivered ? null : AdlStoppedAnswering));
 
         return new RequestedCollect
         {
@@ -748,7 +799,8 @@ public sealed class UploadCycle
 
                 foreach (var candidate in page)
                 {
-                    scan.For(candidate.Entry.StationLinkId)?.Fail(exception.Detail);
+                    scan.For(candidate.Entry.StationLinkId)
+                        ?.Fail(candidate.Entry.Name, candidate.Entry.Size, exception.Detail);
                 }
 
                 continue;
@@ -800,7 +852,7 @@ public sealed class UploadCycle
             // The only place anyone will ever see why one file of five
             // hundred is not arriving, so it is ADL's own sentence about it.
             scan.For(candidate.Entry.StationLinkId)
-                ?.Fail($"{candidate.Entry.Name}: {rejected.Detail}");
+                ?.Fail(candidate.Entry.Name, candidate.Entry.Size, rejected.Detail);
         }
 
         return page.Where((_, index) => !dropped.Contains(index)).ToList();
@@ -883,7 +935,7 @@ public sealed class UploadCycle
                             .UploadFileAsync(token, candidate.Entry, candidate.Path, token1)
                             .ConfigureAwait(false);
 
-                        tally?.Accept();
+                        tally?.Accept(stored.Name, stored.Size);
 
                         _logger.LogDebug(
                             "ADL took {Name} for station link {Link}: {Size} bytes, {Status}.",
@@ -903,14 +955,14 @@ public sealed class UploadCycle
                         // one: the vendor appended to it between the hash and the
                         // read, so the bytes no longer match what was promised.
                         // Next cycle offers the file as it now stands.
-                        tally?.Fail($"{candidate.Entry.Name}: {exception.Detail}");
+                        tally?.Fail(candidate.Entry.Name, candidate.Entry.Size, exception.Detail);
                     }
                     catch (Exception exception) when (
                         exception is IOException or UnauthorizedAccessException)
                     {
                         // Gone, moved, or locked since the scan. Also next
                         // cycle's business, if it is still there at all.
-                        tally?.Fail($"{candidate.Entry.Name}: {exception.Message}");
+                        tally?.Fail(candidate.Entry.Name, candidate.Entry.Size, exception.Message);
                     }
                 }).ConfigureAwait(false);
         }
@@ -1057,5 +1109,110 @@ public sealed class UploadCycle
             links.Sum(tally => tally.Scanned),
             links.Sum(tally => tally.Offered),
             links.Sum(tally => tally.Uploaded));
+    }
+
+    /// <summary>
+    /// Leave one unit pass on the disk, where it will still be next month.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Record"/> and not inside it, because the two answer
+    /// different questions for different readers. The report is what ADL is
+    /// told on the next heartbeat and is overwritten by the pass after it;
+    /// this is the only thing on the machine that survives the cycle that
+    /// wrote it.
+    /// <para>
+    /// Every station in the unit is here, including the ones the scan turned
+    /// away -- no folder, no pattern, half-configured Direct Fetch. Those
+    /// carry zero in every count and the sentence saying what to fix, which
+    /// is a fault that is common in the field and was invisible everywhere.
+    /// </para>
+    /// <para>
+    /// A pass cut short is written exactly like one that finished, with what
+    /// it got to and why it stopped. The record whose absence is hardest to
+    /// explain is the one for the pass that went wrong.
+    /// </para>
+    /// </remarks>
+    private void Log(
+        AgentConfiguration configuration,
+        FolderScanner.ScanUnit unit,
+        ScanResult scan,
+        DateTimeOffset startedAt,
+        DateTimeOffset at,
+        Ending ending)
+    {
+        var names = Names(configuration);
+
+        _log.Write(new CycleRecord
+        {
+            At = startedAt,
+            Seconds = Math.Max(0, (at - startedAt).TotalSeconds),
+            Unit = unit.Folder,
+            Trigger = ending.Trigger,
+            Completed = ending.Completed,
+            Stopped = ending.Stopped,
+            Folders = scan.Folders,
+            Stations = scan.Links.Values
+                .OrderBy(tally => tally.StationLinkId)
+                .Select(tally => new CycleStationRecord
+                {
+                    StationLinkId = tally.StationLinkId,
+                    Station = names.GetValueOrDefault(tally.StationLinkId),
+                    Scanned = tally.Scanned,
+                    Held = tally.Pending,
+                    Offered = tally.Offered,
+                    Wanted = tally.Requested,
+                    Uploaded = tally.Uploaded,
+                    Failed = tally.Failed,
+                    Backlog = tally.Backlog,
+                    Error = tally.Error,
+                })
+                .ToList(),
+            Files = scan.Journal.Files(),
+        });
+    }
+
+    /// <summary>
+    /// How a unit pass ended, which is one fact in three parts.
+    /// </summary>
+    /// <remarks>
+    /// Together because they are only ever read together and are only ever
+    /// wrong together: a pass marked finished with a reason for stopping, or
+    /// cut short with none, is a record that contradicts itself. Passing them
+    /// as three arguments had already produced one call site where the
+    /// completion and the sentence were worked out several lines apart.
+    /// </remarks>
+    private readonly record struct Ending(string Trigger, bool Completed, string? Stopped);
+
+    /// <summary>
+    /// What started this unit's pass, on the scheduled path.
+    /// </summary>
+    /// <remarks>
+    /// Read off the plan rather than off what the scan managed: a unit
+    /// planned as a sweep whose every station was then turned away did not
+    /// stop being a sweep.
+    /// </remarks>
+    private static string Trigger(FolderScanner.ScanUnit unit) =>
+        unit.Reconciling ? CycleTriggers.Reconciliation : CycleTriggers.Scheduled;
+
+    /// <summary>
+    /// Every station link's name, so a record read months later means
+    /// something to whoever has the log and not the ADL that issued the ids.
+    /// </summary>
+    private static Dictionary<long, string> Names(AgentConfiguration configuration)
+    {
+        var names = new Dictionary<long, string>();
+
+        foreach (var connection in configuration.Sync.Connections)
+        {
+            foreach (var link in connection.StationLinks)
+            {
+                // TryAdd rather than an indexer: the configuration comes from
+                // another system, and one duplicated id would cost a cycle
+                // rather than a name.
+                names.TryAdd(link.Id, link.Admin.Station.Name);
+            }
+        }
+
+        return names;
     }
 }

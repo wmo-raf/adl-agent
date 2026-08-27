@@ -1,8 +1,11 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Configuration;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.Platform;
@@ -33,6 +36,8 @@ public sealed class AgentControlService : BackgroundService
     private readonly FolderPreview _preview;
     private readonly OnDemandSync _syncs;
     private readonly OnDemandCollect _collects;
+    private readonly CycleLogReader _passes;
+    private readonly DiagnosticsBundle _bundle;
     private readonly AgentWakeSignal _wake;
     private readonly TimeProvider _time;
     private readonly ILogger<AgentControlService> _logger;
@@ -47,6 +52,8 @@ public sealed class AgentControlService : BackgroundService
         FolderPreview preview,
         OnDemandSync syncs,
         OnDemandCollect collects,
+        CycleLogReader passes,
+        DiagnosticsBundle bundle,
         AgentWakeSignal wake,
         TimeProvider time,
         ILogger<AgentControlService> logger)
@@ -60,6 +67,8 @@ public sealed class AgentControlService : BackgroundService
         _preview = preview;
         _syncs = syncs;
         _collects = collects;
+        _passes = passes;
+        _bundle = bundle;
         _wake = wake;
         _time = time;
         _logger = logger;
@@ -102,6 +111,10 @@ public sealed class AgentControlService : BackgroundService
                 ControlProtocol.CollectCommand => Collect(request),
                 ControlProtocol.CollectStatusCommand => CollectStatus(),
                 ControlProtocol.CollectCancelCommand => CollectCancel(request),
+                ControlProtocol.PassesIndexCommand => PassesIndex(request),
+                ControlProtocol.PassCommand => Pass(request),
+                ControlProtocol.DiagnosticsCommand => await DiagnosticsAsync(request, cancellationToken)
+                    .ConfigureAwait(false),
                 _ => ControlResponse.Failure(
                     "unknown_command",
                     $"This agent does not know the command '{request.Command}'."),
@@ -214,6 +227,175 @@ public sealed class AgentControlService : BackgroundService
         }
 
         return ControlResponse.Success(ToJson(_collects.Progress!));
+    }
+
+    /// <summary>
+    /// A page of recorded passes as table rows, newest first.
+    /// </summary>
+    /// <remarks>
+    /// Trimmed to fit one control message by dropping whole rows from the
+    /// oldest end, and the answer says it was. A row is small enough that
+    /// this hardly ever bites -- four hundred and fifty fit -- but a folder
+    /// path is as long as an administrator typed it, and a page that came
+    /// back refused would leave a window blank on exactly the busiest
+    /// machine.
+    /// </remarks>
+    private ControlResponse PassesIndex(ControlRequest request)
+    {
+        var page = _passes.Index(Query(request.Payload));
+        var rows = page.Rows.ToList();
+        var sizes = rows.Select(Size).ToList();
+        var total = sizes.Sum();
+        var trimmed = false;
+
+        while (rows.Count > 1 && total > PassesBudget)
+        {
+            total -= sizes[^1];
+            sizes.RemoveAt(sizes.Count - 1);
+            rows.RemoveAt(rows.Count - 1);
+            trimmed = true;
+        }
+
+        return ControlResponse.Success(ToJson(page with
+        {
+            Rows = rows,
+            // A trimmed page has not reached the end of anything, whatever the
+            // read thought. It still resumes where the read stopped: the rows
+            // dropped here were matches, and a resume that stepped back over
+            // them would hand the next page the same ones it could not fit.
+            Exhausted = page.Exhausted && !trimmed,
+        }));
+    }
+
+    /// <summary>One pass in full, or nothing when it has been evicted.</summary>
+    /// <remarks>
+    /// Nothing rather than a refusal. A window left open on a machine working
+    /// through a backlog will meet this in the ordinary course of things, and
+    /// "that pass is no longer on this machine" is a sentence about the log
+    /// rather than a fault to report.
+    /// </remarks>
+    private ControlResponse Pass(ControlRequest request)
+    {
+        if (Moment(request.Payload, "at") is not { } at)
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say which pass: {\"at\": \"2026-08-27T09:30:02.417Z\", \"unit\": \"C:\\\\Vendor\"}.");
+        }
+
+        var unit = request.Payload?["unit"]?.GetValue<string>() ?? "";
+
+        return ControlResponse.Success(ToJson(new CyclePass
+        {
+            Record = _passes.One(at, unit),
+        }));
+    }
+
+    /// <summary>Which passes a command is asking about.</summary>
+    private static CyclePassQuery Query(JsonObject? payload) => new(
+        StationLinkId(payload),
+        payload?["trigger"]?.GetValue<string>(),
+        payload?["problems_only"]?.GetValue<bool>() ?? false,
+        Math.Max(0, Whole(payload, "skip") ?? 0),
+        Math.Clamp(Whole(payload, "most") ?? DefaultPasses, 1, MostPasses));
+
+    /// <summary>How many rows a UI gets when it does not say.</summary>
+    private const int DefaultPasses = 50;
+
+    /// <summary>The most it may ask for, whatever it says.</summary>
+    /// <remarks>
+    /// Comfortably more than fits, because the trimming above is the real
+    /// bound and it is measured rather than guessed. This one only stops a
+    /// client asking the reader for a number that would spend its whole scan
+    /// budget building a page nobody could receive.
+    /// </remarks>
+    private const int MostPasses = 1000;
+
+    /// <summary>
+    /// How much of one control message the rows may take.
+    /// </summary>
+    /// <remarks>
+    /// Below <see cref="ControlProtocol.MaxMessageBytes"/> with room over for
+    /// the envelope, because the reader at the other end refuses a line
+    /// longer than that cap.
+    /// </remarks>
+    private const int PassesBudget = ControlProtocol.MaxMessageBytes - 4096;
+
+    /// <summary>
+    /// How many bytes one row costs on the wire.
+    /// </summary>
+    /// <remarks>
+    /// Bytes and not characters. The reader at the other end caps a line in
+    /// bytes, and a folder path or a station name carrying an accent -- which
+    /// is much of this fleet -- costs more of them than it has letters.
+    /// </remarks>
+    private static int Size(CyclePassRow row) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(row, AgentJson.Options));
+
+    /// <summary>An instant a command carries, however the client spelled it.</summary>
+    private static DateTimeOffset? Moment(JsonObject? payload, string name)
+    {
+        if (payload?[name] is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<DateTimeOffset>(out var moment))
+        {
+            return moment;
+        }
+
+        // Round-trip format, as this agent's own serializer writes it. A
+        // client that built the request in process holds the real type; one
+        // that parsed it off the wire holds a string.
+        return value.TryGetValue<string>(out var text)
+            && DateTimeOffset.TryParse(
+                text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    /// <summary>
+    /// Write a plain-text diagnostics bundle where the client asked.
+    /// </summary>
+    /// <remarks>
+    /// Performed rather than started, unlike sync and collect. This one is
+    /// bounded -- it is a few hundred kilobytes off local files -- and the
+    /// window that asked has a Save dialog open behind it and nothing to draw
+    /// until it knows whether the file was written.
+    /// </remarks>
+    private async Task<ControlResponse> DiagnosticsAsync(
+        ControlRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Payload?["path"]?.GetValue<string>() is not { } path ||
+            string.IsNullOrWhiteSpace(path))
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say where the bundle should be written: {\"path\": \"C:\\\\Temp\\\\adl-agent.txt\"}.");
+        }
+
+        try
+        {
+            var bytes = await _bundle
+                .WriteToAsync(path, Query(request.Payload), cancellationToken)
+                .ConfigureAwait(false);
+
+            return ControlResponse.Success(new JsonObject
+            {
+                ["path"] = path,
+                ["bytes"] = bytes,
+            });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or NotSupportedException or ArgumentException)
+        {
+            // The service runs as SYSTEM and the path came from somebody's
+            // Save dialog, so this is a real case: a mapped drive the service
+            // account does not have, or a folder it may not write.
+            return ControlResponse.Failure(
+                "diagnostics_failed", $"The agent could not write {path}: {exception.Message}");
+        }
     }
 
     /// <summary>
@@ -352,6 +534,34 @@ public sealed class AgentControlService : BackgroundService
         }
 
         return value.TryGetValue<int>(out var narrower) ? narrower : null;
+    }
+
+    /// <summary>
+    /// A plain count a command carries, however the client spelled it.
+    /// </summary>
+    /// <remarks>
+    /// Two attempts, for the reason <see cref="StationLinkId"/> gives above:
+    /// a request that came over the transport was parsed from text and is a
+    /// JSON number, while one built in process -- by a test, or by a head
+    /// that skips the wire -- is whatever C# literal somebody wrote. A caller
+    /// that passed <c>10L</c> and was silently given the default instead
+    /// would be the trap that comment exists to describe.
+    /// </remarks>
+    private static int? Whole(JsonObject? payload, string name)
+    {
+        if (payload?[name] is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<int>(out var whole))
+        {
+            return whole;
+        }
+
+        return value.TryGetValue<long>(out var wider)
+            ? (int)Math.Clamp(wider, int.MinValue, int.MaxValue)
+            : null;
     }
 
     private static JsonObject ToJson<T>(T value) =>

@@ -1,0 +1,300 @@
+using System.Globalization;
+using System.Text;
+using AdlAgent.Core.Platform;
+using AdlAgent.Core.Status;
+using Microsoft.Extensions.Options;
+
+namespace AdlAgent.Core.Diagnostics;
+
+/// <summary>
+/// One plain-text file that says everything about this machine, for somebody
+/// to email.
+/// </summary>
+/// <remarks>
+/// This is the artefact that actually reaches HQ. A technician in a country
+/// nobody can reach is not going to read a JSON Lines file down a telephone,
+/// and they are not going to get an operator at HQ into a folder whose
+/// permissions are SYSTEM and Administrators. What they can do is press a
+/// button and attach what comes out.
+/// <para>
+/// Written by the agent and not by the tray, which is what makes it work on
+/// the service tier: the logs live in a folder the tray's account cannot
+/// read, and the service can. The tray asks for a path and the service fills
+/// it.
+/// </para>
+/// <para>
+/// Bounded, like everything else here. What goes in is this machine's state,
+/// its stations, the most recent unit passes rendered as text, and the tail
+/// of the general log -- not the whole ceiling, which is a 96 MB attachment
+/// nobody's mail server will take.
+/// </para>
+/// </remarks>
+public sealed class DiagnosticsBundle
+{
+    /// <summary>How many unit passes the bundle carries.</summary>
+    /// <remarks>
+    /// A day and a half of an ordinary machine, which is long enough to hold
+    /// whatever somebody is writing in about and short enough to read.
+    /// </remarks>
+    public const int Passes = 200;
+
+    /// <summary>How much of the general log's tail the bundle carries.</summary>
+    /// <remarks>
+    /// The tail and not the whole, because the whole is up to the general
+    /// log's entire ceiling and this has to survive being attached to an email
+    /// sent from a country server. The newest of it is also the part anybody
+    /// reads.
+    /// </remarks>
+    public const int GeneralLogCharacters = 512 * 1024;
+
+    private readonly AgentStatusReader _status;
+    private readonly AgentStationsReader _stations;
+    private readonly CycleLogReader _passes;
+    private readonly IEnumerable<ILogFlush> _logs;
+    private readonly string _directory;
+    private readonly TimeProvider _time;
+
+    public DiagnosticsBundle(
+        AgentStatusReader status,
+        AgentStationsReader stations,
+        CycleLogReader passes,
+        IEnumerable<ILogFlush> logs,
+        IOptions<AgentOptions> options,
+        IHostLifecycle host,
+        TimeProvider time)
+    {
+        _status = status;
+        _stations = stations;
+        _passes = passes;
+        _logs = logs;
+        _directory = AgentLogs.In(options.Value.ResolveStateDirectory(host));
+        _time = time;
+    }
+
+    /// <summary>Write the bundle to <paramref name="path"/>.</summary>
+    /// <param name="passes">
+    /// Which passes to carry. The same filter the technician was looking at
+    /// when they pressed the button, so that what reaches HQ is what they
+    /// found -- a bundle that always carried the newest two hundred could not
+    /// hold the failure three weeks back that the window had just been used
+    /// to locate.
+    /// </param>
+    /// <remarks>
+    /// Both logs are brought up to date first. The pass somebody is writing in
+    /// about is very often the one that has just finished, and a bundle read a
+    /// moment before the queue caught up would be a bundle missing the only
+    /// record anybody wanted.
+    /// </remarks>
+    /// <returns>How many bytes were written.</returns>
+    public async Task<long> WriteToAsync(
+        string path, CyclePassQuery? passes = null, CancellationToken cancellationToken = default)
+    {
+        foreach (var log in _logs)
+        {
+            await log.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var text = Render(passes);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+
+        await File.WriteAllTextAsync(path, text, Encoding.UTF8, cancellationToken)
+            .ConfigureAwait(false);
+
+        return new FileInfo(path).Length;
+    }
+
+    /// <summary>What a technician saves and sends.</summary>
+    public string Render(CyclePassQuery? passes = null)
+    {
+        var text = new StringBuilder();
+        var status = _status.Read();
+
+        Heading(text, "ADL Agent diagnostics");
+        text.AppendLine(Line("Written", _time.GetUtcNow().ToString("u", CultureInfo.InvariantCulture)));
+        text.AppendLine(Line("Agent version", status.AgentVersion));
+        text.AppendLine(Line("ADL", status.AdlUrl));
+        text.AppendLine(Line("ADL version", status.AdlVersion));
+        text.AppendLine(Line("Device", $"{status.DeviceName} ({status.DeviceId})"));
+        text.AppendLine(Line("Pairing", status.PairingState));
+        text.AppendLine(Line("Last synced", Moment(status.LastSyncedAt)));
+        text.AppendLine(Line("Configuration", status.ConfigVersion?.ToString(CultureInfo.InvariantCulture) ?? "-"));
+        text.AppendLine(Line("From cache", status.ConfigFromCache ? "yes" : "no"));
+        text.AppendLine(Line("Last heartbeat", Moment(status.LastHeartbeatAt)));
+        text.AppendLine(Line("ADL says", status.FleetStatus ?? "-"));
+        text.AppendLine(Line("Clock difference", status.ClockSkewSeconds is { } skew
+            ? string.Create(CultureInfo.InvariantCulture, $"{skew}s")
+            : "-"));
+        text.AppendLine(Line("Updates", $"{status.UpdateState} {status.UpdateDetail}".Trim()));
+        text.AppendLine(Line("Last problem", status.LastError ?? "-"));
+
+        Stations(text);
+        RecentPasses(text, passes ?? new CyclePassQuery(Most: Passes));
+        General(text);
+
+        return text.ToString();
+    }
+
+    private void Stations(StringBuilder text)
+    {
+        Heading(text, "Stations");
+
+        var stations = _stations.Read();
+
+        if (stations.Stations.Count == 0)
+        {
+            text.AppendLine("This machine has no stations linked to it.");
+
+            return;
+        }
+
+        foreach (var station in stations.Stations)
+        {
+            text.AppendLine(string.Create(
+                CultureInfo.CurrentCulture,
+                $"{station.StationLinkId}  {station.StationName}  ({station.ConnectionName})"));
+            text.AppendLine(Line("  folder", station.Config.LocalFolderPath));
+            text.AppendLine(Line("  pattern", station.Config.FilePattern ?? "-"));
+            text.AppendLine(Line("  strategy", station.Config.ListingStrategy));
+            text.AppendLine(Line("  enabled", station.Enabled ? "yes" : "no"));
+            text.AppendLine(Line("  wants files from", Moment(station.Watermark)));
+            text.AppendLine(Line("  ADL last received", Moment(station.LastReceivedAt)));
+
+            if (station.Error is not null)
+            {
+                text.AppendLine(Line("  problem", station.Error));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The recent unit passes, rendered exactly as the window renders them.
+    /// </summary>
+    /// <remarks>
+    /// One renderer, so that the pass a technician read on screen before
+    /// pressing the button and the pass HQ reads in the attachment are the
+    /// same sentences. A support conversation where the two ends are looking
+    /// at differently-worded copies of one event is a conversation about the
+    /// wording.
+    /// </remarks>
+    private void RecentPasses(StringBuilder text, CyclePassQuery query)
+    {
+        // How many passes a bundle carries is the bundle's business, never the
+        // caller's. What arrives here is a window's filter, and that window's
+        // Most is its own page size -- borrowing it once quietly cut every
+        // bundle from two hundred passes to fifty.
+        var asked = query with { Skip = 0, Most = Passes };
+
+        Heading(
+            text, $"Recent collection passes ({Describe(query)}, newest first, at most {Passes})");
+
+        var records = _passes.Recent(asked);
+
+        text.AppendLine(records.Count == 0
+            ? "No collection pass on this machine matches that."
+            : CycleRecordText.Render(records));
+    }
+
+    /// <summary>
+    /// The filter, said in the heading rather than left to be inferred.
+    /// </summary>
+    /// <remarks>
+    /// Because the reader at the far end did not choose it. A section headed
+    /// only "recent passes" that in fact holds one station's failures is a
+    /// bundle that reads as a machine with one station and nothing else
+    /// working.
+    /// </remarks>
+    private static string Describe(CyclePassQuery query)
+    {
+        var narrowed = new List<string>();
+
+        if (query.StationLinkId is { } stationLinkId)
+        {
+            narrowed.Add(
+                string.Create(CultureInfo.InvariantCulture, $"station link {stationLinkId}"));
+        }
+
+        if (query.Trigger is not null)
+        {
+            narrowed.Add(query.Trigger);
+        }
+
+        if (query.ProblemsOnly)
+        {
+            narrowed.Add("problems only");
+        }
+
+        return narrowed.Count == 0 ? "every station" : string.Join(", ", narrowed);
+    }
+
+    /// <summary>The tail of the general log.</summary>
+    private void General(StringBuilder text)
+    {
+        Heading(text, $"Agent log (the last {GeneralLogCharacters / 1024} KB)");
+
+        try
+        {
+            var newest = AgentLogs
+                .FilesIn(_directory, AgentLogs.GeneralLogName, AgentFileLoggerProvider.Extension)
+                .OrderByDescending(path => path, StringComparer.Ordinal)
+                .FirstOrDefault();
+
+            if (newest is null)
+            {
+                text.AppendLine("There is no agent log on this machine yet.");
+
+                return;
+            }
+
+            text.AppendLine(Tail(newest, GeneralLogCharacters));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            text.AppendLine($"The agent log could not be read: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The last <paramref name="characters"/> of a log file, plain or
+    /// gzipped.
+    /// </summary>
+    /// <remarks>
+    /// Read whole and cut, rather than seeked. A plain file here is at most
+    /// one rolled part and a gzipped one has to be decompressed from the
+    /// front anyway, so the seek bought a little on one of the two cases and
+    /// a second way to open a file on both.
+    /// </remarks>
+    private static string Tail(string path, int characters)
+    {
+        using var reader = AgentLogs.OpenRead(path);
+
+        var whole = reader.ReadToEnd();
+
+        if (whole.Length <= characters)
+        {
+            return whole;
+        }
+
+        // Cut at a line, so the bundle does not open on half a stack frame.
+        var cut = whole.Length - characters;
+        var line = whole.IndexOf('\n', cut);
+
+        return line < 0 ? whole[cut..] : whole[(line + 1)..];
+    }
+
+    private static void Heading(StringBuilder text, string title)
+    {
+        if (text.Length > 0)
+        {
+            text.AppendLine();
+        }
+
+        text.AppendLine(title);
+        text.AppendLine(new string('=', title.Length));
+    }
+
+    private static string Line(string field, string value) => $"{field,-22}{value}";
+
+    private static string Moment(DateTimeOffset? value) =>
+        value?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "-";
+}

@@ -1,0 +1,309 @@
+<Window x:Class="AdlAgent.Tray.PassesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title}"
+        Icon="adl-agent-tray.ico"
+        Height="640" Width="1040"
+        MinHeight="420" MinWidth="720"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#F6F7F9">
+
+    <!--
+        Everything this machine has recorded about its own collection.
+
+        Deliberately not a tab. TrayTabs records that the Pairing tab was
+        deleted precisely because it gave a technician a whole screen with
+        nothing on it to do, in the leftmost and most prominent position, and
+        a machine-wide activity tab would be that again on the many machines
+        that are simply working. A window opened on demand costs nothing until
+        somebody has a question.
+
+        Modeless, unlike every other window the tray opens. Those hold a copy
+        of a station row and freeze the list behind them; this holds no row,
+        and the point of it is to be readable while somebody presses Collect
+        now on the list behind.
+    -->
+    <DockPanel LastChildFill="True" Margin="14">
+
+        <!-- The filters. Applied by the service as it reads the log, never
+             over the page already in hand: a page is a page of matches, so
+             Load more walks back through rows rather than blank screens. -->
+        <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Station" VerticalAlignment="Center" Margin="0,0,6,0"
+                       Foreground="#5A6472" />
+            <ComboBox Width="200" DisplayMemberPath="Name" VerticalAlignment="Center"
+                      ItemsSource="{Binding Stations}"
+                      SelectedItem="{Binding SelectedStation, Mode=TwoWay}" />
+
+            <TextBlock Text="Trigger" VerticalAlignment="Center" Margin="16,0,6,0"
+                       Foreground="#5A6472" />
+            <ComboBox Width="180" DisplayMemberPath="Name" VerticalAlignment="Center"
+                      ItemsSource="{Binding Triggers}"
+                      SelectedItem="{Binding SelectedTrigger, Mode=TwoWay}" />
+
+            <!--
+                One switch over three unrelated faults — files that did not go,
+                a pass cut short, a station turned away half-configured. A
+                technician hunting trouble wants all three and should not first
+                have to know which kind they are looking for.
+            -->
+            <CheckBox Content="Problems only" VerticalAlignment="Center" Margin="16,0,0,0"
+                      IsChecked="{Binding ProblemsOnly, Mode=TwoWay}" />
+
+            <Button Content="Refresh" Padding="12,4" Margin="16,0,0,0"
+                    Command="{Binding RefreshCommand}" />
+            <Button Content="Save these…" Padding="12,4" Margin="8,0,0,0"
+                    Click="SaveThese" />
+
+            <TextBlock Text="{Binding ReadAt}" VerticalAlignment="Center" Margin="16,0,0,0"
+                       Opacity="0.7" />
+            <TextBlock Text="Reading…" VerticalAlignment="Center" Margin="10,0,0,0"
+                       Opacity="0.7"
+                       Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
+        </WrapPanel>
+
+        <!--
+            Whose counts the columns are. A DataGridColumn is not in the visual
+            tree and inherits no DataContext, so its Header cannot simply bind;
+            and the counts DO change meaning with the station filter — they
+            become that station's own rather than the unit's. A change that
+            silent is the Banfora-reading-Bobo-Dioulasso's-failures mistake
+            this filter exists to prevent, so it is said on its own line above
+            the table where it cannot be missed.
+        -->
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" Foreground="#5A6472" TextWrapping="Wrap">
+            <Run Text="Scanned, held, up, fail and backlog are" /><Run Text=" " /><Run
+                Text="{Binding CountsHeading, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="." />
+        </TextBlock>
+
+        <!-- The reach line and the one button that goes further back. Paging
+             and resuming past a read that gave up looking are the same
+             request with the same cursor, so they are one button; only this
+             sentence differs. -->
+        <Border DockPanel.Dock="Bottom" Margin="0,10,0,0" Padding="0,10,0,0"
+                BorderBrush="#DCE0E6" BorderThickness="0,1,0,0">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Button Content="Load more" Padding="14,6" MinWidth="110"
+                            Command="{Binding MoreCommand}"
+                            Visibility="{Binding CanLoadMore, Converter={StaticResource Visible}}" />
+                    <Button Content="Close" Padding="14,6" MinWidth="90" Margin="8,0,0,0"
+                            IsCancel="True" Click="CloseWindow" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="{Binding Reach}" TextWrapping="Wrap"
+                               VerticalAlignment="Center" Foreground="#5A6472" />
+                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,3,0,0"
+                               Visibility="{Binding HasMessage, Converter={StaticResource Visible}}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <!--
+                A sentence and never an empty table. A machine that has not
+                collected yet, a filter nothing matches, and a read that gave
+                up looking all render as no rows, and an empty table is the
+                absence this whole record exists to replace.
+            -->
+            <TextBlock Text="{Binding Problem}" TextWrapping="Wrap" MaxWidth="520"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="#5A6472" TextAlignment="Center"
+                       Visibility="{Binding HasProblem, Converter={StaticResource Visible}}" />
+
+            <DataGrid AutoGenerateColumns="False" IsReadOnly="True"
+                      HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      HorizontalGridLinesBrush="#EDEFF2" RowHeight="30"
+                      SelectionMode="Single" BorderBrush="#DCE0E6" BorderThickness="1"
+                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                      ItemsSource="{Binding Rows}"
+                      SelectedItem="{Binding SelectedPass, Mode=TwoWay}"
+                      RowDetailsVisibilityMode="VisibleWhenSelected"
+                      Visibility="{Binding HasRows, Converter={StaticResource Visible}}"
+                      CanUserReorderColumns="False"
+                      CanUserAddRows="False"
+                      CanUserSortColumns="False">
+
+                <!--
+                    A press on a cell rather than on the row, which is what
+                    keeps the open detail usable: the details presenter is a
+                    sibling of the cells, so Copy and the tables inside it
+                    never reach this handler and never shut the row they are
+                    in.
+                -->
+                <DataGrid.CellStyle>
+                    <Style TargetType="DataGridCell">
+                        <EventSetter Event="PreviewMouseLeftButtonDown" Handler="RowPressed" />
+                    </Style>
+                </DataGrid.CellStyle>
+
+                <!--
+                    Sorting is off, explicitly. This table is a chronology and
+                    the paging cursor depends on it; a column sort would
+                    reorder only the rows already loaded and read as though it
+                    had ranked the log. "Show me the worst" is what Problems
+                    only is for.
+                -->
+
+                <DataGrid.Columns>
+                    <!-- One mark over three unrelated faults, in the column
+                         the eye runs down first. -->
+                    <DataGridTemplateColumn Header="" Width="26">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="!" FontWeight="Bold" Foreground="#A33B2A"
+                                           HorizontalAlignment="Center"
+                                           ToolTip="{Binding Mark}"
+                                           Visibility="{Binding Problem, Converter={StaticResource Visible}}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <DataGridTextColumn Header="When" Binding="{Binding When}" Width="Auto" MinWidth="130" />
+                    <DataGridTextColumn Header="Unit" Binding="{Binding Folder}"
+                                        Width="Auto" MinWidth="160" MaxWidth="360" />
+                    <DataGridTextColumn Header="Trigger" Binding="{Binding Trigger}" Width="Auto" MinWidth="90" />
+                    <DataGridTextColumn Header="Took" Binding="{Binding Took}" Width="Auto" MinWidth="60" />
+
+                    <!--
+                        The counts, right-aligned so they line up: that is the
+                        whole reason for a table rather than the text form,
+                        because the one station in a dump directory whose
+                        numbers differ is then findable by eye.
+
+                        Whose counts these are changes with the station
+                        filter, and the group heading above them says so
+                        rather than letting it change silently.
+                    -->
+                    <DataGridTextColumn Header="Scanned" Binding="{Binding Scanned}" Width="Auto" MinWidth="70"
+                                        ElementStyle="{StaticResource Figure}" />
+                    <DataGridTextColumn Header="Held" Binding="{Binding Held}" Width="Auto" MinWidth="55"
+                                        ElementStyle="{StaticResource Figure}" />
+                    <DataGridTextColumn Header="Up" Binding="{Binding Uploaded}" Width="Auto" MinWidth="50"
+                                        ElementStyle="{StaticResource Figure}" />
+                    <DataGridTextColumn Header="Fail" Binding="{Binding Failed}" Width="Auto" MinWidth="50"
+                                        ElementStyle="{StaticResource Figure}" />
+                    <DataGridTextColumn Header="Backlog" Binding="{Binding Backlog}" Width="Auto" MinWidth="70"
+                                        ElementStyle="{StaticResource Figure}" />
+                </DataGrid.Columns>
+
+                <!-- Opening a row: the stations in the unit and the files that
+                     did something, as tables rather than as a wall of text —
+                     and Copy, which puts the text form on the clipboard so
+                     that what somebody pastes into an email is what the
+                     diagnostics bundle says. -->
+                <DataGrid.RowDetailsTemplate>
+                    <DataTemplate>
+                        <Border Background="#F2F4F7" BorderBrush="#DCE0E6" BorderThickness="0,1,0,1"
+                                Padding="14,10">
+                            <StackPanel DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}">
+
+                                <TextBlock Text="{Binding DetailProblem}" TextWrapping="Wrap"
+                                           Foreground="#5A6472"
+                                           Visibility="{Binding HasDetailProblem, Converter={StaticResource Visible}}" />
+
+                                <StackPanel Visibility="{Binding HasDetail, Converter={StaticResource Visible}}"
+                                            DataContext="{Binding Detail}">
+
+                                    <DockPanel LastChildFill="True" Margin="0,0,0,8">
+                                        <Button DockPanel.Dock="Right" Content="Copy"
+                                                Style="{StaticResource Quiet}" Click="CopyPass"
+                                                VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Walked}" TextWrapping="Wrap"
+                                                   Foreground="#5A6472" VerticalAlignment="Center" />
+                                    </DockPanel>
+
+                                    <TextBlock Text="{Binding Stopped}" TextWrapping="Wrap"
+                                               Foreground="#A33B2A" Margin="0,0,0,8"
+                                               Visibility="{Binding WasCutShort, Converter={StaticResource Visible}}" />
+
+                                    <!--
+                                        Which ADL this pass was made against. A
+                                        repoint deliberately leaves the logs
+                                        alone, so a machine's record can hold
+                                        passes from two instances — and station
+                                        link ids the newer one has since issued
+                                        to entirely different stations.
+                                    -->
+                                    <TextBlock Margin="0,0,0,8" Opacity="0.7" TextWrapping="Wrap">
+                                        <Run Text="Recorded against" /><Run Text=" " /><Run
+                                            Text="{Binding Instance, Mode=OneWay}" />
+                                    </TextBlock>
+
+                                    <DataGrid ItemsSource="{Binding Stations}" AutoGenerateColumns="False"
+                                              IsReadOnly="True" HeadersVisibility="Column"
+                                              GridLinesVisibility="None" RowHeight="24" MaxHeight="200"
+                                              BorderBrush="#DCE0E6" BorderThickness="1"
+                                              Background="White" CanUserSortColumns="False"
+                                              CanUserReorderColumns="False" CanUserAddRows="False"
+                                              Margin="0,0,0,10">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Station" Binding="{Binding Station}"
+                                                                Width="Auto" MinWidth="180" MaxWidth="300" />
+                                            <DataGridTextColumn Header="Scanned" Binding="{Binding Scanned}"
+                                                                Width="Auto" MinWidth="70"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Held" Binding="{Binding Held}"
+                                                                Width="Auto" MinWidth="55"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Offered" Binding="{Binding Offered}"
+                                                                Width="Auto" MinWidth="65"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Wanted" Binding="{Binding Wanted}"
+                                                                Width="Auto" MinWidth="65"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Up" Binding="{Binding Uploaded}"
+                                                                Width="Auto" MinWidth="50"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Fail" Binding="{Binding Failed}"
+                                                                Width="Auto" MinWidth="50"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Backlog" Binding="{Binding Backlog}"
+                                                                Width="Auto" MinWidth="70"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <!--
+                                                The sentence a station the scan
+                                                turned away carries, and the
+                                                only column here that is not a
+                                                number. Half-configured is a
+                                                common real fault and this is
+                                                where it is legible.
+                                            -->
+                                            <DataGridTextColumn Header="Problem" Binding="{Binding Error}"
+                                                                Width="*" MinWidth="160" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+
+                                    <DataGrid ItemsSource="{Binding Files}" AutoGenerateColumns="False"
+                                              IsReadOnly="True" HeadersVisibility="Column"
+                                              GridLinesVisibility="None" RowHeight="24" MaxHeight="260"
+                                              BorderBrush="#DCE0E6" BorderThickness="1"
+                                              Background="White" CanUserSortColumns="False"
+                                              CanUserReorderColumns="False" CanUserAddRows="False"
+                                              Visibility="{Binding HasFiles, Converter={StaticResource Visible}}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="File" Binding="{Binding Name}"
+                                                                Width="Auto" MinWidth="220" MaxWidth="360" />
+                                            <DataGridTextColumn Header="Size" Binding="{Binding Size}"
+                                                                Width="Auto" MinWidth="70"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Count" Binding="{Binding Count}"
+                                                                Width="Auto" MinWidth="55"
+                                                                ElementStyle="{StaticResource Figure}" />
+                                            <DataGridTextColumn Header="Outcome" Binding="{Binding Outcome}"
+                                                                Width="Auto" MinWidth="80" />
+                                            <DataGridTextColumn Header="Reason" Binding="{Binding Reason}"
+                                                                Width="*" MinWidth="160" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </DataGrid.RowDetailsTemplate>
+            </DataGrid>
+        </Grid>
+    </DockPanel>
+</Window>

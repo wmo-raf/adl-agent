@@ -1,4 +1,5 @@
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Diagnostics;
 
 namespace AdlAgent.Core.Cycle;
 
@@ -37,6 +38,29 @@ public sealed record ScanResult(
     IReadOnlyDictionary<long, LinkTally> Links,
     IReadOnlySet<long> Reconciled)
 {
+    /// <summary>
+    /// The folders actually walked, and how many entries each held.
+    /// </summary>
+    /// <remarks>
+    /// Empty for a unit of nothing but Direct Fetch stations, which is
+    /// honest: such a station never lists a folder, and a record claiming it
+    /// walked one would be inventing the very thing that strategy exists to
+    /// avoid.
+    /// </remarks>
+    public IReadOnlyList<CycleFolderRecord> Folders { get; init; } = [];
+
+    /// <summary>
+    /// What this unit's files did, bounded, for the record the pass leaves
+    /// behind.
+    /// </summary>
+    /// <remarks>
+    /// The unit's own, shared by every tally in it, so that the file detail is
+    /// one story rather than one per station. Its own by default, so a
+    /// <see cref="ScanResult"/> built anywhere else still has somewhere to
+    /// write.
+    /// </remarks>
+    public UnitJournal Journal { get; init; } = new();
+
     /// <summary>
     /// This station's tally, or <c>null</c> if the scan opened none for it.
     /// </summary>

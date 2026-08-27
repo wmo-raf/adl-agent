@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using AdlAgent.Core;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 using AdlAgent.Windows.Platform;
@@ -1543,6 +1544,108 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
+    /// The last few passes this station has been in, as headings.
+    /// </summary>
+    /// <remarks>
+    /// Three lines and no file detail, because this is the at-a-glance half
+    /// of the answer: "has anything happened here lately". Anything more is
+    /// what View more is for, and going through the light index means this
+    /// never fetches a record it is not going to show.
+    /// <para>
+    /// Read through the service like every other fact this window shows. The
+    /// records are in a folder whose permissions are SYSTEM and
+    /// Administrators and the tray runs as whoever is logged in, so a window
+    /// that read them itself would work for the developer and for nobody in
+    /// a ministry.
+    /// </para>
+    /// </remarks>
+    public async Task<PassesAnswer> RecentPassesAsync(long stationLinkId, int most = 3)
+    {
+        var answer = await _agent
+            .PassesAsync(new CyclePassQuery(stationLinkId, Most: most))
+            .ConfigureAwait(true);
+
+        if (answer.Value is null)
+        {
+            return new PassesAnswer(
+                [],
+                false,
+                answer.Detail ?? "The agent could not read this machine's record of what it has done.");
+        }
+
+        return new PassesAnswer(
+            answer.Value.Rows.Select(row => new PassRowViewModel(row)).ToList(),
+            !answer.Value.Exhausted,
+            null);
+    }
+
+    /// <summary>
+    /// Open the machine's own record of what it has collected.
+    /// </summary>
+    /// <remarks>
+    /// Modeless and not counted as editing, unlike every other window this
+    /// class opens. Those hold a copy of a station row and freeze the list so
+    /// they cannot end up describing a station that has gone; this holds no
+    /// row, and a technician wants to press Collect now on the list behind it
+    /// and then look here for what it did.
+    /// </remarks>
+    /// <param name="stationLinkId">
+    /// The station to open filtered to, or <c>null</c> for the machine's own
+    /// passes.
+    /// </param>
+    public PassesViewModel Passes(long? stationLinkId = null) => new(
+        _agent,
+        _status?.DeviceName ?? "this machine",
+        Connections
+            .SelectMany(connection => connection.Stations)
+            .Select(station => new StationChoice(
+                station.StationLinkId,
+                string.IsNullOrWhiteSpace(station.StationName)
+                    ? station.StationLinkId.ToString(CultureInfo.CurrentCulture)
+                    : station.StationName))
+            .ToList(),
+        stationLinkId);
+
+    /// <summary>
+    /// Have the agent write a diagnostics bundle, and say what happened.
+    /// </summary>
+    /// <remarks>
+    /// The agent writes it and this only chooses where, which is the only
+    /// arrangement that works on a machine an administrator has installed
+    /// properly: the logs are where the token is, and the tray cannot read
+    /// that folder.
+    /// </remarks>
+    /// <param name="passes">
+    /// Which passes the bundle should carry -- the filter the technician was
+    /// looking at, when this was pressed from the passes window. Left null
+    /// from the Status tab, where the question is about the machine.
+    /// </param>
+    public async Task SaveDiagnosticsAsync(string path, CyclePassQuery? passes = null)
+    {
+        // Said before the wait rather than after it. The agent flushes both
+        // logs and then reads a few hundred kilobytes off them, which on a
+        // country server is long enough for a window that had not changed to
+        // read as a button that did nothing.
+        Message = "Collecting diagnostics…";
+
+        var written = await _agent.SaveDiagnosticsAsync(path, passes).ConfigureAwait(true);
+
+        Message = written.Value is null
+            ? written.Detail ?? "The agent could not write a diagnostics file."
+            : string.Create(
+                CultureInfo.CurrentCulture,
+                $"Diagnostics saved to {written.Value.Path} ({Display.Size(written.Value.Bytes)}).");
+    }
+
+    /// <summary>
+    /// A file size, as the sentence beside a saved file says one.
+    /// </summary>
+    /// <remarks>
+    /// Worth saying at all because it is what tells a technician the file they
+    /// are about to attach has something in it. A bundle of 900 bytes is a
+    /// machine that has recorded nothing, and that is itself the answer.
+    /// </remarks>
+    /// <summary>
     /// Count what a station's boxes would match (story 7).
     /// </summary>
     /// <remarks>
@@ -1926,3 +2029,15 @@ public sealed class ShellViewModel : Observable
         nameof(StationsAvailable),
     ];
 }
+
+/// <summary>
+/// What the agent had to say about a station's recent passes.
+/// </summary>
+/// <remarks>
+/// <paramref name="More"/> rather than a silent truncation: a window showing
+/// six of a station's passes without saying there are more reads as a machine
+/// that has only run six times, which is the exact misreading this whole
+/// record exists to stop.
+/// </remarks>
+public sealed record PassesAnswer(
+    IReadOnlyList<PassRowViewModel> Passes, bool More, string? Problem);

@@ -153,7 +153,12 @@ public class CandidateWindowTests
         var link = Assert.Single(agent.Cycles.LastCompletedCycle!.Links);
 
         Assert.Equal(1, link.Failed);
-        Assert.Contains("more than the 64 ADL accepts", link.Error!);
+
+        // The file is named in front of the reason, as every failure sentence
+        // now is, so that the cycle log can fold five hundred identical ones
+        // into a line and a count without the filename making each distinct.
+        Assert.StartsWith("GARISSA_20260821.dat: ", link.Error!);
+        Assert.Contains("larger than the 64 bytes ADL accepts", link.Error!);
     }
 
     [Fact]

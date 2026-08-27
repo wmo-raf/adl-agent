@@ -45,9 +45,7 @@ public sealed class FileAgentStateStore : IAgentStateStore
         IHostLifecycle host,
         ILogger<FileAgentStateStore> logger)
     {
-        _directory = string.IsNullOrWhiteSpace(options.Value.StateDirectory)
-            ? host.StateDirectory
-            : options.Value.StateDirectory!;
+        _directory = options.Value.ResolveStateDirectory(host);
         _logger = logger;
     }
 

@@ -180,6 +180,102 @@
                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}"
                                Text="{Binding Error}" />
                 </Grid>
+
+                <!--
+                    What this machine has actually been doing here, which is
+                    the half of the question the probe above cannot answer. The
+                    probe speaks about this instant; a station that has been
+                    quietly doing nothing since Tuesday is a question about the
+                    past, and until this list existed nothing on the machine
+                    could answer it — the counts lived in memory and the pass
+                    after overwrote them.
+
+                    Bound to the window rather than to the station, so this
+                    breaks out of the StackPanel's DataContext above.
+                -->
+                <StackPanel DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}">
+                    <DockPanel LastChildFill="True" Margin="0,8,0,0">
+                        <!--
+                            The way to the whole record: every pass this
+                            machine has, with filters and the file detail.
+                            Opened on top of this window rather than in place
+                            of it, so the folder count above — which is what a
+                            technician came here for — is still there when they
+                            come back.
+                        -->
+                        <Button DockPanel.Dock="Right" Content="View more…"
+                                Style="{StaticResource Quiet}" Click="ViewMore"
+                                VerticalAlignment="Center" />
+                        <TextBlock Text="Recent passes" Style="{StaticResource Caption}"
+                                   Margin="0" VerticalAlignment="Center" />
+                    </DockPanel>
+
+                    <!--
+                        A sentence and not an empty box. The empty box is the
+                        thing this whole record exists to stop being the
+                        answer: a machine that has genuinely not collected yet
+                        and a service that could not be reached look identical,
+                        and both look like nothing.
+                    -->
+                    <TextBlock Text="{Binding PassesMessage}" TextWrapping="Wrap" Foreground="#5A6472">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPasses}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!--
+                        Three lines, closed, no detail. This is the at-a-glance
+                        half — has anything happened here lately — and the
+                        files, the filters and the machine's whole history are
+                        one click away rather than inlined into a window that
+                        is about something else.
+                    -->
+                    <ItemsControl ItemsSource="{Binding Passes}"
+                                  Visibility="{Binding HasPasses, Converter={StaticResource Visible}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Margin="0,2,0,0" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <!--
+                                                    A pass that went wrong is
+                                                    the one worth finding in a
+                                                    list of three.
+                                                -->
+                                                <DataTrigger Binding="{Binding Problem}" Value="True">
+                                                    <Setter Property="Foreground" Value="#A33B2A" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                    <Run Text="{Binding When, Mode=OneWay}" />
+                                    <Run Text="  " /><Run Text="{Binding Trigger, Mode=OneWay}" />
+                                    <Run Text="  " /><Run Text="{Binding Took, Mode=OneWay}" />
+                                    <Run Text="   scanned " /><Run Text="{Binding Scanned, Mode=OneWay}" />
+                                    <Run Text="  up " /><Run Text="{Binding Uploaded, Mode=OneWay}" />
+                                    <Run Text="  fail " /><Run Text="{Binding Failed, Mode=OneWay}" />
+                                </TextBlock>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!--
+                        Said out loud. Three rows with nothing to say they are
+                        three of many reads as a machine that has run three
+                        times.
+                    -->
+                    <TextBlock Text="Older passes are in this machine's record."
+                               Margin="0,4,0,0" Opacity="0.75" TextWrapping="Wrap"
+                               Visibility="{Binding HasMorePasses, Converter={StaticResource Visible}}" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

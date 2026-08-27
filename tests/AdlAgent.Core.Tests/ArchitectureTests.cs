@@ -122,6 +122,73 @@ public class ArchitectureTests
         Assert.Equal(typeof(ShellViewModel).Assembly, typeof(StationViewModel).Assembly);
     }
 
+    /// <summary>
+    /// The supply chain stays five Microsoft packages and Velopack.
+    /// </summary>
+    /// <remarks>
+    /// A rule about a binary that is installed inside 26 government networks,
+    /// several of which run a review before anything reaches a server. Every
+    /// package added here is a thing somebody has to answer for, and the way
+    /// one arrives is never a decision -- it is a convenience halfway through
+    /// an unrelated change.
+    /// <para>
+    /// The rolling, gzipping and evicting log this repository has is the
+    /// worked example: Serilog and <c>NReco.Logging.File</c> would each have
+    /// done the job, and each would also have brought a second, independent
+    /// retention model that knows nothing about the cycle log's ceiling.
+    /// </para>
+    /// <para>
+    /// A test rather than a note, because a note is what the fifth
+    /// contributor does not read. Adding a package is still allowed; what is
+    /// not allowed is adding one quietly.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_agent_depends_on_nothing_new()
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            // The shipping programs.
+            "Microsoft.Extensions.Hosting.Abstractions",
+            "Microsoft.Extensions.Http",
+            "Microsoft.Extensions.Logging.Abstractions",
+            "Microsoft.Extensions.Options.ConfigurationExtensions",
+            "Microsoft.Extensions.Options.DataAnnotations",
+            "Microsoft.Extensions.Configuration.Ini",
+            "Microsoft.Extensions.Hosting",
+            "Microsoft.Extensions.Hosting.WindowsServices",
+            "Velopack",
+
+            // And the test projects, which ship to nobody.
+            "Microsoft.Extensions.Logging.Console",
+            "Microsoft.Extensions.TimeProvider.Testing",
+            "Microsoft.NET.Test.Sdk",
+            "xunit",
+            "xunit.runner.visualstudio",
+        };
+
+        var references = new Regex(
+            @"<PackageReference\s+Include=""(?<name>[^""]+)""", RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+
+        foreach (var project in Directory.EnumerateFiles(
+            RepositoryDirectory(), "*.csproj", SearchOption.AllDirectories))
+        {
+            foreach (Match reference in references.Matches(File.ReadAllText(project)))
+            {
+                var name = reference.Groups["name"].Value;
+
+                if (!allowed.Contains(name))
+                {
+                    offenders.Add($"{Path.GetFileName(project)}: {name}");
+                }
+            }
+        }
+
+        Assert.Empty(offenders);
+    }
+
     private static IHost BuildWindowsHost()
     {
         var state = Directory.CreateTempSubdirectory("adl-agent-composition").FullName;
@@ -138,23 +205,27 @@ public class ArchitectureTests
     /// The core's sources, found by walking up from the test binary to the
     /// repository root.
     /// </summary>
-    private static string CoreSourceDirectory()
+    private static string CoreSourceDirectory() =>
+        Path.Combine(RepositoryDirectory(), "src", "AdlAgent.Core");
+
+    /// <summary>
+    /// The repository, found by walking up from the test binary.
+    /// </summary>
+    private static string RepositoryDirectory()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
 
         while (directory is not null)
         {
-            var core = Path.Combine(directory.FullName, "src", "AdlAgent.Core");
-
-            if (Directory.Exists(core))
+            if (Directory.Exists(Path.Combine(directory.FullName, "src", "AdlAgent.Core")))
             {
-                return core;
+                return directory.FullName;
             }
 
             directory = directory.Parent;
         }
 
         throw new DirectoryNotFoundException(
-            "Could not find src/AdlAgent.Core above the test binary. This test reads the core's sources.");
+            "Could not find src/AdlAgent.Core above the test binary. These tests read the repository.");
     }
 }

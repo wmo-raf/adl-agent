@@ -140,6 +140,70 @@ public static class ControlProtocol
     public const string CollectCancelCommand = "collect_cancel";
 
     /// <summary>
+    /// A page of recorded passes as table rows, newest first. Payload is any
+    /// of <c>{"station_link_id": 11, "trigger": "scheduled",
+    /// "problems_only": true, "before": "2026-08-27T09:30:00Z", "most": 450}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Rows and not records, which is what makes a table of passes possible
+    /// at all: this surface caps a message at
+    /// <see cref="MaxMessageBytes"/>, a full record carries its file list and
+    /// runs to kilobytes, and a busy machine writes some fifteen hundred
+    /// passes a day. A row is about a hundred and twenty bytes.
+    /// <para>
+    /// The filters are applied here rather than by whoever draws the table,
+    /// so that a page is a page of matches: "load more" then walks back
+    /// through rows instead of through blank screens, and a failure three
+    /// weeks back is reachable.
+    /// </para>
+    /// <para>
+    /// The answer says how it was arrived at -- how many records were read,
+    /// whether the log ran out, and where to carry on from -- because
+    /// "twelve passes had problems" and "twelve, in the twenty thousand I got
+    /// through before I stopped" look identical and mean opposite things.
+    /// </para>
+    /// </remarks>
+    public const string PassesIndexCommand = "passes_index";
+
+    /// <summary>
+    /// One pass in full, file detail and all. Payload:
+    /// <c>{"at": "2026-08-27T09:30:02.417Z", "unit": "C:\\Vaisala\\dump"}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Named by when it started and the folder it walked, both of which are
+    /// already in the row asking for it. No id is invented: two units never
+    /// share a folder, and one unit cannot pass twice at once.
+    /// <para>
+    /// Answers with nothing when that pass has been evicted since the row was
+    /// drawn, which is an ordinary thing to happen to a window left open on a
+    /// machine working through a backlog.
+    /// </para>
+    /// </remarks>
+    public const string PassCommand = "pass";
+
+    /// <summary>
+    /// Write a plain-text diagnostics bundle. Payload: <c>{"path": "..."}</c>,
+    /// plus any of the filters <see cref="PassesIndexCommand"/> takes.
+    /// </summary>
+    /// <remarks>
+    /// The path comes from the client and the file is written by the agent,
+    /// which is the only arrangement that works on the service tier: the logs
+    /// are in a folder whose permissions the MSI has replaced with SYSTEM and
+    /// Administrators, so the tray cannot read them and the service can. The
+    /// technician picks where it goes and the service fills it. The bundle
+    /// rather than the bytes, for the same reason: it is far larger than
+    /// <see cref="MaxMessageBytes"/>.
+    /// <para>
+    /// The filters are here so that what a technician sends is what they were
+    /// looking at. A bundle that always carried the newest passes could not
+    /// hold the failure three weeks back that the window had just been used to
+    /// find, which would make the window good at locating something it could
+    /// not then report.
+    /// </para>
+    /// </remarks>
+    public const string DiagnosticsCommand = "diagnostics";
+
+    /// <summary>
     /// The agent accepted the connection and then closed it without saying
     /// anything.
     /// </summary>
