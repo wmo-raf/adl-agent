@@ -1,4 +1,6 @@
+using System.Text.Json;
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Cycle;
 using AdlAgent.TestSupport;
 
@@ -47,6 +49,29 @@ public class CycleConcurrencyTests
         // an admin field somebody typed into.
         Assert.Equal(1, concurrency.UploadsFor(new AgentLimits { ConcurrentUploads = 0 }));
         Assert.Equal(8, concurrency.UploadsFor(new AgentLimits { ConcurrentUploads = 1000 }));
+    }
+
+    [Fact]
+    public void The_bound_ADL_sends_is_the_bound_this_agent_reads()
+    {
+        // A literal body rather than a round trip through this agent's own
+        // serializer, which would prove only that it agrees with itself. What
+        // is pinned here is the spelling the plugin emits -- ADL and the agent
+        // are separate repositories on separate release trains, and a field
+        // renamed on one side would otherwise show up as every machine in the
+        // fleet quietly falling back to the default.
+        const string body = """
+            {
+              "manifest_entries": 500,
+              "file_bytes": 52428800,
+              "concurrent_uploads": 6
+            }
+            """;
+
+        var limits = JsonSerializer.Deserialize<AgentLimits>(body, AgentJson.Options)!;
+
+        Assert.Equal(6, limits.ConcurrentUploads);
+        Assert.Equal(6, new CycleConcurrency().UploadsFor(limits));
     }
 
     [Fact]
