@@ -141,6 +141,15 @@ public sealed record AgentStationSnapshot
     public required StationLinkAppConfig Config { get; init; }
 
     /// <summary>Files in the folder matching this station's pattern last cycle.</summary>
+    /// <summary>True while this station is being collected at this moment.</summary>
+    /// <remarks>
+    /// What stops the row showing a stale count as though it were the news. A
+    /// station part-way through a backlog has last pass's numbers against it
+    /// and is busy replacing them, and a grid that showed only the old ones
+    /// reads as a station nothing is happening to.
+    /// </remarks>
+    public bool Collecting { get; init; }
+
     public int? Scanned { get; init; }
 
     public int? Offered { get; init; }

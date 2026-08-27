@@ -36,20 +36,31 @@ public sealed class UploadCycle
     private readonly AgentSession _session;
     private readonly AgentCadence _cadence;
     private readonly CycleReportStore _cycles;
+    private readonly CycleConcurrency _concurrency;
     private readonly TimeProvider _time;
     private readonly ILogger<UploadCycle> _logger;
 
     /// <summary>
-    /// One cycle at a time on this machine, of either kind.
+    /// The stations being collected right now, and the gate over that set.
     /// </summary>
     /// <remarks>
-    /// Here rather than in the loop above it, because the loop is no longer
-    /// the only thing that starts a cycle. Two cycles over one folder would
-    /// hash every file twice and offer ADL the same manifest from both, and
-    /// the hash memo cache -- which is cleared at the end of a cycle -- would
-    /// be cleared out from under whichever of them was still running.
+    /// A claim per station rather than one gate on the machine. The hazard is
+    /// narrower than the machine: two passes over <em>one</em> station's
+    /// folder would hash every file twice and offer ADL the same manifest
+    /// from both. Two passes over two different folders are simply this
+    /// machine doing its job.
+    /// <para>
+    /// A single gate was right while a cycle was one pass over everything and
+    /// took seconds. It stopped being right the moment collection ran a unit
+    /// at a time: on a machine working through a backlog something is always
+    /// running, and a technician standing at it would find "Collect now"
+    /// refused for hours on a healthy station that had nothing to do with the
+    /// backlog.
+    /// </para>
     /// </remarks>
-    private readonly SemaphoreSlim _running = new(1, 1);
+    private readonly HashSet<long> _collecting = [];
+
+    private readonly Lock _gate = new();
 
     public UploadCycle(
         ConfigurationService configuration,
@@ -60,6 +71,7 @@ public sealed class UploadCycle
         AgentSession session,
         AgentCadence cadence,
         CycleReportStore cycles,
+        CycleConcurrency concurrency,
         TimeProvider time,
         ILogger<UploadCycle> logger)
     {
@@ -71,41 +83,165 @@ public sealed class UploadCycle
         _session = session;
         _cadence = cadence;
         _cycles = cycles;
+        _concurrency = concurrency;
         _time = time;
         _logger = logger;
     }
 
-    /// <summary>True while a cycle of either kind is running.</summary>
+    /// <summary>True while anything on this machine is being collected.</summary>
     /// <remarks>
-    /// Read by the collect-now command so it can refuse in a sentence rather
-    /// than queue behind the scheduled cycle or run beside it. Both would be
-    /// worse than the refusal: a queued run starts minutes after the button,
-    /// on a window that has been closed, and a concurrent one hashes the same
-    /// folder twice and offers ADL the same files from two manifests.
+    /// What the window says out loud, so that a machine grinding through a
+    /// backlog does not look like a machine doing nothing -- which is how
+    /// this whole thread started. Not what the collect-now command asks:
+    /// that asks about one station, through
+    /// <see cref="IsCollecting"/>.
     /// </remarks>
-    public bool Running => _running.CurrentCount == 0;
-
-    /// <summary>Run one cycle to its end, or to the point where it cannot go on.</summary>
-    /// <remarks>
-    /// Waits for a collect-now to finish rather than skipping the cycle. The
-    /// scheduled cycle is the thing that must happen; a technician's button
-    /// merely brings one station's turn forward, and a cycle silently dropped
-    /// because somebody was pressing it is the sort of gap that reaches HQ as
-    /// a machine that has quietly stopped.
-    /// </remarks>
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public bool Running
     {
-        await _running.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
+        get
         {
-            await RunEveryStationAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _running.Release();
+            lock (_gate)
+            {
+                return _collecting.Count > 0;
+            }
         }
     }
+
+    /// <summary>How many stations are being collected right now.</summary>
+    public int CollectingCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _collecting.Count;
+            }
+        }
+    }
+
+    /// <summary>True while this station in particular is being collected.</summary>
+    /// <remarks>
+    /// Read by the collect-now command so it can refuse in a sentence rather
+    /// than queue behind a pass over the same folder or run beside it. Both
+    /// would be worse than the refusal: a queued run starts minutes after the
+    /// button, on a window that has been closed, and a concurrent one hashes
+    /// the same folder twice and offers ADL the same files from two
+    /// manifests.
+    /// </remarks>
+    public bool IsCollecting(long stationLinkId)
+    {
+        lock (_gate)
+        {
+            return _collecting.Contains(stationLinkId);
+        }
+    }
+
+    /// <summary>
+    /// Take every station in <paramref name="stationLinkIds"/>, or none.
+    /// </summary>
+    /// <remarks>
+    /// All or nothing, under one lock. A unit that took the stations it could
+    /// and skipped the rest would be collecting half a shared folder while
+    /// something else collected the other half, which is the case the claim
+    /// exists to stop.
+    /// </remarks>
+    private bool TryClaim(IReadOnlyCollection<long> stationLinkIds)
+    {
+        lock (_gate)
+        {
+            if (stationLinkIds.Any(_collecting.Contains))
+            {
+                return false;
+            }
+
+            foreach (var stationLinkId in stationLinkIds)
+            {
+                _collecting.Add(stationLinkId);
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>Take them, waiting for whoever has them now.</summary>
+    /// <remarks>
+    /// Waiting rather than skipping, because the tick is the thing that must
+    /// happen: a station dropped from a tick because somebody was pressing a
+    /// button on it is the sort of gap that reaches HQ as a machine that has
+    /// quietly stopped. What has changed is the size of the wait -- one unit
+    /// waits for one technician's collect, and every other unit on the
+    /// machine carries on around it, where a single gate would have made the
+    /// whole tick queue.
+    /// <para>
+    /// Cannot deadlock. Units are disjoint by construction -- that is what
+    /// grouping stations by the folders they share is for -- so the only
+    /// contention is a unit against the one station somebody is collecting by
+    /// hand, and that collect took its claim without waiting for anything.
+    /// </para>
+    /// </remarks>
+    private async Task ClaimAsync(
+        IReadOnlyCollection<long> stationLinkIds, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task released;
+
+            lock (_gate)
+            {
+                if (!stationLinkIds.Any(_collecting.Contains))
+                {
+                    foreach (var stationLinkId in stationLinkIds)
+                    {
+                        _collecting.Add(stationLinkId);
+                    }
+
+                    return;
+                }
+
+                // Read inside the lock, so a release between the test above
+                // and the wait below cannot be missed.
+                released = _released.Task;
+            }
+
+            await released.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private void Release(IReadOnlyCollection<long> stationLinkIds)
+    {
+        lock (_gate)
+        {
+            foreach (var stationLinkId in stationLinkIds)
+            {
+                _collecting.Remove(stationLinkId);
+            }
+
+            // Everyone waiting looks again, and whoever finds their stations
+            // free takes them. Woken rather than handed the claim, because
+            // what a waiter wants is a set and this does not know whose set
+            // has just become whole.
+            _released.TrySetResult();
+            _released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    private TaskCompletionSource _released =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Run one tick to its end, or to the point where it cannot go on.</summary>
+    /// <remarks>
+    /// The tick is never skipped. It is the thing that must happen; a
+    /// technician's button merely brings one station's turn forward, and a
+    /// tick silently dropped because somebody was pressing it is the sort of
+    /// gap that reaches HQ as a machine that has quietly stopped.
+    /// <para>
+    /// A station somebody is collecting by hand right now is the one thing
+    /// the tick leaves alone -- see <see cref="CollectAsync"/> -- and it is
+    /// picked up on the next one, minutes later.
+    /// </para>
+    /// </remarks>
+    public Task RunAsync(CancellationToken cancellationToken = default) =>
+        RunEveryStationAsync(cancellationToken);
 
     private async Task RunEveryStationAsync(CancellationToken cancellationToken)
     {
@@ -134,22 +270,46 @@ public sealed class UploadCycle
         // one folder, for almost every station in a fleet.
         var units = _scanner.Plan(configuration, sweep, now);
 
-        var cutShort = false;
+        // One count of uploads for the whole machine, not one per unit. Eight
+        // units each sending four files would be thirty-two on the wire.
+        using var uploads = new UploadSlots(
+            _concurrency.UploadsFor(configuration.Sync.Limits));
 
-        foreach (var unit in units)
-        {
-            if (!await CollectAsync(token, configuration, unit, cancellationToken)
-                    .ConfigureAwait(false))
+        // Cancelled by whichever unit first finds ADL gone. Linked to the
+        // caller's, so a service shutdown still stops everything -- and told
+        // apart from it below, because one of the two is a reason to record
+        // what a unit had done and the other is not.
+        using var tick = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        await Parallel.ForEachAsync(
+            units,
+            new ParallelOptions
             {
-                // ADL has stopped answering, which is not this unit's
-                // problem: it is every unit's. The rest of the tick is
-                // abandoned rather than spent discovering the same thing
-                // once per folder on a link that is already down.
-                cutShort = true;
+                MaxDegreeOfParallelism = _concurrency.Units,
+                CancellationToken = cancellationToken,
+            },
+            async (unit, _) =>
+            {
+                if (tick.IsCancellationRequested)
+                {
+                    // ADL went while this unit was still queued. It has not
+                    // run, so it has nothing to report -- reporting a pass
+                    // that never happened would be worse than the silence.
+                    return;
+                }
 
-                break;
-            }
-        }
+                if (!await CollectAsync(
+                        token, configuration, unit, uploads, tick.Token, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    // Not this unit's problem: every unit's. The rest of the
+                    // tick is abandoned rather than spent discovering the
+                    // same thing once per folder on a link already down.
+                    await tick.CancelAsync().ConfigureAwait(false);
+                }
+            }).ConfigureAwait(false);
+
+        var cutShort = tick.IsCancellationRequested;
 
         // Once for the tick, not once per unit. The cache forgets whatever it
         // was not asked about since the last call, so a per-unit sweep of it
@@ -202,12 +362,52 @@ public sealed class UploadCycle
         string token,
         AgentConfiguration configuration,
         FolderScanner.ScanUnit unit,
-        CancellationToken cancellationToken)
+        UploadSlots uploads,
+        CancellationToken cancellationToken,
+        CancellationToken stopping)
+    {
+        // Waits if somebody at the machine is collecting one of these
+        // stations by hand. The tick does not give up its turn; it takes it
+        // late, and the other units carry on meanwhile.
+        await ClaimAsync(unit.StationLinkIds, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await CollectClaimedAsync(
+                token, configuration, unit, uploads, cancellationToken, stopping)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            Release(unit.StationLinkIds);
+        }
+    }
+
+    private async Task<bool> CollectClaimedAsync(
+        string token,
+        AgentConfiguration configuration,
+        FolderScanner.ScanUnit unit,
+        UploadSlots uploads,
+        CancellationToken cancellationToken,
+        CancellationToken stopping)
     {
         var scan = _scanner.Scan(unit, _time.GetUtcNow());
 
-        var delivered = await DeliverAsync(token, configuration, scan, cancellationToken)
-            .ConfigureAwait(false);
+        bool delivered;
+
+        try
+        {
+            delivered = await DeliverAsync(token, configuration, scan, uploads, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!stopping.IsCancellationRequested)
+        {
+            // Another unit found ADL gone and stopped the tick out from under
+            // this one. Cut short exactly as if this unit had found it
+            // itself: what it managed is still worth recording, and its
+            // completion still is not.
+            delivered = false;
+        }
 
         var at = _time.GetUtcNow();
 
@@ -255,11 +455,26 @@ public sealed class UploadCycle
     /// <see cref="RequestedCollect"/>.
     /// </para>
     /// </remarks>
-    /// <returns>What the run came to, or null when a cycle was already running.</returns>
+    /// <returns>
+    /// What the run came to, or null when this station is already being
+    /// collected.
+    /// </returns>
+    /// <remarks>
+    /// Refused only for <em>this</em> station. A technician collecting
+    /// Garissa is blocked by another pass over Garissa's own folder and by
+    /// nothing else -- not by Kisumu's year of backlog, which is what a
+    /// single gate on the machine would have made them wait for.
+    /// </remarks>
     public async Task<RequestedCollect?> CollectStationAsync(
         long stationLinkId, ICollectWatcher watcher, CancellationToken cancellationToken)
     {
-        if (!await _running.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
+        // Claimed before anything is read, and on the station the button
+        // names -- which is the whole of this run, because the configuration
+        // is narrowed to that one link before it is planned. Its neighbours
+        // in a shared dump directory are not collected here, and the
+        // scheduled unit that holds all of them cannot start while this claim
+        // stands.
+        if (!TryClaim([stationLinkId]))
         {
             return null;
         }
@@ -271,7 +486,7 @@ public sealed class UploadCycle
         }
         finally
         {
-            _running.Release();
+            Release([stationLinkId]);
         }
     }
 
@@ -332,7 +547,10 @@ public sealed class UploadCycle
 
         watcher.Step("Offering what was found to ADL…");
 
-        var delivered = await DeliverAsync(token, narrowed, scan, cancellationToken)
+        using var uploads = new UploadSlots(
+            _concurrency.UploadsFor(narrowed.Sync.Limits));
+
+        var delivered = await DeliverAsync(token, narrowed, scan, uploads, cancellationToken)
             .ConfigureAwait(false);
 
         // Cleared whether or not the delivery finished. Unlike the scheduled
@@ -447,6 +665,7 @@ public sealed class UploadCycle
         string token,
         AgentConfiguration configuration,
         ScanResult scan,
+        UploadSlots uploads,
         CancellationToken cancellationToken)
     {
         var pageSize = PageSize(configuration.Sync.Limits);
@@ -522,7 +741,7 @@ public sealed class UploadCycle
 
             Tally(scan, page, answer);
 
-            if (!await SendAsync(token, scan, page, answer, cancellationToken).ConfigureAwait(false))
+            if (!await SendAsync(token, scan, page, answer, uploads, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -573,12 +792,26 @@ public sealed class UploadCycle
     }
 
     /// <summary>Send every file ADL asked for out of this page.</summary>
+    /// <remarks>
+    /// Several at a time, up to what ADL allows the machine across all of its
+    /// units. Three thousand files at one round trip each is the difference
+    /// between a station catching up this morning and catching up this week,
+    /// and the round trip is nearly all waiting -- so the link is used rather
+    /// than taken turns on.
+    /// <para>
+    /// The counters this writes are one station's, written from several
+    /// uploads at once, which is what <see cref="LinkTally"/>'s interlocking
+    /// is for. Nothing else here is shared: the page is read-only and the
+    /// scan's tally lookup is a finished dictionary.
+    /// </para>
+    /// </remarks>
     /// <returns>False when ADL stopped answering.</returns>
     private async Task<bool> SendAsync(
         string token,
         ScanResult scan,
         IReadOnlyList<FileCandidate> page,
         ManifestResponse answer,
+        UploadSlots uploads,
         CancellationToken cancellationToken)
     {
         // Built with TryAdd rather than ToDictionary: the key comes from a
@@ -592,58 +825,88 @@ public sealed class UploadCycle
             offered.TryAdd((candidate.Entry.StationLinkId, candidate.Entry.Name), candidate);
         }
 
-        foreach (var wanted in answer.Requested)
+        // Set by whichever upload finds ADL gone, and read once at the end.
+        // The rest of the page stops rather than each file discovering the
+        // same dead link for itself.
+        var ended = 0;
+
+        using var ending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        try
         {
-            if (!offered.TryGetValue((wanted.StationLinkId, wanted.Name), out var candidate))
-            {
-                // ADL asked for something this page did not offer. Not worth
-                // a failure against the station: the next manifest will offer
-                // whatever it can actually see.
-                _logger.LogWarning(
-                    "ADL asked for {Name} on station link {Link}, which was not in the manifest it answered.",
-                    wanted.Name, wanted.StationLinkId);
+            await Parallel.ForEachAsync(
+                answer.Requested,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = uploads.Most,
+                    CancellationToken = ending.Token,
+                },
+                async (wanted, token1) =>
+                {
+                    if (!offered.TryGetValue((wanted.StationLinkId, wanted.Name), out var candidate))
+                    {
+                        // ADL asked for something this page did not offer. Not
+                        // worth a failure against the station: the next manifest
+                        // will offer whatever it can actually see.
+                        _logger.LogWarning(
+                            "ADL asked for {Name} on station link {Link}, which was not in the manifest it answered.",
+                            wanted.Name, wanted.StationLinkId);
 
-                continue;
-            }
+                        return;
+                    }
 
-            var tally = scan.For(wanted.StationLinkId);
+                    var tally = scan.For(wanted.StationLinkId);
 
-            try
-            {
-                var stored = await _client
-                    .UploadFileAsync(token, candidate.Entry, candidate.Path, cancellationToken)
-                    .ConfigureAwait(false);
+                    // Held across the upload and nothing else, so the bound is
+                    // on what is on the wire rather than on how many files the
+                    // machine is thinking about.
+                    using var slot = await uploads.TakeAsync(token1).ConfigureAwait(false);
 
-                tally?.Accept();
+                    try
+                    {
+                        var stored = await _client
+                            .UploadFileAsync(token, candidate.Entry, candidate.Path, token1)
+                            .ConfigureAwait(false);
 
-                _logger.LogDebug(
-                    "ADL took {Name} for station link {Link}: {Size} bytes, {Status}.",
-                    stored.Name, stored.StationLinkId, stored.Size, stored.Status);
-            }
-            catch (Exception exception) when (EndsTheCycle(exception))
-            {
-                Stop(exception, "An upload");
+                        tally?.Accept();
 
-                return false;
-            }
-            catch (AdlRequestException exception)
-            {
-                // One file, refused. The commonest reason is the honest one:
-                // the vendor appended to it between the hash and the read, so
-                // the bytes no longer match what was promised. Next cycle
-                // offers the file as it now stands.
-                tally?.Fail($"{candidate.Entry.Name}: {exception.Detail}");
-            }
-            catch (Exception exception) when (
-                exception is IOException or UnauthorizedAccessException)
-            {
-                // Gone, moved, or locked since the scan. Also next cycle's
-                // business, if it is still there at all.
-                tally?.Fail($"{candidate.Entry.Name}: {exception.Message}");
-            }
+                        _logger.LogDebug(
+                            "ADL took {Name} for station link {Link}: {Size} bytes, {Status}.",
+                            stored.Name, stored.StationLinkId, stored.Size, stored.Status);
+                    }
+                    catch (Exception exception) when (EndsTheCycle(exception))
+                    {
+                        Stop(exception, "An upload");
+
+                        Interlocked.Exchange(ref ended, 1);
+
+                        await ending.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (AdlRequestException exception)
+                    {
+                        // One file, refused. The commonest reason is the honest
+                        // one: the vendor appended to it between the hash and the
+                        // read, so the bytes no longer match what was promised.
+                        // Next cycle offers the file as it now stands.
+                        tally?.Fail($"{candidate.Entry.Name}: {exception.Detail}");
+                    }
+                    catch (Exception exception) when (
+                        exception is IOException or UnauthorizedAccessException)
+                    {
+                        // Gone, moved, or locked since the scan. Also next
+                        // cycle's business, if it is still there at all.
+                        tally?.Fail($"{candidate.Entry.Name}: {exception.Message}");
+                    }
+                }).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (Volatile.Read(ref ended) == 1)
+        {
+            // The page cut itself short, which is the one cancellation this
+            // knows the reason for. Anything else -- a service shutting
+            // down -- is not this method's to swallow.
         }
 
-        return true;
+        return Volatile.Read(ref ended) == 0;
     }
 
     /// <summary>Note what ADL made of this page, per station.</summary>

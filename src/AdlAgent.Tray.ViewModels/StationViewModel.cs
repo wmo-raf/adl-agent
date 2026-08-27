@@ -169,6 +169,16 @@ public sealed class StationViewModel : Observable
     {
         get
         {
+            if (_station.Collecting)
+            {
+                // Ahead of both, because both are about a pass that has
+                // finished and this station is in one now. A row showing last
+                // pass's counts while this pass is replacing them reads as a
+                // station nothing is happening to, which on a machine working
+                // through a backlog is every row it has.
+                return "collecting…";
+            }
+
             if (_station.Requested is { } requested)
             {
                 var how = requested.Cancelled ? "on request, stopped" : "on request";

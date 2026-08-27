@@ -18,6 +18,14 @@ namespace AdlAgent.Core.Cycle;
 /// thing to the station: one more file that did not go, and a sentence
 /// saying why.
 /// </para>
+/// <para>
+/// Safe to move from several threads, which is a narrower claim than it
+/// sounds. Two <em>units</em> never share a tally -- a unit owns its stations
+/// outright, which is what grouping by shared folders is for -- so nothing
+/// here is guarding against the machine at large. What it guards is one
+/// unit's own uploads running several at a time: those are all this station's
+/// files, and they all come home to this station's counters.
+/// </para>
 /// </remarks>
 public sealed class LinkTally
 {
@@ -29,19 +37,19 @@ public sealed class LinkTally
     public long StationLinkId { get; }
 
     /// <summary>Files in the folder matching this station's pattern.</summary>
-    public int Scanned { get; private set; }
+    public int Scanned => Volatile.Read(ref _scanned);
 
     /// <summary>Files put in front of ADL this cycle.</summary>
-    public int Offered { get; private set; }
+    public int Offered => Volatile.Read(ref _offered);
 
     /// <summary>Files ADL asked for. Not reported; it is what backlog is measured from.</summary>
-    public int Requested { get; private set; }
+    public int Requested => Volatile.Read(ref _requested);
 
     /// <summary>Files ADL accepted.</summary>
-    public int Uploaded { get; private set; }
+    public int Uploaded => Volatile.Read(ref _uploaded);
 
     /// <summary>Files that could not be sent, and will be tried again next cycle.</summary>
-    public int Failed { get; private set; }
+    public int Failed => Volatile.Read(ref _failed);
 
     /// <summary>
     /// Files seen but left alone, because they were still being written.
@@ -51,33 +59,33 @@ public sealed class LinkTally
     /// is in this state on every single cycle, and a station permanently
     /// reporting a failure is a station nobody looks at any more.
     /// </remarks>
-    public int Pending { get; private set; }
+    public int Pending => Volatile.Read(ref _pending);
 
     /// <summary>What went wrong for this station, if anything did.</summary>
-    public string? Error { get; private set; }
+    public string? Error => Volatile.Read(ref _error);
 
     /// <summary>Files this machine has seen that ADL does not hold.</summary>
     public int Backlog => Pending + Math.Max(0, Requested - Uploaded);
 
     /// <summary>A file in the folder matched this station's pattern.</summary>
-    public void Saw() => Scanned++;
+    public void Saw() => Interlocked.Increment(ref _scanned);
 
     /// <summary>A file was left alone until it has finished being written.</summary>
-    public void Wait() => Pending++;
+    public void Wait() => Interlocked.Increment(ref _pending);
 
     /// <summary>A file went into a manifest.</summary>
-    public void Offer() => Offered++;
+    public void Offer() => Interlocked.Increment(ref _offered);
 
     /// <summary>ADL asked for a file this station offered.</summary>
-    public void Want() => Requested++;
+    public void Want() => Interlocked.Increment(ref _requested);
 
     /// <summary>ADL took a file.</summary>
-    public void Accept() => Uploaded++;
+    public void Accept() => Interlocked.Increment(ref _uploaded);
 
     /// <summary>A file did not go, and here is what to tell whoever asks.</summary>
     public void Fail(string reason)
     {
-        Failed++;
+        Interlocked.Increment(ref _failed);
         Note(reason);
     }
 
@@ -88,8 +96,22 @@ public sealed class LinkTally
     /// The first rather than the last: when a station has several problems in
     /// one cycle the later ones are usually consequences of the earlier one,
     /// and one sentence is all the fleet listing shows.
+    /// <para>
+    /// "First" is decided by whichever upload gets there first once several
+    /// run at a time, which is as it should be: they are the same station's
+    /// files failing for the same reason, and a race between two spellings of
+    /// one fault is not a race worth ordering.
+    /// </para>
     /// </remarks>
-    public void Note(string error) => Error ??= error;
+    public void Note(string error) => Interlocked.CompareExchange(ref _error, error, null);
+
+    private int _scanned;
+    private int _pending;
+    private int _offered;
+    private int _requested;
+    private int _uploaded;
+    private int _failed;
+    private string? _error;
 
     public CycleLinkReport ToReport() => new()
     {

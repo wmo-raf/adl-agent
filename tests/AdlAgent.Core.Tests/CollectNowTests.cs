@@ -154,9 +154,12 @@ public class CollectNowTests
         Assert.False(refused.Ok);
 
         // The station is named, so the sentence is followable: it is being
-        // collected right now as part of that cycle, and there is nothing
-        // else for the person who pressed it to do.
-        Assert.Contains("A cycle is already running", refused.Refusal!, StringComparison.Ordinal);
+        // collected right now, and there is nothing else for the person who
+        // pressed it to do.
+        //
+        // Refused because *this* station is busy, not because the machine is.
+        // A pass over some other folder is no reason to refuse.
+        Assert.Contains("is being collected right now", refused.Refusal!, StringComparison.Ordinal);
         Assert.Contains("Station 11", refused.Refusal!, StringComparison.Ordinal);
 
         manifested.Release();

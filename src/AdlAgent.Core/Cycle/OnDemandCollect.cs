@@ -9,10 +9,10 @@ namespace AdlAgent.Core.Cycle;
 /// it, stopping it, and what the last one came to.
 /// </summary>
 /// <remarks>
-/// One at a time, and only when no scheduled cycle is running. Both are
-/// <see cref="UploadCycle"/>'s rule rather than this class's -- there is one
-/// gate on the machine and it lives with the thing it guards -- and this is
-/// where the refusal becomes a sentence somebody reads.
+/// One at a time, and only when nothing is already collecting this station.
+/// Both are <see cref="UploadCycle"/>'s rule rather than this class's -- the
+/// claim lives with the thing it guards -- and this is where the refusal
+/// becomes a sentence somebody reads.
 /// <para>
 /// The run is started and not awaited. The control surface serves one client
 /// at a time, so a command that waited for a cycle to finish would freeze the
@@ -109,15 +109,21 @@ public sealed class OnDemandCollect
             }
 
             // Asked of the cycle rather than of the run above, because the
-            // scheduled loop starts cycles this class never sees. The station
-            // is named so the sentence is followable: it will be collected as
-            // part of that cycle, and there is nothing else to do.
-            if (_cycle.Running)
+            // scheduled loop starts passes this class never sees. The station
+            // is named so the sentence is followable: it is being collected
+            // right now, and there is nothing else to do.
+            //
+            // About this station and not about the machine. Collection runs a
+            // unit at a time, so on a machine working through a backlog
+            // something is always running -- and asking whether *anything* is
+            // would refuse the button for hours on a healthy station that has
+            // nothing to do with the backlog.
+            if (_cycle.IsCollecting(stationLinkId))
             {
                 return CollectStarted.No(
                     string.Format(
                         System.Globalization.CultureInfo.CurrentCulture,
-                        "A cycle is already running on this machine — {0} will be collected as part of it.",
+                        "{0} is being collected right now — this will finish on its own.",
                         link.Admin.Station.Name));
             }
 

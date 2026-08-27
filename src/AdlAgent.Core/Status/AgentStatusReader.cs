@@ -1,4 +1,5 @@
 using AdlAgent.Core.Configuration;
+using AdlAgent.Core.Cycle;
 using AdlAgent.Core.Heartbeat;
 using AdlAgent.Core.Hosting;
 using AdlAgent.Core.Pairing;
@@ -19,6 +20,7 @@ public sealed class AgentStatusReader
     private readonly IUpdateInstaller _installer;
     private readonly IHostLifecycle _host;
     private readonly OnDemandSync _syncs;
+    private readonly UploadCycle _cycle;
     private readonly AgentOptions _options;
 
     public AgentStatusReader(
@@ -30,6 +32,7 @@ public sealed class AgentStatusReader
         IUpdateInstaller installer,
         IHostLifecycle host,
         OnDemandSync syncs,
+        UploadCycle cycle,
         IOptions<AgentOptions> options)
     {
         _session = session;
@@ -40,6 +43,7 @@ public sealed class AgentStatusReader
         _installer = installer;
         _host = host;
         _syncs = syncs;
+        _cycle = cycle;
         _options = options.Value;
     }
 
@@ -119,6 +123,7 @@ public sealed class AgentStatusReader
             CheckIntervalMinutes = (int)_cadence.CheckInterval.TotalMinutes,
             HeartbeatIntervalMinutes = (int)_cadence.HeartbeatInterval.TotalMinutes,
             ReconciliationIntervalHours = heartbeat.ReconciliationIntervalHours,
+            CollectingStations = _cycle.CollectingCount,
             LastError = heartbeat.LastError,
             UpdateState = update.Outcome.ToString(),
             UpdateVersion = update.OfferedVersion,

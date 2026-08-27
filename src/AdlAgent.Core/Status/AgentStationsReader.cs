@@ -32,17 +32,20 @@ public sealed class AgentStationsReader
     private readonly ConfigurationService _configuration;
     private readonly ICycleReportSource _cycles;
     private readonly OnDemandCollect _requested;
+    private readonly UploadCycle _cycle;
     private readonly TimeProvider _time;
 
     public AgentStationsReader(
         ConfigurationService configuration,
         ICycleReportSource cycles,
         OnDemandCollect requested,
+        UploadCycle cycle,
         TimeProvider time)
     {
         _configuration = configuration;
         _cycles = cycles;
         _requested = requested;
+        _cycle = cycle;
         _time = time;
     }
 
@@ -100,6 +103,7 @@ public sealed class AgentStationsReader
                     StationId = link.Admin.Station.StationId,
                     WigosId = link.Admin.Station.WigosId,
                     Enabled = enabled,
+                    Collecting = _cycle.IsCollecting(link.Id),
                     Watermark = link.Watermark,
                     LastReceivedAt = link.LastReceivedAt,
                     // The connection's window resolved onto its station, so
