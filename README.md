@@ -309,6 +309,40 @@ under the state it is the remedy for.
   called ADL. The first is gone; the second is **Sync with ADL**, which is the
   word the rest of the window uses for it.
 
+What the far end is running
+([wmo-raf/adl#305](https://github.com/wmo-raf/adl/issues/305)) — a machine
+could say what *it* was running and nothing else. `ADL Agent 0.4.0` sits in
+the header of the Status tab, and there is deliberately no About box so that
+the number lives in one place; but nothing came back the other way. The
+agent's version has travelled to ADL on every call since the beginning
+(`X-Agent-Version`), so when HQ tells a country it is on an old plugin, the
+country had no way to confirm or deny it — the compatibility question needed
+a Wagtail login somebody else holds.
+
+- **one row, both numbers** — `ADL version`, directly beneath
+  `Configuration version` because it is the other thing ADL served, reading
+  `0.8.14 · agent plugin 0.4.0`. One line rather than two labels nearly as
+  long as their values, because the pair is always quoted together — down a
+  telephone, into an issue, at the top of a support mail.
+- **on the sync response, not the heartbeat** — against the precedent
+  `reconciliation_interval_hours` sets by riding both. A sync response is
+  written to the offline cache byte for byte, so these two survive a service
+  restart and still read correctly on a machine that has lost its link. What
+  the agent keeps from a beat lives in memory and is blank after every
+  restart, which is exactly when somebody is looking.
+- **the silence is named** — an ADL too old to send the block leaves the row
+  reading *Not reported — this ADL predates the field*, rather than hidden or
+  dashed. Most of the fleet is on one of those for a while, and "too old to
+  say" is a lower bound on the far end's version: a fact about the far end,
+  where a dash reads as this machine having failed to fetch something. A
+  machine that has not synced at all still shows `-`, because nothing about
+  ADL's age has been learnt yet.
+- **and `adl-agent status` says it too** — one `ADL ver:` line, omitted
+  entirely when ADL never said, which is the rule `Updates:` and
+  `Last error:` already follow. Labelled apart from `Version:` above it: two
+  lines both reading "Version", on a screen whose whole job is telling three
+  version numbers apart, would be worse than saying nothing.
+
 Repointing a machine ([wmo-raf/adl#292](https://github.com/wmo-raf/adl/issues/292))
 — there was no supported way to change a machine's ADL address after it was
 installed. The URL is written to `agent.ini` by the MSI and read once at

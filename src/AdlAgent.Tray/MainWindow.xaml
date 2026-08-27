@@ -1014,6 +1014,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Field}" Text="ADL says" />
@@ -1024,8 +1025,24 @@
                         <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastSynced}" />
                         <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Field}" Text="Configuration version" />
                         <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ConfigVersion}" />
-                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
+                        <!--
+                            What is running at the other end, directly beneath
+                            the configuration it served. The number in the
+                            header above is this machine's own; this is the
+                            other half of the compatibility question, and
+                            before it existed the only way to answer it was a
+                            Wagtail login somebody in another country holds.
+
+                            Here rather than beside the address in the grid
+                            above: that grid draws on a machine that has never
+                            paired, and a dash there is the empty row that
+                            reads as a stopped service.
+                        -->
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Field}" Text="ADL version" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding AdlVersion}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Clock difference" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ClockSkew}" />
                         <!--
                             The cadence nothing else on this screen would
                             reveal. A deployment-wide setting moves no
@@ -1034,8 +1051,8 @@
                             sweeping nightly — until a technician wonders why
                             a file backfilled last week never went.
                         -->
-                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Field}" Text="Reconciles" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding Reconciles}" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Reconciles" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding Reconciles}" />
                         <!--
                             What this machine is doing about its version. The
                             number itself is in the block above; this is the half
@@ -1045,11 +1062,11 @@
                             is pinned, unable to reach the feed, or simply already
                             current.
                         -->
-                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
+                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Updates" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding UpdateStatus}"
                                    TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
-                        <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
+                        <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource Field}" Text="Last problem" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding LastError}" />
                     </Grid>
                 </StackPanel>
             </TabItem>

@@ -66,6 +66,34 @@ public sealed record AgentStatusSnapshot
 
     public long? ConfigVersion { get; init; }
 
+    // ---------- what the instance at the other end is running ----------
+    //
+    // Beside ConfigVersion because they come from the same place and are
+    // read in the same breath: the configuration this machine is working
+    // from, and the software that served it. Both come from the sync
+    // response and therefore from the offline cache too, so a machine that
+    // cannot reach ADL still shows what it last saw rather than dashes --
+    // which is the whole reason these are not carried on the heartbeat.
+
+    /// <summary>
+    /// ADL core's version, as ADL last reported it. Empty when ADL never
+    /// said.
+    /// </summary>
+    /// <remarks>
+    /// Empty rather than <c>null</c>, and told apart from a value by
+    /// <see cref="AdlReportedItsVersion"/>. The distinction is load-bearing
+    /// for the window: an instance too old to send the block is a fact about
+    /// the instance -- it puts a lower bound on its version -- and the tray
+    /// says so rather than drawing a dash that reads as a failure here.
+    /// </remarks>
+    public string AdlVersion { get; init; } = "";
+
+    /// <summary>The agent plugin's version at that instance. Empty when unsaid.</summary>
+    public string PluginVersion { get; init; } = "";
+
+    /// <summary>True when ADL said anything about its own software.</summary>
+    public bool AdlReportedItsVersion { get; init; }
+
     public int StationLinkCount { get; init; }
 
     public DateTimeOffset? LastHeartbeatAt { get; init; }
