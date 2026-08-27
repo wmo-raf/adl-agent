@@ -1,4 +1,5 @@
 using AdlAgent.Core.Api;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Pairing;
 using AdlAgent.Core.State;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public sealed class ConfigurationService
     private readonly IAdlApiClient _client;
     private readonly IAgentStateStore _store;
     private readonly AgentSession _session;
+    private readonly LogVerbosity _verbosity;
     private readonly TimeProvider _time;
     private readonly ILogger<ConfigurationService> _logger;
     private readonly Lock _gate = new();
@@ -40,12 +42,14 @@ public sealed class ConfigurationService
         IAdlApiClient client,
         IAgentStateStore store,
         AgentSession session,
+        LogVerbosity verbosity,
         TimeProvider time,
         ILogger<ConfigurationService> logger)
     {
         _client = client;
         _store = store;
         _session = session;
+        _verbosity = verbosity;
         _time = time;
         _logger = logger;
     }
@@ -115,6 +119,8 @@ public sealed class ConfigurationService
                 _lastSyncedAt = fetchedAt;
             }
 
+            Adopt(sync);
+
             _logger.LogDebug(
                 "Synced configuration version {Version}: {Connections} connection(s), {Links} station link(s).",
                 sync.ConfigVersion,
@@ -179,6 +185,34 @@ public sealed class ConfigurationService
                 FromCache = true,
             };
         }
+
+        // From the cache as well as from a fresh sync, and outside the lock
+        // the cache was read under. A machine HQ has put on Debug is very
+        // often a machine whose link is the thing being investigated, and a
+        // verbosity that only survived while ADL was reachable would be off
+        // again by the time anybody read the log.
+        Adopt(_current.Sync);
+    }
+
+    /// <summary>Take ADL's word on how much this machine should log.</summary>
+    /// <remarks>
+    /// Here rather than in a loop of its own because this is where ADL's word
+    /// arrives -- from the network and from the cache alike -- and a setting
+    /// applied anywhere else would be one somebody has to remember to apply
+    /// on both paths.
+    /// </remarks>
+    private void Adopt(SyncResponse sync)
+    {
+        if (!_verbosity.Adopt(sync.Device.LogLevel))
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            _verbosity.Overridden
+                ? "ADL has set this machine's log level to {Level}."
+                : "ADL has cleared its log level for this machine; the machine's own setting ({Level}) stands again.",
+            _verbosity.Effective);
     }
 
     private AgentConfiguration MarkStale(AgentConfiguration configuration)

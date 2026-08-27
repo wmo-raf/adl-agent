@@ -595,6 +595,49 @@ passes window has its own **Save these…**, which sends the filter with the
 path — otherwise the window could find a failure three weeks back that the
 bundle could not carry.
 
+The same passes reach ADL
+([wmo-raf/adl#307](https://github.com/wmo-raf/adl/issues/307)) — the log above
+is the whole story and lives on a machine nobody can reach, so the heartbeat
+carries the part HQ needs. `completed_passes` is the unit passes that finished
+since the last beat ADL accepted, beside an unchanged `last_cycle`; ADL stores
+a row per station per pass, and can then answer "what has this station been
+doing for a fortnight" and "which passes failed this week, anywhere".
+
+- **on the beat, not a new endpoint** — it is already authenticated, already
+  throttled, and already designed to be lossy without consequence. At a
+  five-minute beat against a ten-minute cycle each one carries about a cycle's
+  worth and the call count is unchanged at ~288/day; a per-pass endpoint would
+  add ~720/day per machine on links that are often the worst part of the
+  system.
+- **`last_cycle` stays, indefinitely** — not a transition measure. Agents
+  update themselves and ADL instances are upgraded by a person, per country, so
+  a new agent meeting an old plugin is the normal, long-lived state across
+  twenty-six ministries. It is also what ADL's `cycle_stuck` check is written
+  from: an agent that stopped sending it would make every auto-updated machine
+  report as stuck to every ADL not yet upgraded, a fleet-wide false alarm
+  nobody in those countries caused. It costs one small duplicated object a
+  beat.
+- **a bounded queue, shed oldest-first, and the shedding is reported** — the
+  cycle log keeps every pass regardless, so what a long outage costs is only
+  ADL's copy. It is written to this machine's general log as it happens and
+  `dropped_passes` carries the count on the next beat, because a gap nothing
+  accounts for reads as a machine that stopped — and the beat that reports a
+  gap is the beat that clears it, so the number alone would be gone in five
+  minutes.
+- **a refused beat costs nothing** — the passes are read before the send and
+  let go only after ADL has taken them, so a machine on a link that keeps
+  dropping loses nothing to the drops. Settled by queue position rather than
+  by count, because the cycle goes on finishing units for as long as the beat
+  is in flight: on a full queue those very passes can be shed to make room
+  while ADL is still answering, and dropping *however many were sent* off the
+  head would discard passes nobody had sent anywhere.
+- **three names of files that did not arrive** travel with each pass, one from
+  each of failed / unmatched / held before any of them gets a second slot: a
+  pass with forty failures in it still spends one on the unmatched name, which
+  is the only line anywhere that says a vendor has renamed its files. ADL
+  already stores the name of every file it *received*; this is the negative
+  space.
+
 ## Structure
 
 ```
@@ -724,11 +767,18 @@ GeneralLogMegabytes=32
 day, and no auto-revert, because the ceilings make a machine left on it
 harmless: it churns within its cap rather than filling a disk. What being left
 on `Debug` costs is retained window, which collapses from months to days.
-Letting ADL set it remotely is deliberately not here — a machine that cannot
-reach ADL is most of the machines anybody wants a log from.
 
-Set, it wins over the `Logging` section of `appsettings.json`; unset, it leaves
-that section alone, so a developer's build still logs what they told it to.
+**ADL can also set it, per device**, and does so through the `device` block of
+`sync`. When it says a level, that level wins; when it says nothing — a cleared
+field, or an ADL too old to have one — this file's setting stands, and so it
+still works on a machine that cannot reach ADL at all, which is most of the
+machines anybody wants a log from. A level ADL raises takes effect on the
+running service rather than at the next restart, and comes back out of the
+offline cache if the machine restarts with its link still down.
+
+Set, it wins over the `Logging` section of `appsettings.json`; unset with ADL
+silent, it leaves that section alone, so a developer's build still logs what
+they told it to.
 That is a filter rule rather than a minimum level, and the distinction is
 load-bearing: `SetMinimumLevel` looks as though it works and does not, because
 a rule read from configuration beats it outright — which would leave a machine

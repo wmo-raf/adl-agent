@@ -87,6 +87,7 @@ public static class AgentCoreServiceCollectionExtensions
         // sink is built while logging is being configured and owns its own
         // writer, and keeping the two apart is what gives them their two
         // independent ceilings.
+        services.TryAddSingleton<LogVerbosity>();
         services.TryAddSingleton<CycleLog>();
         services.TryAddSingleton<CycleLogReader>();
         services.TryAddSingleton<DiagnosticsBundle>();

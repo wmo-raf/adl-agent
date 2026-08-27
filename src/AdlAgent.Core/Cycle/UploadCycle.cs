@@ -1131,6 +1131,14 @@ public sealed class UploadCycle
     /// it got to and why it stopped. The record whose absence is hardest to
     /// explain is the one for the pass that went wrong.
     /// </para>
+    /// <para>
+    /// The same record is also queued for the next heartbeat, so that ADL
+    /// ends up with the history this machine keeps rather than only with the
+    /// last five minutes of it (wmo-raf/adl#307). One record, built once and
+    /// handed to both, because a disk log and a wire report that were
+    /// assembled separately would eventually disagree about the same pass --
+    /// and the one somebody is reading would be the wrong one.
+    /// </para>
     /// </remarks>
     private void Log(
         AgentConfiguration configuration,
@@ -1142,7 +1150,7 @@ public sealed class UploadCycle
     {
         var names = Names(configuration);
 
-        _log.Write(new CycleRecord
+        var record = new CycleRecord
         {
             At = startedAt,
             Seconds = Math.Max(0, (at - startedAt).TotalSeconds),
@@ -1168,7 +1176,10 @@ public sealed class UploadCycle
                 })
                 .ToList(),
             Files = scan.Journal.Files(),
-        });
+        };
+
+        _log.Write(record);
+        _cycles.Enqueue(record);
     }
 
     /// <summary>
