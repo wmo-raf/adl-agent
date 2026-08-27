@@ -23,7 +23,7 @@
     <!-- One version number for the whole agent. It travels to ADL on every
          call (X-Agent-Version) and is what the update feed compares against,
          so it is set once here rather than per project. -->
-    <VersionPrefix>0.4.0</VersionPrefix>
+    <VersionPrefix>0.5.0</VersionPrefix>
     <Product>ADL Agent</Product>
     <Company>WMO RAF</Company>
   </PropertyGroup>
