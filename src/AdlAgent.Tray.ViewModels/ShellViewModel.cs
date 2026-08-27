@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using AdlAgent.Core;
 using AdlAgent.Core.Cycle;
+using AdlAgent.Core.Diagnostics;
 using AdlAgent.Core.Serialization;
 using AdlAgent.Core.Status;
 using AdlAgent.Windows.Platform;
@@ -1543,24 +1544,26 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>
-    /// The passes this station has been in, newest first.
+    /// The last few passes this station has been in, as headings.
     /// </summary>
     /// <remarks>
-    /// The other half of the sentence the live probe answers. The probe says
-    /// what is in the folder at the moment somebody is looking; this says what
-    /// the machine has actually been doing there, which is the half nothing
-    /// on this machine could answer before -- the counts were in memory and
-    /// were overwritten by the next pass ten minutes later.
+    /// Three lines and no file detail, because this is the at-a-glance half
+    /// of the answer: "has anything happened here lately". Anything more is
+    /// what View more is for, and going through the light index means this
+    /// never fetches a record it is not going to show.
     /// <para>
     /// Read through the service like every other fact this window shows. The
-    /// records are in a folder whose permissions are SYSTEM and Administrators
-    /// and the tray runs as whoever is logged in, so a window that read them
-    /// itself would work for the developer and for nobody in a ministry.
+    /// records are in a folder whose permissions are SYSTEM and
+    /// Administrators and the tray runs as whoever is logged in, so a window
+    /// that read them itself would work for the developer and for nobody in
+    /// a ministry.
     /// </para>
     /// </remarks>
-    public async Task<PassesAnswer> RecentPassesAsync(long stationLinkId)
+    public async Task<PassesAnswer> RecentPassesAsync(long stationLinkId, int most = 3)
     {
-        var answer = await _agent.PassesAsync(stationLinkId).ConfigureAwait(true);
+        var answer = await _agent
+            .PassesAsync(new CyclePassQuery(stationLinkId, Most: most))
+            .ConfigureAwait(true);
 
         if (answer.Value is null)
         {
@@ -1571,10 +1574,37 @@ public sealed class ShellViewModel : Observable
         }
 
         return new PassesAnswer(
-            answer.Value.Passes.Select(record => new PassViewModel(record)).ToList(),
-            answer.Value.More,
+            answer.Value.Rows.Select(row => new PassRowViewModel(row)).ToList(),
+            !answer.Value.Exhausted,
             null);
     }
+
+    /// <summary>
+    /// Open the machine's own record of what it has collected.
+    /// </summary>
+    /// <remarks>
+    /// Modeless and not counted as editing, unlike every other window this
+    /// class opens. Those hold a copy of a station row and freeze the list so
+    /// they cannot end up describing a station that has gone; this holds no
+    /// row, and a technician wants to press Collect now on the list behind it
+    /// and then look here for what it did.
+    /// </remarks>
+    /// <param name="stationLinkId">
+    /// The station to open filtered to, or <c>null</c> for the machine's own
+    /// passes.
+    /// </param>
+    public PassesViewModel Passes(long? stationLinkId = null) => new(
+        _agent,
+        _status?.DeviceName ?? "this machine",
+        Connections
+            .SelectMany(connection => connection.Stations)
+            .Select(station => new StationChoice(
+                station.StationLinkId,
+                string.IsNullOrWhiteSpace(station.StationName)
+                    ? station.StationLinkId.ToString(CultureInfo.CurrentCulture)
+                    : station.StationName))
+            .ToList(),
+        stationLinkId);
 
     /// <summary>
     /// Have the agent write a diagnostics bundle, and say what happened.
@@ -1585,7 +1615,12 @@ public sealed class ShellViewModel : Observable
     /// properly: the logs are where the token is, and the tray cannot read
     /// that folder.
     /// </remarks>
-    public async Task SaveDiagnosticsAsync(string path)
+    /// <param name="passes">
+    /// Which passes the bundle should carry -- the filter the technician was
+    /// looking at, when this was pressed from the passes window. Left null
+    /// from the Status tab, where the question is about the machine.
+    /// </param>
+    public async Task SaveDiagnosticsAsync(string path, CyclePassQuery? passes = null)
     {
         // Said before the wait rather than after it. The agent flushes both
         // logs and then reads a few hundred kilobytes off them, which on a
@@ -1593,7 +1628,7 @@ public sealed class ShellViewModel : Observable
         // read as a button that did nothing.
         Message = "Collecting diagnostics…";
 
-        var written = await _agent.SaveDiagnosticsAsync(path).ConfigureAwait(true);
+        var written = await _agent.SaveDiagnosticsAsync(path, passes).ConfigureAwait(true);
 
         Message = written.Value is null
             ? written.Detail ?? "The agent could not write a diagnostics file."
@@ -2009,4 +2044,4 @@ public sealed class ShellViewModel : Observable
 /// record exists to stop.
 /// </remarks>
 public sealed record PassesAnswer(
-    IReadOnlyList<PassViewModel> Passes, bool More, string? Problem);
+    IReadOnlyList<PassRowViewModel> Passes, bool More, string? Problem);

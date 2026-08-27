@@ -194,14 +194,28 @@
                     breaks out of the StackPanel's DataContext above.
                 -->
                 <StackPanel DataContext="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext}">
-                    <TextBlock Style="{StaticResource Caption}" Text="Recent passes" />
+                    <DockPanel LastChildFill="True" Margin="0,8,0,0">
+                        <!--
+                            The way to the whole record: every pass this
+                            machine has, with filters and the file detail.
+                            Opened on top of this window rather than in place
+                            of it, so the folder count above — which is what a
+                            technician came here for — is still there when they
+                            come back.
+                        -->
+                        <Button DockPanel.Dock="Right" Content="View more…"
+                                Style="{StaticResource Quiet}" Click="ViewMore"
+                                VerticalAlignment="Center" />
+                        <TextBlock Text="Recent passes" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                    </DockPanel>
 
                     <!--
                         A sentence and not an empty box. The empty box is the
                         thing this whole record exists to stop being the
                         answer: a machine that has genuinely not collected yet
-                        and a service too old to keep a record look identical,
-                        and both of them look like nothing.
+                        and a service that could not be reached look identical,
+                        and both look like nothing.
                     -->
                     <TextBlock Text="{Binding PassesMessage}" TextWrapping="Wrap" Foreground="#5A6472">
                         <TextBlock.Style>
@@ -217,54 +231,48 @@
                     </TextBlock>
 
                     <!--
-                        Closed to a line each, because somebody looking down
-                        this list is looking for a moment — "what happened at
-                        13:24" — and only then wants the files. A list that
-                        showed every file of every pass would bury the moments
-                        under them.
+                        Three lines, closed, no detail. This is the at-a-glance
+                        half — has anything happened here lately — and the
+                        files, the filters and the machine's whole history are
+                        one click away rather than inlined into a window that
+                        is about something else.
                     -->
                     <ItemsControl ItemsSource="{Binding Passes}"
                                   Visibility="{Binding HasPasses, Converter={StaticResource Visible}}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Expander Margin="0,0,0,2">
-                                    <Expander.Header>
-                                        <TextBlock Text="{Binding Heading}" TextWrapping="Wrap">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Style.Triggers>
-                                                        <!--
-                                                            A pass that did not
-                                                            finish is the one
-                                                            worth finding in a
-                                                            list of forty.
-                                                        -->
-                                                        <DataTrigger Binding="{Binding Completed}" Value="False">
-                                                            <Setter Property="Foreground" Value="#A33B2A" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </Expander.Header>
-                                    <TextBox Text="{Binding Detail, Mode=OneWay}" IsReadOnly="True"
-                                             FontFamily="Consolas" FontSize="11.5"
-                                             BorderThickness="0" Background="#F2F4F7"
-                                             Padding="8,6" Margin="0,4,0,6"
-                                             TextWrapping="NoWrap"
-                                             HorizontalScrollBarVisibility="Auto" />
-                                </Expander>
+                                <TextBlock Margin="0,2,0,0" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <!--
+                                                    A pass that went wrong is
+                                                    the one worth finding in a
+                                                    list of three.
+                                                -->
+                                                <DataTrigger Binding="{Binding Problem}" Value="True">
+                                                    <Setter Property="Foreground" Value="#A33B2A" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                    <Run Text="{Binding When, Mode=OneWay}" />
+                                    <Run Text="  " /><Run Text="{Binding Trigger, Mode=OneWay}" />
+                                    <Run Text="  " /><Run Text="{Binding Took, Mode=OneWay}" />
+                                    <Run Text="   scanned " /><Run Text="{Binding Scanned, Mode=OneWay}" />
+                                    <Run Text="  up " /><Run Text="{Binding Uploaded, Mode=OneWay}" />
+                                    <Run Text="  fail " /><Run Text="{Binding Failed, Mode=OneWay}" />
+                                </TextBlock>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
                     <!--
-                        Said out loud. Ten rows with nothing under them reads
-                        as a machine that has run ten times, and on the machine
-                        this happens to — a busy one — that is the opposite of
-                        the truth.
+                        Said out loud. Three rows with nothing to say they are
+                        three of many reads as a machine that has run three
+                        times.
                     -->
-                    <TextBlock Text="Older passes than these are in this machine's log."
+                    <TextBlock Text="Older passes are in this machine's record."
                                Margin="0,4,0,0" Opacity="0.75" TextWrapping="Wrap"
                                Visibility="{Binding HasMorePasses, Converter={StaticResource Visible}}" />
                 </StackPanel>

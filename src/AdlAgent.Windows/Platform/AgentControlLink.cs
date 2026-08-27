@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AdlAgent.Core.Api;
@@ -147,47 +148,99 @@ public sealed class AgentControlLink
             cancellationToken);
 
     /// <summary>
-    /// The unit passes this machine has recorded, newest first.
+    /// A page of recorded passes as table rows, newest first.
     /// </summary>
-    /// <param name="stationLinkId">
-    /// Only the passes this station was in, or <c>null</c> for the machine's
-    /// own.
-    /// </param>
-    public Task<AgentAnswer<CyclePasses>> PassesAsync(
-        long? stationLinkId = null, int? most = null, CancellationToken cancellationToken = default)
-    {
-        var payload = new JsonObject();
+    /// <remarks>
+    /// Rows rather than records, because a table wants hundreds of them and a
+    /// full record runs to kilobytes. The detail for one row arrives through
+    /// <see cref="PassAsync"/> when somebody opens it.
+    /// </remarks>
+    public Task<AgentAnswer<CyclePassIndex>> PassesAsync(
+        CyclePassQuery query, CancellationToken cancellationToken = default) =>
+        AskAsync<CyclePassIndex>(
+            new ControlRequest(ControlProtocol.PassesIndexCommand, Payload(query)),
+            cancellationToken);
 
-        if (stationLinkId is not null)
-        {
-            payload["station_link_id"] = stationLinkId.Value;
-        }
-
-        if (most is not null)
-        {
-            payload["most"] = most.Value;
-        }
-
-        return AskAsync<CyclePasses>(
-            new ControlRequest(ControlProtocol.PassesCommand, payload), cancellationToken);
-    }
+    /// <summary>One pass in full, named by the row that asked for it.</summary>
+    /// <remarks>
+    /// Answers with a <see cref="CyclePass"/> holding nothing when the pass
+    /// has been evicted since the row was drawn -- which is an ordinary thing
+    /// to happen to a window somebody left open, and a sentence rather than a
+    /// fault.
+    /// </remarks>
+    public Task<AgentAnswer<CyclePass>> PassAsync(
+        DateTimeOffset at, string unit, CancellationToken cancellationToken = default) =>
+        AskAsync<CyclePass>(
+            new ControlRequest(
+                ControlProtocol.PassCommand,
+                new JsonObject
+                {
+                    ["at"] = at.ToString("O", CultureInfo.InvariantCulture),
+                    ["unit"] = unit,
+                }),
+            cancellationToken);
 
     /// <summary>
     /// Have the agent write a plain-text diagnostics bundle at this path.
     /// </summary>
     /// <remarks>
-    /// The agent writes it rather than the caller, because on the service tier
-    /// the caller cannot read the logs: the state folder's permissions are
-    /// SYSTEM and Administrators, and the tray runs as whoever is logged in.
-    /// The path is the technician's choice and the bytes are the service's.
+    /// The agent writes it rather than the caller, because on the service
+    /// tier the caller cannot read the logs: the state folder's permissions
+    /// are SYSTEM and Administrators, and the tray runs as whoever is logged
+    /// in. The path is the technician's choice and the bytes are the
+    /// service's.
+    /// <para>
+    /// The filter travels with it so that what reaches HQ is what the
+    /// technician was looking at. A bundle that always carried the newest two
+    /// hundred passes could not hold the failure three weeks back that the
+    /// window had just been used to find.
+    /// </para>
     /// </remarks>
     public Task<AgentAnswer<DiagnosticsWritten>> SaveDiagnosticsAsync(
-        string path, CancellationToken cancellationToken = default) =>
-        AskAsync<DiagnosticsWritten>(
-            new ControlRequest(
-                ControlProtocol.DiagnosticsCommand,
-                new JsonObject { ["path"] = path }),
-            cancellationToken);
+        string path, CyclePassQuery? passes = null, CancellationToken cancellationToken = default)
+    {
+        var payload = Payload(passes ?? new CyclePassQuery());
+
+        payload["path"] = path;
+
+        return AskAsync<DiagnosticsWritten>(
+            new ControlRequest(ControlProtocol.DiagnosticsCommand, payload), cancellationToken);
+    }
+
+    /// <summary>
+    /// The filters, as the wire spells them.
+    /// </summary>
+    /// <remarks>
+    /// Only what was asked for goes on: the service reads a missing field and
+    /// an explicit null the same way, and the shorter body is the one that
+    /// survives a bad link.
+    /// </remarks>
+    private static JsonObject Payload(CyclePassQuery query)
+    {
+        var payload = new JsonObject { ["most"] = query.Most };
+
+        if (query.StationLinkId is { } stationLinkId)
+        {
+            payload["station_link_id"] = stationLinkId;
+        }
+
+        if (query.Trigger is not null)
+        {
+            payload["trigger"] = query.Trigger;
+        }
+
+        if (query.ProblemsOnly)
+        {
+            payload["problems_only"] = true;
+        }
+
+        if (query.Before is { } before)
+        {
+            payload["before"] = before.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        return payload;
+    }
 
     /// <summary>Write a station's app tier through the service to ADL.</summary>
     public Task<AgentAnswer<ConfigWriteResponse>> ConfigureAsync(

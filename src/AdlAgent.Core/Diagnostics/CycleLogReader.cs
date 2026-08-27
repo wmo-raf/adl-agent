@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using AdlAgent.Core.Platform;
 using AdlAgent.Core.Serialization;
@@ -48,43 +49,121 @@ public sealed class CycleLogReader
     }
 
     /// <summary>
-    /// The most recent passes, newest first.
+    /// A page of rows, newest first, and how it was arrived at.
     /// </summary>
-    /// <param name="stationLinkId">
-    /// Only the passes this station was in, or <c>null</c> for all of them.
-    /// A station rather than a unit, because that is the question somebody
-    /// standing at the machine is asking -- and a station's unit is whatever
-    /// it happens to share a folder with, which is not a thing anybody knows
-    /// the name of.
-    /// </param>
-    public IReadOnlyList<CycleRecord> Recent(int most, long? stationLinkId = null)
+    /// <remarks>
+    /// Filtering happens here rather than in whoever is drawing the table, so
+    /// that a page is a page of matches and "load more" walks back through
+    /// rows instead of through blank screens. It costs nothing: this is
+    /// already reading and deserialising every record it passes.
+    /// </remarks>
+    public CyclePassIndex Index(CyclePassQuery query)
     {
-        var found = new List<CycleRecord>();
+        var rows = new List<CyclePassRow>();
         var scanned = 0;
+        DateTimeOffset? oldest = null;
 
-        foreach (var path in Newest())
+        foreach (var path in Newest(query.Before))
         {
             foreach (var line in Backwards(path))
             {
-                if (++scanned > MostRecordsScanned)
-                {
-                    return found;
-                }
-
                 if (Parse(line) is not { } record)
                 {
                     continue;
                 }
 
-                if (stationLinkId is not null &&
-                    !record.Stations.Any(station => station.StationLinkId == stationLinkId))
+                // Counted after parsing, so the budget bounds records rather
+                // than lines -- a file's blank tail would otherwise spend it.
+                if (query.Before is not null && record.At >= query.Before)
+                {
+                    continue;
+                }
+
+                scanned++;
+                oldest = record.At;
+
+                if (query.Matches(record))
+                {
+                    rows.Add(CyclePassRow.Of(record, query.StationLinkId));
+
+                    if (rows.Count >= query.Most)
+                    {
+                        return new CyclePassIndex
+                        {
+                            Rows = rows,
+                            Exhausted = false,
+                            Scanned = scanned,
+                            ResumeBefore = oldest,
+                        };
+                    }
+                }
+
+                if (scanned >= MostRecordsScanned)
+                {
+                    // Stopped looking, which is not the same as having found
+                    // everything -- and the difference is the whole reason
+                    // this answer carries three facts instead of a list.
+                    return new CyclePassIndex
+                    {
+                        Rows = rows,
+                        Exhausted = false,
+                        Scanned = scanned,
+                        ResumeBefore = oldest,
+                    };
+                }
+            }
+        }
+
+        return new CyclePassIndex
+        {
+            Rows = rows,
+            Exhausted = true,
+            Scanned = scanned,
+            ResumeBefore = oldest,
+        };
+    }
+
+    /// <summary>
+    /// Every record this query matches, newest first, up to
+    /// <see cref="CyclePassQuery.Most"/>.
+    /// </summary>
+    /// <remarks>
+    /// The whole records, for the diagnostics bundle -- which renders them as
+    /// text and is not on a wire, so the file detail that the index leaves out
+    /// is exactly what it is there to carry.
+    /// </remarks>
+    public IReadOnlyList<CycleRecord> Recent(CyclePassQuery query)
+    {
+        var found = new List<CycleRecord>();
+        var scanned = 0;
+
+        foreach (var path in Newest(query.Before))
+        {
+            foreach (var line in Backwards(path))
+            {
+                if (Parse(line) is not { } record)
+                {
+                    continue;
+                }
+
+                if (query.Before is not null && record.At >= query.Before)
+                {
+                    continue;
+                }
+
+                if (++scanned > MostRecordsScanned)
+                {
+                    return found;
+                }
+
+                if (!query.Matches(record))
                 {
                     continue;
                 }
 
                 found.Add(record);
 
-                if (found.Count >= most)
+                if (found.Count >= query.Most)
                 {
                     return found;
                 }
@@ -92,6 +171,54 @@ public sealed class CycleLogReader
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// One pass, named by when it started and the folder it walked.
+    /// </summary>
+    /// <remarks>
+    /// A natural key rather than an id, because both halves are already in
+    /// the record and in the row that asks for it. It is unique: two units
+    /// never share a folder -- that is what grouping stations by the folders
+    /// they share is for -- and one unit cannot pass twice at once, because
+    /// the cycle claims its stations before it reads anything.
+    /// <para>
+    /// The exception is a unit with no folder at all, and it is harmless. A
+    /// station the scan turned away has nothing to join it to anything, so it
+    /// lands in a unit by itself with an empty folder and a sentence -- and
+    /// such a record has no folders walked and no files, so the row asking for
+    /// its detail already holds everything there is.
+    /// </para>
+    /// </remarks>
+    /// <returns>The record, or <c>null</c> if it has been evicted since.</returns>
+    public CycleRecord? One(DateTimeOffset at, string unit)
+    {
+        // Newest-first from just after the moment wanted: the record cannot be
+        // newer than its own timestamp, so everything above that is skipped by
+        // filename before a byte is read.
+        foreach (var path in Newest(at.AddTicks(1)))
+        {
+            foreach (var line in Backwards(path))
+            {
+                if (Parse(line) is not { } record)
+                {
+                    continue;
+                }
+
+                if (record.At == at && string.Equals(record.Unit, unit, StringComparison.Ordinal))
+                {
+                    return record;
+                }
+
+                if (record.At < at)
+                {
+                    // Past it, and the log is ordered: it is not here.
+                    return null;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -103,9 +230,54 @@ public sealed class CycleLogReader
     /// day gzipped late would sort as the newest thing in the folder and a
     /// window asking for recent passes would be handed last week's.
     /// </remarks>
-    private IEnumerable<string> Newest() =>
+    /// <param name="before">
+    /// Skip whole files that can hold nothing older than this. The name
+    /// carries the day, so a read paging back through months does not
+    /// decompress and deserialise every part above the one it wants -- which
+    /// on a full log is a hundred thousand records, against a pipe the client
+    /// abandons after three seconds.
+    /// </param>
+    private IEnumerable<string> Newest(DateTimeOffset? before = null) =>
         AgentLogs.FilesIn(_directory, AgentLogs.CycleLogName, CycleLog.Extension)
+            .Where(path => Reaches(path, before))
             .OrderByDescending(path => path, StringComparer.Ordinal);
+
+    /// <summary>
+    /// True when this file could hold a record older than
+    /// <paramref name="before"/>.
+    /// </summary>
+    /// <remarks>
+    /// A file is named for the day it holds, and the cut is that day rather
+    /// than the instant: a file named for the cursor's own day holds records
+    /// on both sides of it, so it is read and filtered record by record. Only
+    /// whole days above the cursor are skipped, which is the cheap and safe
+    /// half of the saving.
+    /// <para>
+    /// A file whose name carries no day is kept. It is not one this writer
+    /// made, and answering a question by silently ignoring a file is worse
+    /// than reading one too many.
+    /// </para>
+    /// </remarks>
+    private static bool Reaches(string path, DateTimeOffset? before)
+    {
+        if (before is null)
+        {
+            return true;
+        }
+
+        var name = Path.GetFileName(path);
+        var dash = name.IndexOf('-');
+
+        if (dash < 0 || name.Length < dash + 9 ||
+            !DateOnly.TryParseExact(
+                name.Substring(dash + 1, 8), "yyyyMMdd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var day))
+        {
+            return true;
+        }
+
+        return day <= DateOnly.FromDateTime(before.Value.UtcDateTime);
+    }
 
     /// <summary>
     /// One file's lines, last first.

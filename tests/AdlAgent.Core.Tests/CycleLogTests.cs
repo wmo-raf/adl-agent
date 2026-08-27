@@ -312,7 +312,7 @@ public class CycleLogTests
 
         // The whole point. In memory, the honest answer after a restart is
         // "nothing since I started"; on the disk, it is what happened.
-        var read = new CycleLogReader(AgentLogs.In(state)).Recent(10);
+        var read = new CycleLogReader(AgentLogs.In(state)).Recent(new CyclePassQuery(Most: 10));
 
         Assert.Single(read);
         Assert.Equal(Folder, read[0].Unit);

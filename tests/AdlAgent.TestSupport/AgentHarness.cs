@@ -182,7 +182,7 @@ public sealed class AgentHarness : IAsyncDisposable
     {
         await CycleLog.FlushAsync().ConfigureAwait(false);
 
-        return Passes.Recent(most, stationLinkId);
+        return Passes.Recent(new CyclePassQuery(stationLinkId, Most: most));
     }
 
     /// <summary>The station list as the tray reads it.</summary>

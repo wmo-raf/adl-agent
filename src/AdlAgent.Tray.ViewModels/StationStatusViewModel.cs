@@ -83,9 +83,15 @@ public sealed class StationStatusViewModel : Observable
     public bool IsChecking => _probing;
 
     /// <summary>
-    /// This station's recent passes, newest first, each opening to its files.
+    /// The last few passes this station has been in, newest first.
     /// </summary>
-    public ObservableCollection<PassViewModel> Passes { get; } = [];
+    /// <remarks>
+    /// Headings only, and only three of them. This is the at-a-glance half of
+    /// the question -- has anything happened here lately -- and the file
+    /// detail, the filters and the whole machine's history are what
+    /// <see cref="PassesViewModel"/> is for, one click away.
+    /// </remarks>
+    public ObservableCollection<PassRowViewModel> Passes { get; } = [];
 
     /// <summary>
     /// What to say where the passes go when there are none to show.
@@ -102,14 +108,16 @@ public sealed class StationStatusViewModel : Observable
     public bool HasPasses => Passes.Count > 0;
 
     /// <summary>
-    /// True when older passes exist than this window was given.
+    /// True when there are older passes than the three shown.
     /// </summary>
     /// <remarks>
-    /// Said out loud. Six rows with nothing under them reads as a machine that
-    /// has run six times, and on the machine this happens to -- a busy one --
-    /// that is the opposite of the truth.
+    /// What View more is offered on. Three rows with nothing to say they are
+    /// three of many reads as a machine that has run three times.
     /// </remarks>
     public bool HasMorePasses => _more;
+
+    /// <summary>The station this window's View more opens the table filtered to.</summary>
+    public long StationLinkId => Station.StationLinkId;
 
     private string _passesMessage = "";
     private bool _more;

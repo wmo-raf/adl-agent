@@ -43,14 +43,19 @@ public class DiagnosticsTests
 
         var pass = Assert.Single(status.Passes);
 
-        // The heading is the line the row shows closed, and the detail is what
-        // opening it gives. Both come from the same renderer the bundle uses.
-        Assert.Contains("unit", pass.Heading);
-        Assert.Contains(Garissa, pass.Heading);
-        Assert.Contains("GARISSA_20260821.dat", pass.Detail);
+        // Headings only here: the at-a-glance half of the question. The file
+        // detail is one click away, in the window this row's View more opens.
+        Assert.Equal(Garissa, pass.Folder);
+
+        // A machine's first pass over a station is that station's first
+        // sweep, which is what the trigger says rather than "scheduled".
+        Assert.Equal("sweep", pass.Trigger);
+        Assert.Equal(1, pass.Uploaded);
+        Assert.False(pass.Problem);
 
         Assert.True(status.HasPasses);
         Assert.Equal("", status.PassesMessage);
+        Assert.Equal(11, status.StationLinkId);
     }
 
     [Fact]
@@ -102,17 +107,19 @@ public class DiagnosticsTests
 
         using var serving = await ServedAgent.ServingAsync(agent);
 
-        var answer = await serving.Link.PassesAsync(11, 25);
+        var answer = await serving.Link.PassesAsync(
+            new CyclePassQuery(Most: PassesViewModel.Page));
 
         // Answered rather than refused, which is the point: the reader at the
         // other end rejects a line over the cap, and a window that showed
         // nothing at all on the busiest machine would be the worst outcome.
         Assert.True(answer.Ok);
-        Assert.NotEmpty(answer.Value!.Passes);
+        Assert.Equal(25, answer.Value!.Rows.Count);
 
-        // Whole passes, never half of one: a record with its file detail cut
-        // off cannot be told from a pass in which nothing happened.
-        Assert.All(answer.Value.Passes, pass => Assert.NotEmpty(pass.Stations));
+        // And this is what rows are for: twenty-five passes carrying sixty
+        // files each go over in one message, where twenty-five records could
+        // not.
+        Assert.True(answer.Value.Exhausted);
     }
 
     // ---------- the bundle ----------

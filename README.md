@@ -522,24 +522,69 @@ walks the same directory as those.
   Records carry the instance they were written against, so stale station link
   ids cannot be misread as current.
 
-Read at the machine in the two places somebody already is when they have a
-question, and deliberately **not** in a third tab — `TrayTabs` records that the
-Pairing tab was deleted precisely because it gave a technician a whole screen
-with nothing on it to do, in the leftmost and most prominent position.
+Read at the machine in a **window** rather than a third tab — `TrayTabs`
+records that the Pairing tab was deleted precisely because it gave a
+technician a whole screen with nothing on it to do, in the leftmost and most
+prominent position, and a machine-wide activity tab would be that again on the
+many machines that are simply working. A window opened on demand costs nothing
+until somebody has a question.
 
-- **"Recent passes" in Check status…** — that window is already read-only,
-  already safe to open on a station mid-cycle, and its live probe exists to
-  answer *"scanned 0, no error"*. Cycle history is the other half of that same
-  sentence: the probe speaks about this instant, and a station that has been
-  quietly doing nothing since Tuesday is a question about the past. It lists
-  the unit records touching that station, newest first, each opening to its
-  file detail.
-- **"Save diagnostics…" on the Status tab** — a plain-text bundle: what this
-  machine is, its stations, its recent passes rendered as text, and the tail
-  of the general log. This is the artefact that actually reaches HQ, because
-  somebody emails it. The dialog is the tray's and the file is written by the
-  service, which is the only arrangement that works on an installed machine:
-  the logs are where the token is, in a folder the tray's account cannot read.
+**The passes window** is a table, one row per unit pass — one stored record,
+nothing re-aggregated. Columns are When · Unit · Trigger · Took · Scanned ·
+Held · Up · Fail · Backlog, right-aligned, with a `!` in the first column for a
+pass that was cut short or holds a station error. Opening a row shows the
+stations in the unit and the files that did something, as tables, plus **Copy**,
+which renders through the same code the bundle uses — so the pass somebody
+pastes into an email is the pass HQ reads in the attachment.
+
+- **three doors** — a *Recent passes…* item on a station row's context menu
+  (filtered to that station), a button on the Status tab (the whole machine),
+  and *View more…* in Check status…. It is modeless and single-instance: it
+  holds no station row, so the reason every other window freezes the list
+  behind it does not apply, and being readable while somebody presses **Collect
+  now** on the list behind is most of the point. Owned by the main window even
+  when opened from the modal Check status…, so closing that dialog leaves it
+  standing.
+- **filtered to a station, the counts become that station's, and the column
+  heading says so.** In a dump directory shared by forty stations a row's
+  counts are the unit's, so a technician filtered to Banfora would otherwise
+  read Bobo-Dioulasso's twelve failures as Banfora's — a station misread as
+  broken, which is the exact failure this record exists to prevent.
+- **the filters are the service's work, not the window's** — station, trigger,
+  and one *Problems only* switch spanning the three unrelated ways a pass is
+  bad (files that did not go, a pass cut short, a station turned away
+  half-configured). A window that narrowed the page it had been sent could only
+  narrow the newest few hundred passes, and on a healthy machine those are
+  exactly the ones with nothing in them.
+- **no column sorting**, explicitly. The table is a chronology and the paging
+  cursor depends on it; a column sort would reorder the loaded rows and read as
+  though it had ranked the log.
+- **one button to go further back.** Paging and resuming past a read that gave
+  up looking are the same request with the same cursor, so they are one
+  button — only the sentence above it differs: *more are further back*, or
+  *read from the 20,000 most recent*, or *that is all this machine has
+  recorded*. The window holds 5,000 rows, said out loud, with the filter
+  offered as the way past it.
+- **refresh on open, on the button, on re-focus — no timer.** The control
+  surface serves one client at a time and the tray already polls it every five
+  seconds for the header; a second poller would contend for that slot and make
+  a working service report as absent.
+
+**Check status…** keeps the last three passes as headings with a *View more…*
+beside them. That window's live probe exists to answer *"scanned 0, no error"*;
+the passes are the other half of the same sentence, because the probe speaks
+about this instant and a station quietly doing nothing since Tuesday is a
+question about the past.
+
+**"Save diagnostics…"** on the Status tab writes the plain-text bundle: what
+this machine is, its stations, its recent passes rendered as text, and the tail
+of the general log. This is the artefact that actually reaches HQ, because
+somebody emails it. The dialog is the tray's and the file is written by the
+service, which is the only arrangement that works on an installed machine: the
+logs are where the token is, in a folder the tray's account cannot read. The
+passes window has its own **Save these…**, which sends the filter with the
+path — otherwise the window could find a failure three weeks back that the
+bundle could not carry.
 
 ## Structure
 
@@ -911,15 +956,19 @@ so what is counted is exactly the configuration the cycle will use — and
 **Check again** re-runs it, for the common case of having this window open on
 one screen while a share is being granted on another.
 
-At the bottom of it, **Recent passes**: the unit records touching this station,
-newest first, each closed to a line and opening to its file detail. That is the
-other half of the sentence the count answers. The count speaks about this
-instant; a station that has been quietly doing nothing since Tuesday is a
-question about the past, and until the
-[cycle log](#what-is-built-so-far) existed nothing on the machine could answer
-it — the counts lived in memory and the pass after overwrote them. A station
-with no record yet is told so in a sentence rather than shown a blank, because
-a blank is exactly the absence all of this exists to stop being the answer.
+At the bottom of it, **Recent passes**: the last three passes touching this
+station, one line each, and **View more…** beside them. That is the other half
+of the sentence the count answers. The count speaks about this instant; a
+station that has been quietly doing nothing since Tuesday is a question about
+the past, and until the [cycle log](#what-is-built-so-far) existed nothing on
+the machine could answer it — the counts lived in memory and the pass after
+overwrote them. A station with no record yet is told so in a sentence rather
+than shown a blank, because a blank is exactly the absence all of this exists
+to stop being the answer.
+
+**View more…** opens the passes window filtered to this station, on top of this
+one rather than in place of it, so the folder count somebody came here for is
+still there when they come back.
 
 Nothing on it writes, which is what makes it safe to open on a station a cycle
 is in the middle of. Like the settings window it is modal and stops the list
@@ -1038,7 +1087,8 @@ which is true, and which is also what a mistyped folder name says.
 
 #### Sending everything to HQ
 
-At the bottom of the Status tab, quietly, **Save diagnostics…**. It writes one
+At the bottom of the Status tab, quietly, **Recent passes…** and **Save
+diagnostics…**. It writes one
 plain-text file: what this machine is, its stations and their bindings, its
 most recent collection passes rendered as text, and the tail of the general
 log. This is the artefact that actually reaches HQ, because it is the one
@@ -1173,7 +1223,8 @@ both heads mean the same thing by each of them:
 | `collect` | Run a cycle for one station now |
 | `collect_status` | Where that run has got to |
 | `collect_cancel` | Stop it |
-| `passes` | The unit passes this machine has recorded, newest first |
+| `passes_index` | A page of recorded passes as table rows, newest first |
+| `pass` | One pass in full, named by when it started and the folder it walked |
 | `diagnostics` | Write a plain-text diagnostics bundle where the client asks |
 
 The middle four all **start** something and answer at once rather than waiting
@@ -1192,14 +1243,27 @@ that leave the surface free between them. That is also what makes
 `collect_cancel` possible at all: a held connection has nowhere for a second
 command to arrive.
 
-`passes` and `diagnostics` are the two exceptions, and for the opposite
-reason: both are bounded reads of local files, and the window that asked has
-nothing to draw until it knows the answer. `passes` trims whole records from
-the oldest end until the answer fits one line of this protocol and says that
-it did — half a record cannot be told from a pass in which nothing happened.
-`diagnostics` takes the path and writes the file itself, because on the
-service tier the client cannot: the logs are beside the device token, in a
-folder whose permissions the MSI has replaced with SYSTEM and Administrators.
+The last three are the exceptions, and for the opposite reason: all are
+bounded reads of local files, and the window that asked has nothing to draw
+until it knows the answer.
+
+`passes_index` answers rows rather than records, which is what makes a table of
+passes possible at all — a full record carries its file list and runs to
+kilobytes, so twenty fill a page, while a row is about a hundred and twenty
+bytes. Its filters are applied here rather than by the window, so a page is a
+page of *matches*. It says how it was arrived at — how many records were read,
+whether the log ran out, and where to carry on from — because "twelve passes
+had problems" and "twelve, in the twenty thousand I got through before I
+stopped looking" look identical and mean opposite things.
+
+`pass` fetches one record by `(at, unit)`. No id is invented: two units never
+share a folder, and one unit cannot pass twice at once. It answers with nothing
+when that pass has been evicted since the row was drawn.
+
+`diagnostics` takes the path and writes the file itself, because on the service
+tier the client cannot: the logs are beside the device token, in a folder whose
+permissions the MSI has replaced with SYSTEM and Administrators. It takes the
+same filters, so what a technician sends is what they were looking at.
 
 The pipe carries an explicit ACL: the service's own account and the machine's
 administrators in full, the technician's interactive logon session enough to

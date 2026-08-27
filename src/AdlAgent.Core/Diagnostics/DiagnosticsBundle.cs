@@ -72,6 +72,13 @@ public sealed class DiagnosticsBundle
     }
 
     /// <summary>Write the bundle to <paramref name="path"/>.</summary>
+    /// <param name="passes">
+    /// Which passes to carry. The same filter the technician was looking at
+    /// when they pressed the button, so that what reaches HQ is what they
+    /// found -- a bundle that always carried the newest two hundred could not
+    /// hold the failure three weeks back that the window had just been used
+    /// to locate.
+    /// </param>
     /// <remarks>
     /// Both logs are brought up to date first. The pass somebody is writing in
     /// about is very often the one that has just finished, and a bundle read a
@@ -79,14 +86,15 @@ public sealed class DiagnosticsBundle
     /// record anybody wanted.
     /// </remarks>
     /// <returns>How many bytes were written.</returns>
-    public async Task<long> WriteToAsync(string path, CancellationToken cancellationToken = default)
+    public async Task<long> WriteToAsync(
+        string path, CyclePassQuery? passes = null, CancellationToken cancellationToken = default)
     {
         foreach (var log in _logs)
         {
             await log.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var text = Render();
+        var text = Render(passes);
 
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
 
@@ -97,7 +105,7 @@ public sealed class DiagnosticsBundle
     }
 
     /// <summary>What a technician saves and sends.</summary>
-    public string Render()
+    public string Render(CyclePassQuery? passes = null)
     {
         var text = new StringBuilder();
         var status = _status.Read();
@@ -121,7 +129,7 @@ public sealed class DiagnosticsBundle
         text.AppendLine(Line("Last problem", status.LastError ?? "-"));
 
         Stations(text);
-        RecentPasses(text);
+        RecentPasses(text, passes ?? new CyclePassQuery(Most: Passes));
         General(text);
 
         return text.ToString();
@@ -169,15 +177,47 @@ public sealed class DiagnosticsBundle
     /// at differently-worded copies of one event is a conversation about the
     /// wording.
     /// </remarks>
-    private void RecentPasses(StringBuilder text)
+    private void RecentPasses(StringBuilder text, CyclePassQuery query)
     {
-        Heading(text, $"Recent collection passes (newest first, at most {Passes})");
+        Heading(text, $"Recent collection passes ({Describe(query)}, newest first, at most {query.Most})");
 
-        var records = _passes.Recent(Passes);
+        var records = _passes.Recent(query with { Most = Math.Min(query.Most, Passes) });
 
         text.AppendLine(records.Count == 0
-            ? "This machine has not recorded a collection pass yet."
+            ? "No collection pass on this machine matches that."
             : CycleRecordText.Render(records));
+    }
+
+    /// <summary>
+    /// The filter, said in the heading rather than left to be inferred.
+    /// </summary>
+    /// <remarks>
+    /// Because the reader at the far end did not choose it. A section headed
+    /// only "recent passes" that in fact holds one station's failures is a
+    /// bundle that reads as a machine with one station and nothing else
+    /// working.
+    /// </remarks>
+    private static string Describe(CyclePassQuery query)
+    {
+        var narrowed = new List<string>();
+
+        if (query.StationLinkId is { } stationLinkId)
+        {
+            narrowed.Add(
+                string.Create(CultureInfo.InvariantCulture, $"station link {stationLinkId}"));
+        }
+
+        if (query.Trigger is not null)
+        {
+            narrowed.Add(query.Trigger);
+        }
+
+        if (query.ProblemsOnly)
+        {
+            narrowed.Add("problems only");
+        }
+
+        return narrowed.Count == 0 ? "every station" : string.Join(", ", narrowed);
     }
 
     /// <summary>The tail of the general log.</summary>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -110,7 +111,8 @@ public sealed class AgentControlService : BackgroundService
                 ControlProtocol.CollectCommand => Collect(request),
                 ControlProtocol.CollectStatusCommand => CollectStatus(),
                 ControlProtocol.CollectCancelCommand => CollectCancel(request),
-                ControlProtocol.PassesCommand => Passes(request),
+                ControlProtocol.PassesIndexCommand => PassesIndex(request),
+                ControlProtocol.PassCommand => Pass(request),
                 ControlProtocol.DiagnosticsCommand => await DiagnosticsAsync(request, cancellationToken)
                     .ConfigureAwait(false),
                 _ => ControlResponse.Failure(
@@ -228,75 +230,130 @@ public sealed class AgentControlService : BackgroundService
     }
 
     /// <summary>
-    /// The unit passes this machine has recorded, newest first.
+    /// A page of recorded passes as table rows, newest first.
     /// </summary>
     /// <remarks>
-    /// Trimmed to fit one control message rather than truncated per record.
-    /// A record is one unit's whole story and half of one is worse than none:
-    /// a reader shown a pass with its file detail cut off has no way to tell
-    /// that from a pass in which nothing happened. So whole passes are dropped
-    /// from the oldest end until the answer fits, and the answer says that it
-    /// was.
+    /// Trimmed to fit one control message by dropping whole rows from the
+    /// oldest end, and the answer says it was. A row is small enough that
+    /// this hardly ever bites -- four hundred and fifty fit -- but a folder
+    /// path is as long as an administrator typed it, and a page that came
+    /// back refused would leave a window blank on exactly the busiest
+    /// machine.
     /// </remarks>
-    private ControlResponse Passes(ControlRequest request)
+    private ControlResponse PassesIndex(ControlRequest request)
     {
-        var most = Math.Clamp(Whole(request.Payload, "most") ?? DefaultPasses, 1, MostPasses);
-
-        // One more than was asked for, so that "there are older ones" is
-        // something this knows rather than something it infers from having
-        // filled the answer exactly.
-        var found = _passes.Recent(most + 1, StationLinkId(request.Payload));
-        var more = found.Count > most;
-        var passes = found.Take(most).ToList();
-
-        // Measured per record and summed, rather than by re-serialising the
-        // whole list once per record dropped. The envelope's own few bytes sit
-        // inside the slack the budget already leaves.
-        var sizes = passes.Select(Size).ToList();
+        var page = _passes.Index(Query(request.Payload));
+        var rows = page.Rows.ToList();
+        var sizes = rows.Select(Size).ToList();
         var total = sizes.Sum();
+        var trimmed = false;
 
-        while (passes.Count > 1 && total > PassesBudget)
+        while (rows.Count > 1 && total > PassesBudget)
         {
             total -= sizes[^1];
             sizes.RemoveAt(sizes.Count - 1);
-            passes.RemoveAt(passes.Count - 1);
-            more = true;
+            rows.RemoveAt(rows.Count - 1);
+            trimmed = true;
         }
 
-        return ControlResponse.Success(ToJson(new CyclePasses
+        return ControlResponse.Success(ToJson(page with
         {
-            Passes = passes,
-            More = more,
+            Rows = rows,
+            // A trimmed page has not reached the end of anything, whatever
+            // the read thought, and it carries on from the last row that
+            // survived rather than from the last one read.
+            Exhausted = page.Exhausted && !trimmed,
+            ResumeBefore = trimmed ? rows[^1].At : page.ResumeBefore,
         }));
     }
 
-    /// <summary>How many passes a UI gets when it does not say.</summary>
-    private const int DefaultPasses = 10;
+    /// <summary>One pass in full, or nothing when it has been evicted.</summary>
+    /// <remarks>
+    /// Nothing rather than a refusal. A window left open on a machine working
+    /// through a backlog will meet this in the ordinary course of things, and
+    /// "that pass is no longer on this machine" is a sentence about the log
+    /// rather than a fault to report.
+    /// </remarks>
+    private ControlResponse Pass(ControlRequest request)
+    {
+        if (Moment(request.Payload, "at") is not { } at)
+        {
+            return ControlResponse.Failure(
+                "invalid_request",
+                "Say which pass: {\"at\": \"2026-08-27T09:30:02.417Z\", \"unit\": \"C:\\\\Vendor\"}.");
+        }
+
+        var unit = request.Payload?["unit"]?.GetValue<string>() ?? "";
+
+        return ControlResponse.Success(ToJson(new CyclePass
+        {
+            Record = _passes.One(at, unit),
+        }));
+    }
+
+    /// <summary>Which passes a command is asking about.</summary>
+    private static CyclePassQuery Query(JsonObject? payload) => new(
+        StationLinkId(payload),
+        payload?["trigger"]?.GetValue<string>(),
+        payload?["problems_only"]?.GetValue<bool>() ?? false,
+        Moment(payload, "before"),
+        Math.Clamp(Whole(payload, "most") ?? DefaultPasses, 1, MostPasses));
+
+    /// <summary>How many rows a UI gets when it does not say.</summary>
+    private const int DefaultPasses = 50;
 
     /// <summary>The most it may ask for, whatever it says.</summary>
-    private const int MostPasses = 25;
+    /// <remarks>
+    /// Comfortably more than fits, because the trimming above is the real
+    /// bound and it is measured rather than guessed. This one only stops a
+    /// client asking the reader for a number that would spend its whole scan
+    /// budget building a page nobody could receive.
+    /// </remarks>
+    private const int MostPasses = 1000;
 
     /// <summary>
-    /// How much of one control message the passes may take.
+    /// How much of one control message the rows may take.
     /// </summary>
     /// <remarks>
     /// Below <see cref="ControlProtocol.MaxMessageBytes"/> with room over for
-    /// the envelope around it, because the reader at the other end refuses a
-    /// line longer than that cap and a refusal here would be a window that
-    /// shows nothing at all on exactly the busiest machine.
+    /// the envelope, because the reader at the other end refuses a line
+    /// longer than that cap.
     /// </remarks>
     private const int PassesBudget = ControlProtocol.MaxMessageBytes - 4096;
 
     /// <summary>
-    /// How many bytes one record costs on the wire.
+    /// How many bytes one row costs on the wire.
     /// </summary>
     /// <remarks>
     /// Bytes and not characters. The reader at the other end caps a line in
     /// bytes, and a folder path or a station name carrying an accent -- which
     /// is much of this fleet -- costs more of them than it has letters.
     /// </remarks>
-    private static int Size(CycleRecord pass) =>
-        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(pass, AgentJson.Options));
+    private static int Size(CyclePassRow row) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(row, AgentJson.Options));
+
+    /// <summary>An instant a command carries, however the client spelled it.</summary>
+    private static DateTimeOffset? Moment(JsonObject? payload, string name)
+    {
+        if (payload?[name] is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<DateTimeOffset>(out var moment))
+        {
+            return moment;
+        }
+
+        // Round-trip format, as this agent's own serializer writes it. A
+        // client that built the request in process holds the real type; one
+        // that parsed it off the wire holds a string.
+        return value.TryGetValue<string>(out var text)
+            && DateTimeOffset.TryParse(
+                text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+    }
 
     /// <summary>
     /// Write a plain-text diagnostics bundle where the client asked.
@@ -320,7 +377,9 @@ public sealed class AgentControlService : BackgroundService
 
         try
         {
-            var bytes = await _bundle.WriteToAsync(path, cancellationToken).ConfigureAwait(false);
+            var bytes = await _bundle
+                .WriteToAsync(path, Query(request.Payload), cancellationToken)
+                .ConfigureAwait(false);
 
             return ControlResponse.Success(new JsonObject
             {

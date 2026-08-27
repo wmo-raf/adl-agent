@@ -22,6 +22,13 @@
         <ContextMenu x:Key="StationRowMenu">
             <MenuItem Header="Edit settings…" Click="EditStation" />
             <MenuItem Header="Check status…" Click="CheckStation" />
+            <!--
+                Opens the machine's record filtered to this station. A door
+                here rather than only on the Status tab because somebody who
+                right-clicked Kisumu is asking about Kisumu, and arriving
+                pre-filtered is the whole of what that saves them.
+            -->
+            <MenuItem Header="Recent passes…" Click="StationPasses" />
             <Separator />
             <!--
                 Grey when there is nothing for it to do, with the reason on
@@ -1089,6 +1096,14 @@
                     <Separator Margin="0,14,0,4" Background="#DCE0E6" />
 
                     <WrapPanel Orientation="Horizontal">
+                        <!--
+                            The machine's whole record, unfiltered. The other
+                            door is on a station row, where the question is
+                            about one station.
+                        -->
+                        <Button Content="Recent passes…" Style="{StaticResource Quiet}"
+                                Click="MachinePasses" />
+                        <TextBlock Text="  ·  " Opacity="0.75" VerticalAlignment="Center" />
                         <Button Content="Save diagnostics…" Style="{StaticResource Quiet}"
                                 Click="SaveDiagnostics" />
                         <TextBlock Text="  ·  everything this machine knows about itself, as one text file"

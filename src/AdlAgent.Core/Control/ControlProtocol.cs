@@ -140,39 +140,47 @@ public static class ControlProtocol
     public const string CollectCancelCommand = "collect_cancel";
 
     /// <summary>
-    /// The unit passes this machine has recorded, newest first. Payload:
-    /// <c>{"station_link_id": 11, "most": 10}</c>, both optional.
+    /// A page of recorded passes as table rows, newest first. Payload is any
+    /// of <c>{"station_link_id": 11, "trigger": "scheduled",
+    /// "problems_only": true, "before": "2026-08-27T09:30:00Z", "most": 450}</c>.
     /// </summary>
     /// <remarks>
-    /// The other half of the sentence the live probe answers. That probe
-    /// exists to tell "scanned 0, no error" apart from a folder that is
-    /// really empty, and it can only ever speak about this instant; this
-    /// speaks about the passes that already happened, which is where a
-    /// question about 13:24 is answered.
+    /// Rows and not records, which is what makes a table of passes possible
+    /// at all: this surface caps a message at
+    /// <see cref="MaxMessageBytes"/>, a full record carries its file list and
+    /// runs to kilobytes, and a busy machine writes some fifteen hundred
+    /// passes a day. A row is about a hundred and twenty bytes.
     /// <para>
-    /// Named by station rather than by unit, because a station's unit is
-    /// whatever it happens to share a folder with and nobody knows the name
-    /// of that. Omitting the station gives the machine's own passes, which is
-    /// what the diagnostics bundle takes.
+    /// The filters are applied here rather than by whoever draws the table,
+    /// so that a page is a page of matches: "load more" then walks back
+    /// through rows instead of through blank screens, and a failure three
+    /// weeks back is reachable.
+    /// </para>
+    /// <para>
+    /// The answer says how it was arrived at -- how many records were read,
+    /// whether the log ran out, and where to carry on from -- because
+    /// "twelve passes had problems" and "twelve, in the twenty thousand I got
+    /// through before I stopped" look identical and mean opposite things.
     /// </para>
     /// </remarks>
-    public const string PassesCommand = "passes";
+    public const string PassesIndexCommand = "passes_index";
 
     /// <summary>
-    /// Write a plain-text diagnostics bundle. Payload: <c>{"path": "..."}</c>.
+    /// One pass in full, file detail and all. Payload:
+    /// <c>{"at": "2026-08-27T09:30:02.417Z", "unit": "C:\\Vaisala\\dump"}</c>.
     /// </summary>
     /// <remarks>
-    /// The path comes from the client and the file is written by the agent,
-    /// which is the only arrangement that works on the service tier: the logs
-    /// are in a folder whose permissions the MSI has replaced with SYSTEM and
-    /// Administrators, so the tray cannot read them, and the service can. The
-    /// technician picks where it goes and the service fills it.
+    /// Named by when it started and the folder it walked, both of which are
+    /// already in the row asking for it. No id is invented: two units never
+    /// share a folder, and one unit cannot pass twice at once.
     /// <para>
-    /// The bundle rather than the bytes, for the same reason: it is far larger
-    /// than <see cref="MaxMessageBytes"/> and this surface serves one client
-    /// at a time.
+    /// Answers with nothing when that pass has been evicted since the row was
+    /// drawn, which is an ordinary thing to happen to a window left open on a
+    /// machine working through a backlog.
     /// </para>
     /// </remarks>
+    public const string PassCommand = "pass";
+
     public const string DiagnosticsCommand = "diagnostics";
 
     /// <summary>
