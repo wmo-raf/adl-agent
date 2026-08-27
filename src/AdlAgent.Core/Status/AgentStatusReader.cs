@@ -116,6 +116,12 @@ public sealed class AgentStatusReader
             LastSyncedAt = configuration.LastSyncedAt,
             ConfigFromCache = configuration.Configuration?.FromCache ?? false,
             ConfigVersion = configuration.Configuration?.Version,
+            // From the configuration and not the heartbeat, so a machine
+            // working from the cache still says what it last saw. See
+            // Api.ServerInfo.
+            AdlVersion = configuration.Configuration?.Sync.Server.AdlVersion ?? "",
+            PluginVersion = configuration.Configuration?.Sync.Server.PluginVersion ?? "",
+            AdlReportedItsVersion = configuration.Configuration?.Sync.Server.Reported ?? false,
             StationLinkCount = configuration.Configuration?.StationLinks.Count() ?? 0,
             LastHeartbeatAt = heartbeat.LastSuccessAt,
             FleetStatus = heartbeat.FleetStatus,

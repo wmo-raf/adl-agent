@@ -547,6 +547,57 @@ public sealed class ShellViewModel : Observable
 
     public string ConfigVersion => _status?.ConfigVersion?.ToString(CultureInfo.CurrentCulture) ?? "-";
 
+    /// <summary>
+    /// What the instance at the other end is running, on one line.
+    /// </summary>
+    /// <remarks>
+    /// One row and not two. The two numbers are quoted together -- down a
+    /// telephone, into an issue, at the top of a support mail -- and a second
+    /// label nearly as long as its value would buy nothing for the line it
+    /// costs on a page that already has eight.
+    /// <para>
+    /// The silence is named rather than drawn as a dash. Most of the fleet
+    /// will be on an ADL older than the release that added the block, so this
+    /// wording is what most machines show for a while, and it is worth
+    /// something: "too old to say" puts a lower bound on the far end's
+    /// version, which is a fact about the far end. A "-" here would read as
+    /// this machine having failed to fetch something.
+    /// </para>
+    /// <para>
+    /// Before the first sync there is no answer of either kind, so it falls
+    /// back to the dash every other unanswered row on this page uses -- the
+    /// grid it sits in is hidden until this machine has paired anyway.
+    /// </para>
+    /// </remarks>
+    public string AdlVersion
+    {
+        get
+        {
+            if (_status is null)
+            {
+                return "-";
+            }
+
+            if (!_status.AdlReportedItsVersion)
+            {
+                return _status.LastSyncedAt is null
+                    ? "-"
+                    : "Not reported — this ADL predates the field";
+            }
+
+            var adl = Blank(_status.AdlVersion);
+            var plugin = Blank(_status.PluginVersion);
+
+            return $"{adl}  ·  agent plugin {plugin}";
+
+            // Half an answer is still an answer, and is shown as one. An
+            // instance that sent the block with one string empty has told us
+            // something is wrong at its end, not at this one.
+            static string Blank(string value) =>
+                string.IsNullOrWhiteSpace(value) ? "unknown" : value;
+        }
+    }
+
     public string CheckInterval => _status is null
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"every {_status.CheckIntervalMinutes} minutes");
@@ -1864,7 +1915,8 @@ public sealed class ShellViewModel : Observable
         nameof(PairedSince), nameof(ShowsPairingBox), nameof(ShowsPairAgain),
         nameof(ShowsCancelPairing),
         nameof(FleetStatus), nameof(FleetTone),
-        nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
+        nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(AdlVersion),
+        nameof(CheckInterval),
         nameof(LastHeartbeatAgo), nameof(LastSyncedAgo),
         nameof(ClockSkew), nameof(Reconciles), nameof(LastError), nameof(UpdateStatus),
         nameof(Collecting), nameof(CollectingNow),

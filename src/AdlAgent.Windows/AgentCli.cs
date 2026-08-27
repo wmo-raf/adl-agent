@@ -122,6 +122,29 @@ public static class AgentCli
             $"Version:  {Text(status, "agent_version")}",
         };
 
+        // What the far end is running, when the far end says. Omitted rather
+        // than dashed on an ADL too old to send it -- the rule the Updates
+        // and Last error lines below already follow, and the reason this is
+        // not the tray's wording: a window has room to explain a silence, six
+        // lines read down a telephone do not.
+        //
+        // Labelled apart from "Version:" above it on purpose. Two lines both
+        // reading "Version" on a screen whose entire job is telling three
+        // version numbers apart would be worse than saying nothing.
+        //
+        // ASCII, where the tray's own row uses a middle dot. Nothing sets
+        // Console.OutputEncoding, so this prints through whatever code page
+        // the console has -- cp850 on a French-locale server, cp437 on an
+        // older one -- and a byte those cannot render is a byte read out over
+        // a telephone as a question. Every other line this program prints is
+        // already ASCII; this one stays that way.
+        if (status["adl_reported_its_version"]?.GetValue<bool>() == true)
+        {
+            lines.Add(
+                $"ADL ver:  {Text(status, "adl_version")}"
+                + $" (agent plugin {Text(status, "plugin_version")})");
+        }
+
         if (Text(status, "update_detail") is { Length: > 0 } update and not "-")
         {
             lines.Add($"Updates:  {update}");

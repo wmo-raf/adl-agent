@@ -1169,6 +1169,11 @@ public sealed class FakeAdlServer : IDisposable
     {
         ConfigVersion = 1,
         Limits = new AgentLimits { ManifestEntries = 500, FileBytes = 50 * 1024 * 1024 },
+        // What a current ADL sends. Here rather than left empty because the
+        // fake stands in for an instance somebody is running today, and a
+        // test that wants the other case -- an ADL too old to say -- is
+        // clearer for having to ask for it.
+        Server = new ServerInfo { AdlVersion = "0.8.14", PluginVersion = "0.4.0" },
         Device = new DeviceConfig
         {
             Id = 7,

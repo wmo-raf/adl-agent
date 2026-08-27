@@ -30,8 +30,62 @@ public sealed record SyncResponse
 {
     public long ConfigVersion { get; init; }
     public AgentLimits Limits { get; init; } = new();
+
+    /// <summary>What the instance at the other end is running.</summary>
+    /// <remarks>
+    /// Never absent from an ADL new enough to send it, and always at its
+    /// default from one that is not -- which is a state the window says out
+    /// loud rather than hides. See <see cref="ServerInfo"/>.
+    /// </remarks>
+    public ServerInfo Server { get; init; } = new();
+
     public DeviceConfig Device { get; init; } = new();
     public IReadOnlyList<ConnectionConfig> Connections { get; init; } = [];
+}
+
+/// <summary>
+/// The software running at the other end of the wire.
+/// </summary>
+/// <remarks>
+/// Nothing here changes what the agent does. It is read by a person, and it
+/// answers the question a technician standing at a country server actually
+/// has when HQ says the country is running something old: what <em>is</em>
+/// this machine talking to. Before it existed that question had no answer at
+/// the machine at all -- the agent's own version travels to ADL on every call
+/// (<c>X-Agent-Version</c>), and nothing came back the other way.
+/// <para>
+/// On the sync response and not the heartbeat, deliberately. A sync response
+/// is cached to disk byte for byte and re-fetched in full every cycle, so
+/// these survive a service restart and still read correctly on a machine that
+/// has lost its link. What the agent keeps from a beat lives in
+/// <c>HeartbeatMonitor</c>, in memory, and is blank after every restart --
+/// which is exactly when somebody is looking at this.
+/// </para>
+/// <para>
+/// Both default to empty rather than to a guess. An ADL that predates the
+/// block sends nothing, and "this instance is too old to say" is a fact about
+/// the instance worth showing; inventing a number here would turn it into a
+/// lie the tray then repeats.
+/// </para>
+/// </remarks>
+public sealed record ServerInfo
+{
+    /// <summary>ADL core's version, as ADL reports it.</summary>
+    public string AdlVersion { get; init; } = "";
+
+    /// <summary>The version of the agent plugin serving this instance.</summary>
+    public string PluginVersion { get; init; } = "";
+
+    /// <summary>True when ADL said anything at all about itself.</summary>
+    /// <remarks>
+    /// One question rather than two null checks at each call site, because
+    /// the two strings arrive together or not at all: an instance new enough
+    /// to send the block reads both numbers out of code that is already
+    /// loaded, and neither can fail on its own.
+    /// </remarks>
+    public bool Reported =>
+        !string.IsNullOrWhiteSpace(AdlVersion) ||
+        !string.IsNullOrWhiteSpace(PluginVersion);
 }
 
 /// <summary>What one call may carry. Handed out by ADL, never compiled in.</summary>
