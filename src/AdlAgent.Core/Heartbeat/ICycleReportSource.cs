@@ -35,4 +35,20 @@ public interface ICycleReportSource
     /// what a machine that has not managed a cycle yet should say.
     /// </summary>
     int? BacklogCount { get; }
+
+    /// <summary>
+    /// The finished passes the next beat should carry, without giving them
+    /// up.
+    /// </summary>
+    /// <remarks>
+    /// The one place this seam is not purely a read, and it earns the
+    /// exception: the beat is what empties the queue, so the beat has to be
+    /// able to say what it managed to deliver. Reading and settling are still
+    /// two calls, which is what makes a refused beat cost nothing -- the
+    /// passes are still here for the next one.
+    /// </remarks>
+    PassBatch Take(int most = CycleReportStore.PerBeat);
+
+    /// <summary>ADL accepted that batch; let it go.</summary>
+    void Delivered(PassBatch batch);
 }

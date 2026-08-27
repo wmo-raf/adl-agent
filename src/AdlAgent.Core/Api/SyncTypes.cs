@@ -161,6 +161,31 @@ public sealed record DeviceConfig
     /// </para>
     /// </remarks>
     public int? DatedFolderWindowHours { get; init; }
+
+    /// <summary>
+    /// How much this machine should write to its general log, if ADL has an
+    /// opinion. Absent means "use whatever the machine was set to locally".
+    /// </summary>
+    /// <remarks>
+    /// The remote half of a setting whose local half already exists
+    /// (wmo-raf/adl#306): a machine can be put on <c>Debug</c> by editing one
+    /// line of its settings file, which requires reaching the machine -- the
+    /// exact problem this product exists to solve. So HQ can raise it from
+    /// the admin, per device, and lower it again by clearing the field.
+    /// <para>
+    /// Absent, empty, and unparseable all mean the same thing: the local
+    /// setting stands. That is the same reading of silence
+    /// <see cref="ReconciliationIntervalHours"/> and
+    /// <see cref="DatedFolderWindowHours"/> get, and it is what keeps a
+    /// machine on an ADL that predates the field working exactly as it did.
+    /// </para>
+    /// <para>
+    /// A string and not an enum, because it is typed by a person into a form
+    /// on another continent and arrives here as whatever they typed. What is
+    /// done with a word nobody can parse is the local setting, not silence.
+    /// </para>
+    /// </remarks>
+    public string? LogLevel { get; init; }
 }
 
 public sealed record ConnectionConfig

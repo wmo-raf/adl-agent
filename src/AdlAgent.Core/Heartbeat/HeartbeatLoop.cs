@@ -94,11 +94,21 @@ public sealed class HeartbeatLoop : AgentLoop
 
         var sentAt = _time.GetUtcNow();
 
+        // Read before the send and settled after it. What is on the queue at
+        // this instant is what this beat is answerable for; a pass that
+        // finishes while the request is in flight belongs to the next one.
+        var batch = _cycles.Take();
+
         try
         {
             var response = await _client
-                .HeartbeatAsync(token, Compose(sentAt), cancellationToken)
+                .HeartbeatAsync(token, Compose(sentAt, batch), cancellationToken)
                 .ConfigureAwait(false);
+
+            // Only now. Everything below this line is a beat that did not
+            // arrive, and its passes are still owed -- which is the whole of
+            // what makes a refused beat cost nothing.
+            _cycles.Delivered(batch);
 
             _monitor.RecordSuccess(response, sentAt);
             _cadence.Adopt(
@@ -149,7 +159,7 @@ public sealed class HeartbeatLoop : AgentLoop
     /// everything else has gone wrong, because that is the machine whose
     /// beat matters most.
     /// </remarks>
-    private HeartbeatRequest Compose(DateTimeOffset now)
+    private HeartbeatRequest Compose(DateTimeOffset now, PassBatch batch)
     {
         var configuration = _configuration.Current;
 
@@ -167,6 +177,11 @@ public sealed class HeartbeatLoop : AgentLoop
             DeviceTime = now,
             BacklogCount = _cycles.BacklogCount,
             LastCycle = _cycles.LastCompletedCycle,
+            CompletedPasses = batch.Passes,
+            // Left out entirely on the ordinary beat, which is nearly all of
+            // them: a zero every five minutes is a field ADL learns to read
+            // past, and this one is meant to be noticed.
+            DroppedPasses = batch.Dropped > 0 ? batch.Dropped : null,
             Disk = _volumes.Read(folders),
         };
     }
