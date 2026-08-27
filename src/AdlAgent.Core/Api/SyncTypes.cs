@@ -39,6 +39,19 @@ public sealed record AgentLimits
 {
     public int ManifestEntries { get; init; } = 500;
     public long FileBytes { get; init; } = 50 * 1024 * 1024;
+
+    /// <summary>
+    /// How many files this machine may have in flight at once, across every
+    /// station it serves.
+    /// </summary>
+    /// <remarks>
+    /// ADL's to set, because the scarce thing is the country's link and the
+    /// capacity of the instance at the other end of it -- neither of which a
+    /// machine in a vendor's server room can see. Four is what an ADL that
+    /// predates the field is taken to mean, which is the same reading of
+    /// silence the reconciliation interval and the dated-folder window get.
+    /// </remarks>
+    public int ConcurrentUploads { get; init; } = 4;
 }
 
 public sealed record DeviceConfig

@@ -120,47 +120,82 @@ public sealed class ReconciliationSweep
     /// waiting another day after somebody fixed it.
     /// </param>
     /// <remarks>
-    /// Called only when the cycle ran to its end. A sweep that was cut short
+    /// Called only for a unit that ran to its end. A sweep that was cut short
     /// by an ADL that stopped answering offered some of the folder and not
     /// the rest, and recording that as done would leave the unoffered part
     /// waiting another day for no reason. That an unreachable ADL therefore
     /// makes every cycle a sweep costs nothing: the manifest call it would
     /// spend them on is refused before it is built.
+    /// <para>
+    /// Per unit rather than per cycle, which is what stops a station's own
+    /// completed sweep being thrown away because some other folder on the
+    /// machine was still being uploaded when ADL went quiet.
+    /// </para>
     /// </remarks>
-    public void Record(SweepPlan plan, IReadOnlySet<long> reconciled, DateTimeOffset at)
+    public void Record(IReadOnlySet<long> reconciled, DateTimeOffset at)
     {
+        if (reconciled.Count == 0)
+        {
+            // Not worth a disk write every check interval for the life of
+            // the install, and a tick of forty units would otherwise make
+            // forty of them.
+            return;
+        }
+
         lock (_gate)
         {
             var swept = Swept();
-            var changed = false;
 
             foreach (var stationLinkId in reconciled)
             {
                 swept[stationLinkId] = at;
-                changed = true;
             }
 
-            // Stations this device no longer has drop out, so the log stays
-            // the size of the fleet rather than the size of its history. A
-            // station that comes back is swept once, which is what a station
-            // whose folder nobody watched for a while wants anyway.
-            //
-            // Only for a plan that saw the whole fleet. A collect-now's plan
-            // knows one station, and everything else is absent from it because
-            // nobody asked rather than because it has gone.
-            foreach (var stationLinkId in plan.Prunes
-                ? swept.Keys.Where(id => !plan.Known.Contains(id)).ToList()
-                : [])
+            _store.SaveSweeps(new SweepLog { Swept = swept });
+        }
+    }
+
+    /// <summary>
+    /// Forget the stations this device no longer has.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Record"/>, and called once for a tick rather
+    /// than once per unit, because it is the one question here that is about
+    /// the whole fleet: what is absent from a unit is absent because that
+    /// unit is one folder's worth of a machine, not because it has gone.
+    /// <para>
+    /// The log stays the size of the fleet rather than the size of its
+    /// history. A station that comes back is swept once, which is what a
+    /// station whose folder nobody watched for a while wants anyway.
+    /// </para>
+    /// <para>
+    /// Does nothing for a plan that did not see the whole fleet. A
+    /// collect-now's plan knows one station, and pruning on that would wipe
+    /// the log every time a technician pressed a button -- so the next
+    /// scheduled cycle would sweep all forty stations at once, offering every
+    /// folder in full, on the link this product exists for.
+    /// </para>
+    /// </remarks>
+    public void Prune(SweepPlan plan)
+    {
+        if (!plan.Prunes)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            var swept = Swept();
+            var gone = swept.Keys.Where(id => !plan.Known.Contains(id)).ToList();
+
+            if (gone.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var stationLinkId in gone)
             {
                 swept.Remove(stationLinkId);
-                changed = true;
-            }
-
-            if (!changed)
-            {
-                // Nothing swept and nothing gone: not worth a disk write
-                // every check interval for the life of the install.
-                return;
             }
 
             _store.SaveSweeps(new SweepLog { Swept = swept });

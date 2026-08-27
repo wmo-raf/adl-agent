@@ -79,11 +79,19 @@ public abstract class AgentLoop : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Before the pass, not after. A wake that arrives while this loop
+            // is working is meant for the sleep that follows -- and taking
+            // the signal only afterwards would take the fresh one Set() left
+            // behind, so the loop would sleep through the very nudge somebody
+            // is standing there watching for.
+            var listening = _wake.Listen();
+
             await RunOnceAsync(stoppingToken).ConfigureAwait(false);
 
             try
             {
-                await _wake.WaitAsync(Interval, _time, stoppingToken).ConfigureAwait(false);
+                await _wake.WaitAsync(listening, Interval, _time, stoppingToken)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

@@ -68,6 +68,7 @@ public static class AgentCoreServiceCollectionExtensions
         services.TryAddSingleton<FolderScanner>();
         services.TryAddSingleton<FolderPreview>();
         services.TryAddSingleton<ReconciliationSweep>();
+        services.TryAddSingleton<CycleConcurrency>();
         services.TryAddSingleton<UploadCycle>();
         services.TryAddSingleton<OnDemandSync>();
         services.TryAddSingleton<OnDemandCollect>();

@@ -50,10 +50,17 @@ public sealed class AgentHarness : IAsyncDisposable
     /// this is a short list: where ADL is, where state goes, and whether
     /// this machine may replace itself.
     /// </param>
+    /// <param name="concurrency">
+    /// How much of this machine's collection may happen at once. One unit and
+    /// one upload unless a test says otherwise -- see
+    /// <see cref="Concurrency"/> for why.
+    /// </param>
     public AgentHarness(
         InMemoryAgentStateStore? store = null,
-        IReadOnlyDictionary<string, string?>? settings = null)
+        IReadOnlyDictionary<string, string?>? settings = null,
+        CycleConcurrency? concurrency = null)
     {
+        Concurrency = concurrency ?? new CycleConcurrency { Units = 1, MostUploads = 1 };
         Store = store ?? new InMemoryAgentStateStore();
         Server = new FakeAdlServer();
 
@@ -94,6 +101,7 @@ public sealed class AgentHarness : IAsyncDisposable
         services.AddSingleton<IFileReadinessProbe>(Readiness);
         services.AddSingleton<IControlSurface>(Control);
         services.AddSingleton<IUpdateInstaller>(Updates);
+        services.AddSingleton(Concurrency);
 
         services.AddAdlAgentCore(configuration);
 
@@ -113,6 +121,24 @@ public sealed class AgentHarness : IAsyncDisposable
     public FakeControlSurface Control { get; } = new();
 
     public FakeUpdateInstaller Updates { get; } = new();
+
+    /// <summary>
+    /// One unit and one upload at a time, unless a test says otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The whole of how the suite survived collection becoming concurrent.
+    /// At one apiece the same calls go out in the same order they did when
+    /// nothing was concurrent, so every sequence a test had already pinned --
+    /// which page was offered first, which file was refused, what a folder
+    /// cost -- still means what it meant.
+    /// <para>
+    /// Set higher by the handful of tests where concurrency is the subject
+    /// rather than the setting, and those assert on what is true whatever the
+    /// order: that the bounds hold, and that a unit finding ADL gone stops
+    /// the rest.
+    /// </para>
+    /// </remarks>
+    public CycleConcurrency Concurrency { get; }
 
     public InMemoryAgentStateStore Store { get; }
 

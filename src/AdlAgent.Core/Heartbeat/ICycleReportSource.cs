@@ -16,10 +16,18 @@ namespace AdlAgent.Core.Heartbeat;
 public interface ICycleReportSource
 {
     /// <summary>
-    /// The last cycle that ran to completion, or <c>null</c> if none has
-    /// since this service started.
+    /// Every station's latest word, stamped with the last pass that ran to
+    /// completion -- or <c>null</c> if none has since this service started.
     /// </summary>
+    /// <remarks>
+    /// Not one pass's snapshot. Collection runs a unit at a time and each
+    /// unit finishes on its own, so what is reported is each station's own
+    /// most recent counts (wmo-raf/adl#304).
+    /// </remarks>
     CycleReport? LastCompletedCycle { get; }
+
+    /// <summary>When this station's own pass last finished, or null.</summary>
+    DateTimeOffset? LastPassAt(long stationLinkId);
 
     /// <summary>
     /// Files this machine has seen and ADL has not yet accepted. <c>null</c>

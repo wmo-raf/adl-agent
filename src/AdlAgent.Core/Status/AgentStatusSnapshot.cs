@@ -93,6 +93,20 @@ public sealed record AgentStatusSnapshot
     /// </remarks>
     public int? ReconciliationIntervalHours { get; init; }
 
+    /// <summary>
+    /// How many stations this machine is collecting at this moment.
+    /// </summary>
+    /// <remarks>
+    /// Zero between passes, which on a settled machine is nearly always. It
+    /// earns its place on the machine that is not settled: one working
+    /// through a first bind's backlog spends hours collecting, and until this
+    /// existed the window said nothing about it at all -- a stale count in
+    /// the station grid and a scan cadence, on a machine uploading as fast as
+    /// its link allows. Somebody looking at that screen could not tell it
+    /// from a machine that had stopped, which is the whole of wmo-raf/adl#304.
+    /// </remarks>
+    public int CollectingStations { get; init; }
+
     /// <summary>Why the last attempt to reach ADL failed, if it did.</summary>
     public string? LastError { get; init; }
 

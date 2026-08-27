@@ -551,6 +551,34 @@ public sealed class ShellViewModel : Observable
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"every {_status.CheckIntervalMinutes} minutes");
 
+    /// <summary>True while this machine is collecting something.</summary>
+    /// <remarks>
+    /// What the header hangs its one live fact on. A machine between passes
+    /// -- which a settled one nearly always is -- shows nothing, because a
+    /// line reading "collecting 0 stations" is a line that teaches a reader
+    /// to stop looking at it.
+    /// </remarks>
+    public bool Collecting => _status is { CollectingStations: > 0 };
+
+    /// <summary>
+    /// What this machine is collecting at this moment, in words.
+    /// </summary>
+    /// <remarks>
+    /// The answer to the question the window could not answer before: a
+    /// server working through a first bind's backlog spends hours uploading,
+    /// and everything else on this screen is a stale count or a cadence.
+    /// Somebody looking at it could not tell that machine from one that had
+    /// stopped -- which is exactly what happened, at a country that had just
+    /// bound four stations with years of history behind them.
+    /// </remarks>
+    public string CollectingNow => _status is not { CollectingStations: > 0 }
+        ? ""
+        : _status.CollectingStations == 1
+            ? "collecting 1 station"
+            : string.Create(
+                CultureInfo.CurrentCulture,
+                $"collecting {_status.CollectingStations} stations");
+
     public string ClockSkew => _status?.ClockSkewSeconds is null
         ? "-"
         : string.Create(CultureInfo.CurrentCulture, $"{_status.ClockSkewSeconds} seconds");
@@ -1839,6 +1867,7 @@ public sealed class ShellViewModel : Observable
         nameof(LastHeartbeat), nameof(LastSynced), nameof(ConfigVersion), nameof(CheckInterval),
         nameof(LastHeartbeatAgo), nameof(LastSyncedAgo),
         nameof(ClockSkew), nameof(Reconciles), nameof(LastError), nameof(UpdateStatus),
+        nameof(Collecting), nameof(CollectingNow),
         nameof(ShowsAdlFacts), nameof(ShowsPairedTo), nameof(ShowsHeadline),
         nameof(Headline), nameof(HasNoConnections), nameof(ShowsConnectionHint),
         nameof(ShowsMachineReason), nameof(ShowsConnectionReason),

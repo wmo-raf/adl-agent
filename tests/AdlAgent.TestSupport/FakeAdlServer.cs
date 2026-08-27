@@ -222,6 +222,33 @@ public sealed class FakeAdlServer : IDisposable
     /// </remarks>
     public Func<Task>? BeforeManifest { get; set; }
 
+    /// <summary>
+    /// Run before every upload is answered, so a test can hold uploads in
+    /// flight.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="BeforeManifest"/>, and what makes the
+    /// upload bound observable at all: how many files this machine has on the
+    /// wire at once is only a question while more than one of them is there.
+    /// </remarks>
+    public Func<Task>? BeforeUpload { get; set; }
+
+    /// <summary>
+    /// Answer several requests at once, instead of one after another.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, and deliberately. Answering serially is what makes a
+    /// test's recorded request sequence a sequence at all, and every test
+    /// written before collection became concurrent depends on that.
+    /// <para>
+    /// Turned on by the handful of tests where what is on the wire at once is
+    /// the subject. A hook that holds an upload would otherwise hold the
+    /// whole server -- including the very requests whose arrival the test is
+    /// waiting for -- and the test would deadlock rather than fail.
+    /// </para>
+    /// </remarks>
+    public bool AnswersConcurrently { get; set; }
+
     /// <summary>Entries this instance takes in one manifest, whatever it advertises.</summary>
     /// <remarks>
     /// Set below <see cref="AgentLimits.ManifestEntries"/> to be an instance
@@ -412,6 +439,28 @@ public sealed class FakeAdlServer : IDisposable
                 return;
             }
 
+            if (AnswersConcurrently)
+            {
+                // Not awaited, so the accept loop takes the next request
+                // while this one is still being answered. Every fault is
+                // swallowed for the same reason it is below: this is a stub,
+                // and a test learns what went wrong from its own assertions.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await HandleAsync(context).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // The client hung up, or the test tore the server
+                        // down mid-answer.
+                    }
+                });
+
+                continue;
+            }
+
             try
             {
                 await HandleAsync(context).ConfigureAwait(false);
@@ -439,6 +488,11 @@ public sealed class FakeAdlServer : IDisposable
         if (request.Path == "manifest/" && BeforeManifest is { } waiting)
         {
             await waiting().ConfigureAwait(false);
+        }
+
+        if (request.Path == "files/" && BeforeUpload is { } uploading)
+        {
+            await uploading().ConfigureAwait(false);
         }
 
         var (status, body) = Answer(request);

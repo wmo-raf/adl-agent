@@ -197,6 +197,31 @@
                             Style="{StaticResource FactLabel}" Text="  Scans " /><Run
                             Style="{StaticResource FactValue}"
                             Text="{Binding CheckInterval, Mode=OneWay}" /></TextBlock>
+
+                        <!--
+                            The one live fact in this header, and the only one
+                            that is not there most of the time: a settled
+                            machine is between passes and shows nothing, which
+                            is what keeps this worth looking at when it does
+                            appear.
+
+                            It is here because everything else on this screen
+                            is a stale count or a cadence, and a machine
+                            working through a backlog spends hours uploading
+                            while all of them sit still. Somebody looking at
+                            that could not tell it from a machine that had
+                            stopped — see wmo-raf/adl#304.
+
+                            No colon, for the same reason as Scans above it:
+                            the value is already a phrase.
+                        -->
+                        <TextBlock Style="{StaticResource Fact}"
+                                   Visibility="{Binding Collecting,
+                                                        Converter={StaticResource Visible}}"><Run
+                            Style="{StaticResource Glyph}" Text="&#xE896;" /><Run
+                            Style="{StaticResource FactLabel}" Text="  Now " /><Run
+                            Style="{StaticResource FactValue}"
+                            Text="{Binding CollectingNow, Mode=OneWay}" /></TextBlock>
                     </WrapPanel>
 
                     <!--
