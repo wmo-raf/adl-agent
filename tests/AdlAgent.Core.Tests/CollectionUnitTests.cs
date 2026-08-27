@@ -99,6 +99,12 @@ public class CollectionUnitTests
 
         Assert.Equal(11, link.StationLinkId);
         Assert.Equal(1, link.Scanned);
+
+        // And why, which is the half that matters to whoever reads the row.
+        // Counts with no sentence beside them read as a station whose folder
+        // is wrong; this is a link that went, and it is nobody at this
+        // machine's to fix.
+        Assert.Equal("ADL stopped answering before this station finished.", link.Error);
     }
 
     [Fact]

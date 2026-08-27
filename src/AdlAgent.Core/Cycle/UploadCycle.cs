@@ -419,6 +419,22 @@ public sealed class UploadCycle
             // the unoffered part waiting another day for no reason.
             _sweeps.Record(scan.Reconciled, at);
         }
+        else
+        {
+            // Every station in the unit is told why, because the counts alone
+            // are an absence: a row showing files scanned and none sent, with
+            // nothing saying what stopped them, reads as a station whose
+            // folder is wrong. This is a link that went, and it is nobody at
+            // this machine's to fix.
+            //
+            // Noted rather than set, so a station that already has a real
+            // fault of its own -- a file it could not read, a name ADL
+            // refused -- keeps it. That one is actionable and this one is not.
+            foreach (var tally in scan.Links.Values)
+            {
+                tally.Note(AdlStoppedAnswering);
+            }
+        }
 
         // Recorded either way, and completion only on the first. A unit that
         // died mid-page still knows what it scanned and why it stopped, and
@@ -581,8 +597,7 @@ public sealed class UploadCycle
             Uploaded = tally?.Uploaded ?? 0,
             Failed = tally?.Failed ?? 0,
             Cancelled = cancellationToken.IsCancellationRequested,
-            Error = tally?.Error
-                ?? (delivered ? null : "ADL stopped answering before this station finished."),
+            Error = tally?.Error ?? (delivered ? null : AdlStoppedAnswering),
         };
     }
 
@@ -1006,6 +1021,18 @@ public sealed class UploadCycle
     /// the pages fit.
     /// </remarks>
     private static int PageSize(AgentLimits limits) => Math.Clamp(limits.ManifestEntries, 1, 5_000);
+
+    /// <summary>
+    /// What a station is told when the link went before its turn finished.
+    /// </summary>
+    /// <remarks>
+    /// Spelled once, because both paths that can be cut short say it -- the
+    /// scheduled tick and the collect somebody asked for -- and a technician
+    /// comparing the grid with what the button just told them should not be
+    /// reading two sentences about one thing.
+    /// </remarks>
+    private const string AdlStoppedAnswering =
+        "ADL stopped answering before this station finished.";
 
     /// <summary>Leave the cycle where the heartbeat will find it.</summary>
     private void Record(ScanResult scan, DateTimeOffset at, bool completed)
