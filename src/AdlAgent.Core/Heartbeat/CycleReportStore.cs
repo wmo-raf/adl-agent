@@ -1,5 +1,7 @@
 using AdlAgent.Core.Api;
 using AdlAgent.Core.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AdlAgent.Core.Heartbeat;
 
@@ -63,14 +65,38 @@ public sealed class CycleReportStore : ICycleReportSource
 {
     private readonly Lock _gate = new();
 
+    private readonly ILogger<CycleReportStore> _logger;
+
+    /// <param name="logger">
+    /// Only ever used to say what was shed, which is the one thing that
+    /// happens here that a person needs to know about. Defaulted so a test
+    /// about the queue can be a test about the queue.
+    /// </param>
+    public CycleReportStore(ILogger<CycleReportStore>? logger = null) =>
+        _logger = logger ?? NullLogger<CycleReportStore>.Instance;
+
     private readonly Dictionary<long, Station> _stations = [];
 
     /// <summary>Passes that have finished and not yet been accepted by ADL.</summary>
-    private readonly Queue<CyclePassReport> _passes = new();
+    private readonly Queue<Queued> _passes = new();
 
     private DateTimeOffset? _completedAt;
 
     private int _dropped;
+
+    /// <summary>
+    /// What the next pass to arrive is numbered.
+    /// </summary>
+    /// <remarks>
+    /// The whole reason a batch is settled by number rather than by count. A
+    /// beat is in flight for as long as the country's link takes, and the
+    /// cycle goes on finishing units the entire time -- so on a machine whose
+    /// queue is full, the passes this batch was read from can be shed to make
+    /// room while ADL is still answering. Dropping "however many were sent"
+    /// off the head would then throw away passes nobody had sent anywhere,
+    /// silently, in exactly the long outage the shedding exists for.
+    /// </remarks>
+    private long _numbered;
 
     /// <summary>
     /// How many finished passes wait here for an ADL that is not answering.
@@ -211,15 +237,30 @@ public sealed class CycleReportStore : ICycleReportSource
     {
         var pass = PassReports.Of(record);
 
+        var shed = 0;
+
         lock (_gate)
         {
             while (_passes.Count >= Capacity)
             {
                 _passes.Dequeue();
                 _dropped++;
+                shed++;
             }
 
-            _passes.Enqueue(pass);
+            _passes.Enqueue(new Queued(++_numbered, pass));
+        }
+
+        if (shed > 0)
+        {
+            // Said out loud, and outside the lock. The count also travels on
+            // the next beat, but a beat is a moment: ADL clears the number
+            // once it has been told, so nothing at either end would still say
+            // so a fortnight later when somebody asks about the gap. This
+            // does, on the machine where the passes themselves still are.
+            _logger.LogWarning(
+                "ADL has been unreachable long enough that {Shed} finished pass(es) have been dropped from the queue waiting for it. They are still in this machine's cycle log.",
+                shed);
         }
     }
 
@@ -233,13 +274,19 @@ public sealed class CycleReportStore : ICycleReportSource
     /// that keeps dropping loses nothing to the drops themselves -- only,
     /// eventually, to the ceiling.
     /// </remarks>
-    public PassBatch Take(int most = PerBeat)
+    public PassBatch Peek(int most = PerBeat)
     {
         lock (_gate)
         {
+            var batch = _passes.Take(Math.Max(0, most)).ToList();
+
             return new PassBatch(
-                _passes.Take(Math.Max(0, most)).ToList(),
-                _dropped);
+                batch.Select(queued => queued.Pass).ToList(),
+                _dropped,
+                // Nothing, when there is nothing: a delivered empty batch
+                // must not clear a pass that arrived while the beat was in
+                // flight, and every real pass is numbered from one.
+                batch.Count == 0 ? 0 : batch[^1].Number);
         }
     }
 
@@ -254,11 +301,17 @@ public sealed class CycleReportStore : ICycleReportSource
     {
         lock (_gate)
         {
-            for (var taken = 0; taken < batch.Passes.Count && _passes.Count > 0; taken++)
+            // Up to the number ADL took, rather than however many were sent.
+            // Anything the ceiling shed while the beat was in flight is
+            // simply no longer here and was counted as shed when it went.
+            while (_passes.Count > 0 && _passes.Peek().Number <= batch.Through)
             {
                 _passes.Dequeue();
             }
 
+            // Only what this batch reported. A pass shed since it was read is
+            // still a gap ADL has not been told about, and it is the next
+            // beat's to report.
             _dropped = Math.Max(0, _dropped - batch.Dropped);
         }
     }
@@ -306,6 +359,9 @@ public sealed class CycleReportStore : ICycleReportSource
 
     /// <summary>One station's latest word, and when it was said.</summary>
     private readonly record struct Station(CycleLinkReport Report, int Backlog, DateTimeOffset At);
+
+    /// <summary>One queued pass, and its place in the order they arrived.</summary>
+    private readonly record struct Queued(long Number, CyclePassReport Pass);
 }
 
 /// <summary>
@@ -322,4 +378,9 @@ public sealed class CycleReportStore : ICycleReportSource
 /// Passes the queue shed since ADL last accepted a beat. Zero on a machine
 /// whose link is working, which is nearly all of them.
 /// </param>
-public sealed record PassBatch(IReadOnlyList<CyclePassReport> Passes, int Dropped);
+/// <param name="Through">
+/// The queue position of the last pass in the batch, which is what settling
+/// it goes by. Zero when the batch is empty.
+/// </param>
+public sealed record PassBatch(
+    IReadOnlyList<CyclePassReport> Passes, int Dropped, long Through);

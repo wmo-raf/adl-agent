@@ -97,7 +97,7 @@ public sealed class HeartbeatLoop : AgentLoop
         // Read before the send and settled after it. What is on the queue at
         // this instant is what this beat is answerable for; a pass that
         // finishes while the request is in flight belongs to the next one.
-        var batch = _cycles.Take();
+        var batch = _cycles.Peek();
 
         try
         {

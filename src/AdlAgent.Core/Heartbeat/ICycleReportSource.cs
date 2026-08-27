@@ -47,7 +47,7 @@ public interface ICycleReportSource
     /// two calls, which is what makes a refused beat cost nothing -- the
     /// passes are still here for the next one.
     /// </remarks>
-    PassBatch Take(int most = CycleReportStore.PerBeat);
+    PassBatch Peek(int most = CycleReportStore.PerBeat);
 
     /// <summary>ADL accepted that batch; let it go.</summary>
     void Delivered(PassBatch batch);

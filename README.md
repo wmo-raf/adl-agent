@@ -619,11 +619,18 @@ doing for a fortnight" and "which passes failed this week, anywhere".
   beat.
 - **a bounded queue, shed oldest-first, and the shedding is reported** — the
   cycle log keeps every pass regardless, so what a long outage costs is only
-  ADL's copy; `dropped_passes` says how much, because a gap nothing accounts
-  for reads as a machine that stopped.
+  ADL's copy. It is written to this machine's general log as it happens and
+  `dropped_passes` carries the count on the next beat, because a gap nothing
+  accounts for reads as a machine that stopped — and the beat that reports a
+  gap is the beat that clears it, so the number alone would be gone in five
+  minutes.
 - **a refused beat costs nothing** — the passes are read before the send and
   let go only after ADL has taken them, so a machine on a link that keeps
-  dropping loses nothing to the drops.
+  dropping loses nothing to the drops. Settled by queue position rather than
+  by count, because the cycle goes on finishing units for as long as the beat
+  is in flight: on a full queue those very passes can be shed to make room
+  while ADL is still answering, and dropping *however many were sent* off the
+  head would discard passes nobody had sent anywhere.
 - **three names of files that did not arrive** travel with each pass, one from
   each of failed / unmatched / held before any of them gets a second slot: a
   pass with forty failures in it still spends one on the unmatched name, which

@@ -89,7 +89,7 @@ public sealed class LogVerbosity
     {
         var level = Parse(asked) ?? LogLevel.Information;
 
-        Announce(() =>
+        Apply(() =>
         {
             _local = level;
         });
@@ -101,7 +101,7 @@ public sealed class LogVerbosity
     {
         var level = Parse(asked);
 
-        return Announce(() =>
+        return Apply(() =>
         {
             _remote = level;
         });
@@ -124,7 +124,8 @@ public sealed class LogVerbosity
             ? parsed
             : null;
 
-    private bool Announce(Action change)
+    /// <summary>Make a change, and say whether the level in force moved.</summary>
+    private bool Apply(Action change)
     {
         LogLevel before;
         LogLevel after;

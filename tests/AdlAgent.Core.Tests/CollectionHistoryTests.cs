@@ -185,7 +185,7 @@ public class CollectionHistoryTests
             store.Enqueue(Pass($"C:\\VendorData\\Unit{made}"));
         }
 
-        var batch = store.Take(CycleReportStore.Capacity);
+        var batch = store.Peek(CycleReportStore.Capacity);
 
         Assert.Equal(3, batch.Dropped);
 
@@ -196,7 +196,54 @@ public class CollectionHistoryTests
 
         store.Delivered(batch);
 
-        Assert.Equal(0, store.Take().Dropped);
+        Assert.Equal(0, store.Peek().Dropped);
+    }
+
+    /// <summary>
+    /// The batch is settled by position, not by count -- which matters
+    /// because the cycle goes on finishing units while a beat is in flight.
+    /// </summary>
+    /// <remarks>
+    /// On a machine whose queue is full, the passes a beat was built from can
+    /// be shed to make room while ADL is still answering. Dropping "however
+    /// many were sent" off the head would then throw away passes nobody had
+    /// sent anywhere -- silently, in exactly the long outage the shedding
+    /// exists for.
+    /// </remarks>
+    [Fact]
+    public void Shedding_while_a_beat_is_in_flight_costs_no_undelivered_pass()
+    {
+        var store = new CycleReportStore();
+
+        for (var made = 0; made < CycleReportStore.Capacity; made++)
+        {
+            store.Enqueue(Pass($"C:\\VendorData\\Unit{made}"));
+        }
+
+        var batch = store.Peek(10);
+
+        // The link is slow, and three more units finish while the beat is on
+        // the wire. The queue is full, so the three oldest go -- and those
+        // three are in the batch.
+        for (var made = 0; made < 3; made++)
+        {
+            store.Enqueue(Pass($"C:\\VendorData\\Late{made}"));
+        }
+
+        store.Delivered(batch);
+
+        var left = store.Peek(CycleReportStore.Capacity);
+
+        // The seven of the batch that were still here have gone, and nothing
+        // beyond them: the queue picks up at the eleventh pass. Three shed
+        // and seven delivered out of a queue that had taken three more, so
+        // what is left is the ceiling less the seven.
+        Assert.Equal("C:\\VendorData\\Unit10", left.Passes[0].Unit);
+        Assert.Equal(CycleReportStore.Capacity - 7, left.Passes.Count);
+        Assert.Equal("C:\\VendorData\\Late2", left.Passes[^1].Unit);
+
+        // The three shed are still owed as a gap: this beat reported none.
+        Assert.Equal(3, left.Dropped);
     }
 
     [Fact]
@@ -209,13 +256,13 @@ public class CollectionHistoryTests
             store.Enqueue(Pass($"C:\\VendorData\\Unit{made}"));
         }
 
-        var first = store.Take();
+        var first = store.Peek();
 
         Assert.Equal(CycleReportStore.PerBeat, first.Passes.Count);
 
         store.Delivered(first);
 
-        Assert.Equal(5, store.Take().Passes.Count);
+        Assert.Equal(5, store.Peek().Passes.Count);
     }
 
     /// <summary>
